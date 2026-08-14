@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Troubleshooting — Oli Help Center</title>
+    <meta name="description" content="Fixes for common Oli problems: reset settings, missing library, links and downloads not working." />
+    <link rel="icon" href="icon.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <nav class="nav">
+        <a class="brand" href="index.html">
+          <img src="icon.png" alt="Oli logo" />
+          Oli
+        </a>
+        <span class="spacer"></span>
+        <a href="index.html">Home</a>
+        <a class="active" href="troubleshooting.html">Troubleshooting</a>
+        <a href="faq.html">FAQ</a>
+        <a href="support.html">Support</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1>Troubleshooting</h1>
+      <p class="subtitle">Common issues and how to fix them.</p>
+
+      <div class="card">
+        <h3>My theme, queue, and history reset after an update</h3>
+        <p>
+          Oli stores everything in a single database file. If an earlier update was interrupted
+          (for example the app was closed while copying its data), the database could fail its
+          integrity check and start over with a fresh one.
+        </p>
+        <p>
+          Oli now <strong>automatically restores</strong> missing data from the previous app data
+          folder on its next launch, and the copy is done in a way that can no longer be corrupted.
+          Your settings, queue, history, favorites, and playlists come back — anything you changed
+          in the meantime is kept.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Pasting a YouTube link does nothing</h3>
+        <p>
+          Open the <strong>Search</strong> page, paste the link, and press Enter. A panel appears
+          with download options:
+        </p>
+        <ul>
+          <li>
+            <strong>Both video + playlist</strong> links (e.g. <code>watch?v=...&amp;list=...</code>)
+            offer a choice: <em>This video only</em> or <em>Entire playlist</em>.
+          </li>
+          <li>
+            <strong>Video-only</strong> links offer Song (tagged audio) or Video downloads.
+          </li>
+          <li>
+            <strong>Playlist-only</strong> links download the whole playlist as songs.
+          </li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Downloads fail or never start</h3>
+        <p>
+          Oli bundles <code>yt-dlp</code> inside the app. If downloads fail, check that:
+        </p>
+        <ul>
+          <li>You are online and YouTube is reachable.</li>
+          <li>You chose a destination folder you have write access to.</li>
+          <li>
+            The file <code>resources\bin\yt-dlp.exe</code> exists inside the installation folder
+            (reinstall if it is missing).
+          </li>
+        </ul>
+        <p>
+          For video downloads, ffmpeg is needed. Oli uses the ffmpeg already installed on your
+          system — install it with <code>winget install ffmpeg</code> if video downloads fail.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Oli does not resume the last played song</h3>
+        <p>
+          Resume on launch works with the current build: the song and position are saved while you
+          listen. Make sure <em>Settings → Playback → Resume on launch</em> is enabled. If the song
+          came from YouTube it must still be online when Oli starts.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>My library is empty after updating</h3>
+        <p>
+          Open <em>Settings → Library</em> and confirm your music folder is still listed, then run
+          a rescan. If the folder is gone, add it again — Oli re-imports all files. Your playback
+          history, queue, and favorites are stored separately and are not affected.
+        </p>
+      </div>
+
+      <h2>Finding the log files</h2>
+      <div class="card">
+        <p>
+          If something goes wrong, the log file usually explains what happened. Logs are stored in:
+        </p>
+        <pre><code>%APPDATA%\Oli\logs</code></pre>
+        <p>
+          The most recent file is named <code>cytto-&lt;date&gt;-&lt;time&gt;.log</code>. When
+          reporting an issue, attach the newest log file — it includes the full story of what the
+          app did.
+        </p>
+      </div>
+
+      <h2>Backing up your data</h2>
+      <div class="card">
+        <p>Everything Oli knows lives in one SQLite database. To back it up, copy:</p>
+        <pre><code>%APPDATA%\Oli\library.sqlite</code></pre>
+        <p>
+          Keep a copy somewhere safe. To restore, close Oli and put the file back in that folder,
+          replacing the current one.
+        </p>
+        <div class="callout warn">
+          Only restore a backup created by a recent Oli version — older database formats are
+          upgraded automatically, but a backup from the far past may be missing newer features.
+        </div>
+      </div>
+
+      <div class="callout info">
+        Can't find your problem here? Visit the <a href="support.html">Support</a> page and we'll
+        help you out.
+      </div>
+    </main>
+
+    <footer>
+      <p>
+        Oli — a desktop music player for Windows · <a href="https://github.com/CyttosPlay/CyttosPlay">Source code</a> ·
+        <a href="faq.html">FAQ</a> · <a href="support.html">Support</a>
+      </p>
+    </footer>
+  </body>
+</html>

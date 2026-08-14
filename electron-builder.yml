@@ -1,0 +1,38 @@
+appId: com.cyttos.oli
+productName: Oli
+copyright: Copyright © 2026 Cytto
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+asar: true
+extraResources:
+  - from: bin
+    to: bin
+    filter:
+      - '**/*'
+win:
+  target:
+    - nsis
+  icon: build/icon.png
+  artifactName: ${productName}-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Oli
+  deleteAppDataOnUninstall: false
+  license: build/license.txt
+mac:
+  target:
+    - dmg
+    - zip
+  icon: build/icon.png
+  category: public.app-category.music
+  artifactName: ${productName}-${version}-${arch}.${ext}
+dmg:
+  sign: false

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FAQ — Oli Help Center</title>
+    <meta name="description" content="Frequently asked questions about Oli: storage, downloads, privacy, and more." />
+    <link rel="icon" href="icon.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <nav class="nav">
+        <a class="brand" href="index.html">
+          <img src="icon.png" alt="Oli logo" />
+          Oli
+        </a>
+        <span class="spacer"></span>
+        <a href="index.html">Home</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a class="active" href="faq.html">FAQ</a>
+        <a href="support.html">Support</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1>Frequently Asked Questions</h1>
+      <p class="subtitle">Short answers to the questions we hear most.</p>
+
+      <div class="card">
+        <h3>Where does Oli store my data?</h3>
+        <p>
+          In one SQLite database file: <code>%APPDATA%\Oli\library.sqlite</code>. Your library
+          scan data, settings, queue, history, favorites, and playlists all live there. Download
+          artwork is cached in the same folder.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Does Oli upload anything to the internet?</h3>
+        <p>
+          Oli works offline for your local music. Internet is only used when you search YouTube,
+          download videos, or fetch lyrics/artwork for online tracks. Your library, settings, and
+          personal data stay on your computer.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Does Oli need yt-dlp or ffmpeg installed?</h3>
+        <p>
+          <code>yt-dlp</code> is bundled with Oli — nothing to install. <code>ffmpeg</code> is only
+          needed for video downloads and is picked up from your system if present
+          (<code>winget install ffmpeg</code> if not).
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Can I download YouTube songs as audio files?</h3>
+        <p>
+          Yes. Paste a video link in the Search page and choose <em>Song</em> — Oli downloads the
+          best audio and tags it with title, artist, cover art, and more. Whole playlists work too.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Which audio formats are supported?</h3>
+        <p>
+          MP3, FLAC, AAC/M4A, WAV, OGG/Opus, and more — anything your Windows media pipeline can
+          decode. Metadata is read automatically, including embedded artwork.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Can I use Oli with Spotify?</h3>
+        <p>
+          Oli supports Spotify as a search provider for playing music online. If you have a Spotify
+          Client ID and Client Secret, you can enter them in <em>Settings → Providers</em> for
+          higher-rate search results. They are stored only on your computer.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>How do I keep Oli running in the background?</h3>
+        <p>
+          Enable <em>Settings → Close to tray</em>. Closing the window then keeps Oli running with
+          playback and taskbar controls; the tray icon (bottom-right) is where you'll find it.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Will my settings survive updates?</h3>
+        <p>
+          Yes. Updates install over the app and never touch your data folder. Oli also includes
+          automatic recovery and one-time restore logic for older data folders, so your theme,
+          queue, and history are preserved.
+        </p>
+      </div>
+
+      <div class="callout info">
+        Still have questions? Ask on the <a href="support.html">Support</a> page.
+      </div>
+    </main>
+
+    <footer>
+      <p>
+        Oli — a desktop music player for Windows · <a href="https://github.com/CyttosPlay/CyttosPlay">Source code</a> ·
+        <a href="troubleshooting.html">Troubleshooting</a> · <a href="support.html">Support</a>
+      </p>
+    </footer>
+  </body>
+</html>
