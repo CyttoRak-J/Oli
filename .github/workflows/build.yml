@@ -51,7 +51,7 @@ jobs:
         run: npm run build
 
       - name: Package (${{ matrix.os }})
-        run: npx electron-builder --${{ runner.os == 'Windows' && 'win' || 'mac' }} --x64
+        run: npx electron-builder --${{ runner.os == 'Windows' && 'win' || 'mac' }} --x64 --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
