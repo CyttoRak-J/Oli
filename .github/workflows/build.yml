@@ -1,0 +1,83 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: ${{ matrix.os }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: macos-latest
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The repo doesn't ship the yt-dlp binaries (Windows binary is 18 MB
+      # and the mac one differs per platform). The app resolves the binary
+      # per platform (yt-dlp.exe on Windows, yt-dlp elsewhere), so fetch it
+      # before packaging.
+      - name: Fetch yt-dlp binary
+        shell: bash
+        run: |
+          mkdir -p bin
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            curl -L -o bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos
+            chmod +x bin/yt-dlp
+          else
+            curl -L -o bin/yt-dlp.exe https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Package (${{ matrix.os }})
+        run: npx electron-builder --${{ runner.os == 'Windows' && 'win' || 'mac' }} --x64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: oli-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Draft GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: artifacts/**/*
