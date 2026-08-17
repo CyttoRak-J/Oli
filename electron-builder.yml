@@ -34,5 +34,6 @@ mac:
   icon: build/icon.png
   category: public.app-category.music
   artifactName: ${productName}-${version}-${arch}.${ext}
+  identity: null
 dmg:
   sign: false

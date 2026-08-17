@@ -32,7 +32,7 @@ locally on your machine.
 ## Getting started
 
 1. Download the latest installer from the
-   [Releases](https://github.com/CyttosPlay/CyttosPlay/releases) page
+   [Releases](https://github.com/cyttorak-j/Oli/releases) page
    (`Oli-Setup-1.0.0.exe`).
 2. Run it and launch Oli.
 3. Open **Settings → Library**, add your music folder, and let Oli scan it.
@@ -55,7 +55,7 @@ The installer bundles `yt-dlp` for YouTube support. Video downloads additionally
 
 ## Documentation
 
-Visit the [Oli Help Center](https://cyttosplay.github.io/CyttosPlay/) for setup help,
+Visit the [Oli Help Center](https://cyttorak-j.github.io/Oli/) for setup help,
 troubleshooting, and the FAQ.
 
 ## Data & privacy
@@ -67,7 +67,7 @@ play online content. Spotify/AcoustID API keys, if you add any, stay on your mac
 ## Support
 
 Found a bug or have an idea? Open an
-[issue](https://github.com/CyttosPlay/CyttosPlay/issues) and attach the newest log file
+[issue](https://github.com/cyttorak-j/Oli/issues) and attach the newest log file
 from `%APPDATA%\Oli\logs`.
 
 ## License
