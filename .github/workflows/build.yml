@@ -54,7 +54,7 @@ jobs:
         run: npx electron-builder --${{ runner.os == 'Windows' && 'win' || 'mac' }} --x64 --publish never
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: oli-${{ matrix.os }}-${{ matrix.arch }}
           path: |
@@ -71,7 +71,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           path: artifacts
           merge-multiple: true
