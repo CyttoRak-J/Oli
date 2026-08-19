@@ -129,17 +129,11 @@ export function registerIpc(services: ServiceContainer): void {
   })
 
   // ----------------------------------------------------------------- settings
-  ipcMain.handle(IPC.getSettings, () => settings.all())
+ipcMain.handle(IPC.getSettings, () => settings.all())
   ipcMain.handle(IPC.setSettings, (_e, patch: Partial<AppSettings>) => {
-    const scoped: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(patch)) {
-      if (typeof value !== 'object' || value === null) {
-        scoped[key] = value
-      } else {
-        scoped[key] = JSON.stringify(value)
-      }
-    }
-    settings.setMany(scoped as Partial<AppSettings>)
+    // setMany stringifies each value itself; pre-stringifying objects here
+    // would double-encode them.
+    settings.setMany(patch)
     applyRuntimeSettings(services)
     // Settings UI and any window may react (sender included: the store also
     // learns of changes made from other windows, e.g. the mini player)
@@ -268,8 +262,8 @@ export function registerIpc(services: ServiceContainer): void {
       const { partial, online } = search.runStreaming(query, filters ?? {}, record === true)
       void online.then((results) => {
         if (!event.sender.isDestroyed()) {
-          // done: true tells the UI "providers finished" so it can stop
-          // waiting â€” even when nothing was found.
+// done: true tells the UI "providers finished" so it can stop
+          // waiting — even when nothing was found.
           event.sender.send(IPC.onSearchOnline, { query, online: results, done: true })
         }
       })

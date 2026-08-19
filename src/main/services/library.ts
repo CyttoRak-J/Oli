@@ -449,18 +449,16 @@ export class LibraryService extends EventEmitter {
       trackCount: number
       totalDuration: number
       totalSize: number
-      missingCount: number
       favoriteCount: number
     }>(
       `SELECT
         COUNT(*) AS trackCount,
         COALESCE(SUM(duration), 0) AS totalDuration,
         COALESCE(SUM(file_size), 0) AS totalSize,
-        SUM(CASE WHEN missing = 1 THEN 1 ELSE 0 END) AS missingCount,
         SUM(CASE WHEN favorite = 1 THEN 1 ELSE 0 END) AS favoriteCount
        FROM songs
        WHERE missing = 0`
-    ) ?? { trackCount: 0, totalDuration: 0, totalSize: 0, missingCount: 0, favoriteCount: 0 }
+    ) ?? { trackCount: 0, totalDuration: 0, totalSize: 0, favoriteCount: 0 }
     return {
       folderCount: this.db.count('SELECT id FROM library_locations'),
       trackCount: Number(stats.trackCount ?? 0),
@@ -468,7 +466,9 @@ export class LibraryService extends EventEmitter {
       artistCount: this.db.count('SELECT id FROM artists WHERE track_count > 0'),
       playlistCount: this.db.count('SELECT id FROM playlists'),
       favoriteCount: Number(stats.favoriteCount ?? 0),
-      missingCount: Number(stats.missingCount ?? 0),
+      // Counting inside the WHERE missing = 0 filter above always yields 0;
+      // missing songs live outside that filter by definition.
+      missingCount: this.db.count('SELECT id FROM songs WHERE missing = 1'),
       totalDuration: Number(stats.totalDuration ?? 0),
       totalSize: Number(stats.totalSize ?? 0)
     }
@@ -626,6 +626,17 @@ export class LibraryService extends EventEmitter {
         FROM songs s
         WHERE s.genre IS NOT NULL AND LENGTH(TRIM(s.genre)) > 0 AND s.missing = 0
         GROUP BY TRIM(s.genre)`)
+      // Rebuilds above hardcode favorite = 0; restore the real state from
+      // the favorites table (the source of truth) so a scan/merge/metadata
+      // edit can never silently wipe album/artist favorites.
+      this.db.run(
+        `UPDATE albums SET favorite = 1
+         WHERE id IN (SELECT item_id FROM favorites WHERE item_type = 'album')`
+      )
+      this.db.run(
+        `UPDATE artists SET favorite = 1
+         WHERE id IN (SELECT item_id FROM favorites WHERE item_type = 'artist')`
+      )
       tx.commit()
     } catch (err) {
       tx.rollback()

@@ -239,16 +239,26 @@ export class PlaylistService {
   reorder(playlistId: string, orderedSongIds: string[]): void {
     const tx = this.db.transaction()
     try {
+      // position is part of the PRIMARY KEY (playlist_id, position): shifting
+      // every row out of its slot first avoids UNIQUE collisions when tracks
+      // swap places (a plain per-row UPDATE always collides on non-identity
+      // permutations and silently fails).
+      this.db.run(
+        'UPDATE playlist_tracks SET position = position + 1000000 WHERE playlist_id = ?',
+        [playlistId]
+      )
       orderedSongIds.forEach((songId, idx) => {
         this.db.run(
           'UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND song_id = ?',
           [idx, playlistId, songId]
         )
       })
+      this.reindex(playlistId)
       tx.commit()
       this.touch(playlistId)
-    } catch {
+    } catch (err) {
       tx.rollback()
+      getLogger().warn('reorder failed', err)
     }
   }
 
@@ -315,7 +325,13 @@ export class PlaylistService {
     switch (op) {
       case 'between': {
         const arr = Array.isArray(value) ? value : [value]
-        const [a, b] = [arr[0] ?? 0, arr[1] ?? 0]
+        const a = arr[0]
+        const b = arr[1]
+        // A single value cannot form a range: fall back to an exact match
+        // instead of the old `BETWEEN a AND 0` (which matches nothing).
+        if (b === null || b === undefined || b === '') {
+          return { clause: `${column} = ?`, params: [a] }
+        }
         return { clause: `${column} BETWEEN ? AND ?`, params: [a, b] }
       }
       case 'matchesAny': {
@@ -403,7 +419,7 @@ export class PlaylistService {
         const base = path.basename(line)
         const match = this.db.get<{ id: string }>(
           'SELECT id FROM songs WHERE missing = 0 AND (path LIKE ? OR path LIKE ?) LIMIT 1',
-          [`%${base}`, `%${base}`]
+          [`%${base}`, `%/${base}`]
         )
         if (match) songIds.push(match.id)
       }

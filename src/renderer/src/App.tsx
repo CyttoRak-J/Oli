@@ -100,8 +100,13 @@ function MainShell(): React.JSX.Element {
 
   // One-time bootstrap: load settings, hydrate player, restore last page.
   useEffect(() => {
-    void usePlayer.getState().hydrate()
-    void resumePlayback()
+    // hydrate() attaches the audio event listeners; resumePlayback() must
+    // run only after that, or the resumed song plays with no listeners
+    // (status stuck at 'loading', watchdog then restarts or skips it).
+    void (async () => {
+      await usePlayer.getState().hydrate()
+      await resumePlayback()
+    })()
 
     const unsubCommands = window.cytto.on(IPC.onPlaybackCommand, (raw) => {
       const command = String(raw)

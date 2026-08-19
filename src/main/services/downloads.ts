@@ -237,7 +237,15 @@ export class DownloadService extends EventEmitter {
     }
     const id = randomUUID()
     const safeName = sanitizeFilename(resolvedTitle)
-    const destPath = path.join(this.downloadsDir, `${safeName}${extFromUrl(parsed)}`)
+    const ext = extFromUrl(parsed)
+    // Two downloads can resolve to the same destination (same title, retries):
+    // concurrent writes would truncate each other's file, so a busy path gets
+    // a " (2)" suffix instead.
+    let destPath = path.join(this.downloadsDir, `${safeName}${ext}`)
+    let n = 2
+    while (this.db.get('SELECT id FROM downloads WHERE dest_path = ?', [destPath])) {
+      destPath = path.join(this.downloadsDir, `${safeName} (${n++})${ext}`)
+    }
     const now = Date.now()
     this.db.run(
       `INSERT INTO downloads (id, title, url, dest_path, state, created_at, updated_at)
@@ -639,17 +647,19 @@ export class DownloadService extends EventEmitter {
     this.processing = true
     try {
       while (this.active < CONCURRENCY) {
-        const next = this.db.get<{ id: string }>(
-          "SELECT id FROM downloads WHERE state = 'queued' ORDER BY created_at ASC LIMIT 1"
-        )
-        if (!next) break
-        // YouTube downloads are limited (default 1): spawning several
-        // yt-dlp processes at once trips YouTube's bot check and makes them
-        // all fail; the user can raise the limit in Settings at their own
-        // risk (single-track downloads are unaffected by queue ordering).
-        const isYt = this.isYtJob(next.id)
+        // Pick the oldest queued job that can run now: when the YouTube slot
+        // is full, HTTP jobs behind a YT row must not starve (a `break` here
+        // would stop the whole pump).
         const ytLimit = Math.max(1, Math.min(3, this.opts.ytConcurrency?.() ?? 1))
-        if (isYt && this.activeYt >= ytLimit) break
+        const queued = this.db.all<{ id: string }>(
+          "SELECT id FROM downloads WHERE state = 'queued' ORDER BY created_at ASC"
+        )
+        const next = queued.find((r) => {
+          if (!this.isYtJob(r.id)) return true
+          return this.activeYt < ytLimit
+        })
+        if (!next) break
+        const isYt = this.isYtJob(next.id)
         this.active++
         if (isYt) this.activeYt++
         void this.process(next.id).finally(() => {
@@ -714,13 +724,24 @@ export class DownloadService extends EventEmitter {
     // plain HTTP fetch would save the HTML page or an audio-less stream.
     const job = this.ytJobs.get(id)
     if (job) {
-      await this.downloadWithYtDlp(id, job)
+      try {
+        await this.downloadWithYtDlp(id, job)
+      } finally {
+        // The HTTP path clears the abort flag below; the YT path must too,
+        // or a paused-then-retried download dies instantly (it checks the
+        // flag but nothing ever removes it).
+        this.aborted.delete(id)
+      }
       return
     }
     const ytId = ytVideoIdFromUrl(item.url)
     if (ytId && this.hooks.downloadYouTubeVideo) {
       this.ytJobs.set(id, { videoId: ytId, height: 0, audio: 'best', mode: 'video' })
-      await this.downloadWithYtDlp(id, this.ytJobs.get(id)!)
+      try {
+        await this.downloadWithYtDlp(id, this.ytJobs.get(id)!)
+      } finally {
+        this.aborted.delete(id)
+      }
       return
     }
     const url = safeUrl(item.url)

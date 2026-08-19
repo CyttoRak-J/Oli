@@ -77,6 +77,11 @@ function clearStall(): void {
  */
 let pendingSeekPos = 0
 let lastSeekAt = 0
+/** When the user resumed from pause; fresh re-buffers get grace time before the stall watchdog may restart/skip the song. */
+let resumedAt = 0
+/** hydrate() attaches listeners to the singleton audio element; guard against
+ *  double attachment (React StrictMode double-mounts effects in dev). */
+let listenersAttached = false
 
 export interface PlaySource {
   source: 'library' | 'playlist' | 'album' | 'artist' | 'queue' | 'search' | 'favorites' | 'downloads'
@@ -186,8 +191,6 @@ export const usePlayer = create<PlayerState>((set, get) => {
     transcodedTrackId = null
     streamFallbacks = []
     streamFallbackIdx = 0
-    pendingSeekPos = 0
-    lastSeekAt = 0
     set({ current: track, status: 'loading', currentTime: 0, duration: 0 })
     // YouTube tracks are never played from stored URLs (they expire and
     // stall unpredictably): a FRESH stream is resolved at play time, every
@@ -225,10 +228,23 @@ export const usePlayer = create<PlayerState>((set, get) => {
       })
     }
     // If Chromium cannot decode the file it may stall instead of erroring;
-    // fall back to transcoding if nothing starts within 6 seconds.
+    // fall back to transcoding if nothing starts within 6 seconds. A seek or
+    // resume right after load (slow drives take a while to re-buffer) gets
+    // one more window instead of being skipped.
     stallTimer = setTimeout(() => {
       const s = get()
-      if (s.status === 'loading' && s.current?.id === track.id && !tryTranscode()) {
+      if (s.status !== 'loading' || s.current?.id !== track.id) return
+      if (!tryTranscode()) {
+        if (Date.now() - lastSeekAt < 10000 || Date.now() - resumedAt < 10000) {
+          clearStall()
+          stallTimer = setTimeout(() => {
+            const s2 = get()
+            if (s2.status === 'loading' && s2.current?.id === track.id && !tryTranscode()) {
+              skipCurrent()
+            }
+          }, 15000)
+          return
+        }
         skipCurrent()
       }
     }, 6000)
@@ -393,6 +409,66 @@ export const usePlayer = create<PlayerState>((set, get) => {
     }
   }
 
+  /**
+   * Stall recovery: a stream that starves mid-track (common with opus) never
+   * fires an error, so after a wait the playback falls back to a transcode /
+   * download or skips. A SEEK or RESUME starts a fresh re-buffer that can
+   * take a while on slow media (USB/network drives): while the user is
+   * driving the track, the song must never be restarted from 0 or skipped.
+   */
+  const stallWatchdog = (): void => {
+    const s = get()
+    const elNow = getAudio()
+    if (s.status !== 'loading') return
+    if (elNow.paused) return
+    const cur = s.current
+    if (!cur) return
+    const sinceSeek = Date.now() - lastSeekAt
+    const sinceResume = Date.now() - resumedAt
+    const userDriven = sinceSeek < 60000 || sinceResume < 60000
+    if (userDriven) {
+      if (sinceSeek < 30000 || sinceResume < 30000) {
+        // Inside the grace window: keep waiting, never hijack.
+        stallTimer = setTimeout(stallWatchdog, 20000)
+        return
+      }
+      // Past the grace window and still stalled: the stream is dead. Fall
+      // back WITHOUT skipping — reloads restore the seek position.
+      if (cur.path) {
+        if (!tryTranscode() && transcodedTrackId === cur.id) {
+          // The transcoded MP3 also stalls: wait once more instead of skip.
+          stallTimer = setTimeout(stallWatchdog, 30000)
+        }
+      } else if (!startOnlineFallback(cur)) {
+        // Download fallback already attempted: the track's URLs may be
+        // stale — resolve a fresh stream before ever skipping.
+        const videoId = videoIdOf(cur)
+        if (videoId && freshResolvingId !== cur.id) {
+          freshResolvingId = cur.id
+          void resolveYouTubeStream(videoId)
+            .then((urls) => {
+              if (freshResolvingId === cur.id) freshResolvingId = null
+              if (urls.length === 0) return
+              if (get().current?.id !== cur.id) return
+              const el = getAudio()
+              el.src = urls[0]
+              el.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+            })
+            .catch(() => {
+              if (freshResolvingId === cur.id) freshResolvingId = null
+            })
+        }
+      }
+      return
+    }
+    // No user action: normal starvation fallback, skip only as last resort.
+    if (cur.path) {
+      if (!tryTranscode()) skipCurrent()
+    } else if (!startOnlineFallback(cur)) {
+      skipCurrent()
+    }
+  }
+
   return {
     queue: [],
     index: -1,
@@ -429,6 +505,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         el.volume = 0.8
       }
 
+      if (listenersAttached) return
+      listenersAttached = true
+
       el.addEventListener('timeupdate', () => {
         const s = get()
         if (s.status === 'playing') {
@@ -459,30 +538,27 @@ export const usePlayer = create<PlayerState>((set, get) => {
         syncMainNow()
       })
       el.addEventListener('pause', () => {
+        clearStall()
+        // Remember where the user stopped: if playback must be reloaded after
+        // resume (transcode / download fallback), it continues from here
+        // instead of restarting from 0.
+        const cur = get().current
+        const t = el.currentTime
+        if (cur && t > 0 && (!el.duration || t < el.duration) && pendingSeekPos === 0) {
+          pendingSeekPos = t
+        }
         set({ status: 'paused' })
         syncMainNow()
       })
       el.addEventListener('waiting', () => {
         if (!get().current?.path) dbg(`waiting (${srcHost(el)})`)
         set({ status: 'loading' })
-        // A seek starts a fresh re-buffer; give it time to settle before
-        // the stall watchdog kicks in (which would restart or skip the song).
-        if (Date.now() - lastSeekAt < 3000) return
-        // A stream that starts but then starves mid-track (common with opus)
-        // never fires an error; switch to the download fallback if it does
-        // not resume within 10 seconds.
         clearStall()
-        stallTimer = setTimeout(() => {
-          const s = get()
-          if (s.status !== 'loading') return
-          const cur = s.current
-          if (!cur) return
-          if (cur.path) {
-            if (!tryTranscode()) skipCurrent()
-          } else if (!startOnlineFallback(cur)) {
-            skipCurrent()
-          }
-        }, 10000)
+        // A seek or a resume-from-pause starts a fresh re-buffer; the
+        // watchdog gives those a long grace window (it would otherwise
+        // restart or skip the song on slow media).
+        const userDriven = Date.now() - lastSeekAt < 3000 || Date.now() - resumedAt < 3000
+        stallTimer = setTimeout(stallWatchdog, userDriven ? 20000 : 10000)
         syncMainNow()
       })
       el.addEventListener('playing', () => {
@@ -496,7 +572,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
       el.addEventListener('ended', () => get().next(true))
       el.addEventListener('error', () => {
         clearStall()
-        if (!get().current?.path) {
+        const failed = get().current
+        // Removing the src attribute (queue edits, stop) fires a spurious
+        // MEDIA_ERR_SRC_NOT_SUPPORTED error event with no current track; with
+        // a null current the fallback chain must not start or skip anything.
+        if (!failed) return
+        if (!failed.path) {
           dbg(`audio-error code=${el.error?.code} idx=${streamFallbackIdx} fbs=${streamFallbacks.length} host=${srcHost(el)}`)
         }
         if (streamFallbackIdx + 1 < streamFallbacks.length) {
@@ -515,9 +596,35 @@ export const usePlayer = create<PlayerState>((set, get) => {
         streamFallbackIdx = 0
         // Online tracks have no local file to transcode: go through the
         // stream re-resolve / download fallback instead of being skipped.
-        const failed = get().current
-        if (failed && !failed.path && startOnlineFallback(failed)) return
+        if (!failed.path && startOnlineFallback(failed)) return
         if (tryTranscode()) return
+        // Last chance for online tracks whose download fallback was already
+        // attempted this session: the URLs they carry may be stale/expired
+        // (replays via previous/queue) — resolve a fresh stream before skip.
+        if (!failed.path) {
+          const videoId = videoIdOf(failed)
+          if (videoId && freshResolvingId !== failed.id) {
+            freshResolvingId = failed.id
+            set({ status: 'loading' })
+            void resolveYouTubeStream(videoId)
+              .then((urls) => {
+                if (freshResolvingId === failed.id) freshResolvingId = null
+                if (urls.length === 0) {
+                  skipCurrent()
+                  return
+                }
+                if (get().current?.id !== failed.id) return
+                const elNow = getAudio()
+                elNow.src = urls[0]
+                elNow.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+              })
+              .catch(() => {
+                if (freshResolvingId === failed.id) freshResolvingId = null
+                skipCurrent()
+              })
+            return
+          }
+        }
         skipCurrent()
       })
     },
@@ -526,6 +633,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (tracks.length === 0) return
       const idx = clamp(startIndex, 0, tracks.length - 1)
       const track = tracks[idx]
+      pendingSeekPos = 0
+      lastSeekAt = 0
       set({ queue: tracks, index: idx, current: track, source })
       resetHistory(idx)
       load(track)
@@ -540,6 +649,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (idx !== -1) {
         set({ index: idx })
         pushHistory(idx)
+        pendingSeekPos = 0
+        lastSeekAt = 0
         load(track)
         getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
         sendPlaybackState(makeSnapshot(get()))
@@ -573,6 +684,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (s.status === 'playing') {
         getAudio().pause()
       } else if (s.current) {
+        if (s.status === 'paused') resumedAt = Date.now()
         getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
       }
     },
@@ -582,13 +694,19 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
 
     play(): void {
-      if (get().current) getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+      const s = get()
+      if (s.current) {
+        if (s.status === 'paused') resumedAt = Date.now()
+        getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+      }
     },
 
     next(auto = false): void {
       const s = get()
       if (s.queue.length === 0) return
       if (s.repeat === 'one' && auto && s.current) {
+        pendingSeekPos = 0
+        lastSeekAt = 0
         load(s.current)
         getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
         return
@@ -611,6 +729,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const track = s.queue[nextIdx]
       set({ index: nextIdx, current: track })
       pushHistory(nextIdx)
+      pendingSeekPos = 0
+      lastSeekAt = 0
       load(track)
       getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
       sendPlaybackState(makeSnapshot(get()))
@@ -621,6 +741,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (s.queue.length === 0) return
       if (s.currentTime > 3) {
         getAudio().currentTime = 0
+        pendingSeekPos = 0
+        lastSeekAt = Date.now()
         set({ currentTime: 0 })
         syncMain()
         return
@@ -636,6 +758,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
         const prevIdx = h[h.length - 2]
         const track = s.queue[prevIdx]
         set({ index: prevIdx, current: track })
+        pendingSeekPos = 0
+        lastSeekAt = 0
         load(track)
         getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
         sendPlaybackState(makeSnapshot(get()))
@@ -645,6 +769,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // current one instead of guessing a queue neighbor (which, with
       // shuffle on, would be an unrelated song).
       getAudio().currentTime = 0
+      pendingSeekPos = 0
+      lastSeekAt = Date.now()
       set({ currentTime: 0 })
       syncMain()
     },
@@ -653,12 +779,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const el = getAudio()
       // Online streams often choke on seeking (signed URLs re-fetch badly);
       // remember the target so fallback streams resume there instead of
-      // restarting from 0 (or appearing to "skip").
+      // restarting from 0 (or appearing to "skip"). Also remembered when the
+      // duration is not known yet so a transcode/fallback reload can restore
+      // the position once metadata loads.
       const cur = get().current
-      if (cur && !cur.path && !el.src.startsWith('cyttos-local')) {
-        pendingSeekPos = Math.max(0, seconds)
-        lastSeekAt = Date.now()
-      }
+      if (cur && seconds > 0) pendingSeekPos = seconds
+      lastSeekAt = Date.now()
       el.currentTime = clamp(seconds, 0, el.duration || 0)
       set({ currentTime: el.currentTime })
       syncMain()
@@ -666,7 +792,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     setVolume(volume): void {
       const v = clamp(volume, 0, 1)
-      getAudio().volume = v
+      const el = getAudio()
+      el.volume = v
+      // Adjusting the volume while muted is a request to hear again (and the
+      // mini player slider would otherwise snap back to 0 / stay silent).
+      if (v > 0 && el.muted) {
+        el.muted = false
+        set({ muted: false })
+      }
       set({ volume: v })
       persistVolume(v)
       syncMainNow()
@@ -700,17 +833,22 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const idx = s.queue.findIndex((t) => t.id === id)
       if (idx === -1) return
       const queue = s.queue.filter((t) => t.id !== id)
-      let index = s.index > idx ? s.index - 1 : s.index
-      const current = queue[index] ?? null
-      if (s.current?.id === id) {
+      const removingCurrent = s.current?.id === id
+      const index = removingCurrent ? -1 : s.index > idx ? s.index - 1 : s.index
+      if (removingCurrent) {
         getAudio().pause()
         getAudio().removeAttribute('src')
-        index = -1
       }
+      const current = queue[index] ?? null
       set((st) => {
-        // Keep history consistent with the trimmed queue: drop indices that
-        // no longer exist and re-anchor the top on the current track.
-        const h = st.history.filter((i) => i < queue.length)
+        // Keep history consistent with the trimmed queue: indices after the
+        // removed slot shift down, and entries that no longer exist drop.
+        // When the current track itself is removed there is nothing to anchor.
+        if (removingCurrent) return { queue, index, current, history: [] }
+        const h = st.history
+          .filter((i) => i !== idx)
+          .map((i) => (i > idx ? i - 1 : i))
+          .filter((i) => i >= 0 && i < queue.length)
         const top = h[h.length - 1]
         const history = index >= 0 && top !== index ? [...h, index] : h
         return { queue, index, current, history }
@@ -758,7 +896,14 @@ export async function resumePlayback(): Promise<void> {
     if (!track) return
     const s = usePlayer.getState()
     if (s.current) return
-    s.playTracks([track], 0, { source: 'library', sourceId: null })
+    // Play inside the restored queue when the song is still there; otherwise
+    // append it so the queue survives and playback continues into it.
+    const idx = s.queue.findIndex((t) => t.id === track.id)
+    if (idx >= 0) {
+      s.playTrack(track)
+    } else {
+      s.playTracks([...s.queue, track], s.queue.length, { source: 'library', sourceId: null })
+    }
     if (settings.lastPositionSeconds > 0) {
       setTimeout(() => s.seek(settings.lastPositionSeconds), 300)
     }

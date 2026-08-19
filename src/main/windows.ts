@@ -419,7 +419,7 @@ export class WindowManager {
    * and played in a bare <video> element, so only the video itself is shown
    * (no YouTube chrome, sidebar, comments or embed restrictions). A quality
    * selector is offered when multiple stream heights are available. If no
-   * stream can be resolved, a minimal embed player is used instead â€” never
+* stream can be resolved, a minimal embed player is used instead — never
    * the full YouTube website.
    */
   async openVideoWindow(videoId: string): Promise<void> {
@@ -600,11 +600,11 @@ export class WindowManager {
       `</style></head><body>` +
       `<video id="v" controls playsinline autoplay></video>` +
       `<audio id="a" style="display:none" preload="auto"></audio>` +
-      `<div id="qbar"><span id="curq">-</span> Quality <select id="q"></select><input id="vol" type="range" min="0" max="100" value="100" title="Volume"><select id="spd" title="Playback speed"></select><button id="dlbtn" title="Download video">â¬‡</button><button id="repeat" title="Repeat video">Repeat</button></div>` +
+      `<div id="qbar"><span id="curq">-</span> Quality <select id="q"></select><input id="vol" type="range" min="0" max="100" value="100" title="Volume"><select id="spd" title="Playback speed"></select><button id="dlbtn" title="Download video">⤓</button><button id="repeat" title="Repeat video">Repeat</button></div>` +
       `<div id="dlp"><div id="dlbox"><h3>Download video</h3>` +
       `<label>Video quality<select id="dlv"></select></label>` +
       `<label>Audio<select id="dla"><option value="best">Best audio</option><option value="m4a">MP4 (AAC)</option><option value="opus">Opus (WebM)</option></select></label>` +
-      `<label>Folder<div class="row"><input id="dlf" placeholder="Default downloads folder"><button class="sec" id="dlpick">Chooseâ€¦</button></div></label>` +
+      `<label>Folder<div class="row"><input id="dlf" placeholder="Default downloads folder"><button class="sec" id="dlpick">Choose…</button></div></label>` +
       `<div class="row"><button id="dlstart">Download video</button><span id="dlstatus"></span></div>` +
       `<div class="row"><button id="dlsong">Download song (tagged)</button><span id="dlsstatus" style="color:#8fe388"></span></div>` +
       `<div id="dlsng" style="font-size:11.5px;color:#bbb">Best audio only, with cover art + title/artist/album tags embedded.</div>` +
@@ -640,8 +640,8 @@ export class WindowManager {
       `dlbtn.addEventListener('click',()=>{const open=getComputedStyle(dlp).display!=='none';dlp.style.display=open?'none':'flex';if(dlv.options.length===0){const hs=[];ST.forEach(s=>{const h=Number(s.height);if(h>0&&hs.indexOf(h)<0)hs.push(h)});hs.sort((a,b)=>b-a);hs.forEach(h=>{const o=document.createElement('option');o.value=h;o.textContent=h+'p';dlv.appendChild(o)});const b=document.createElement('option');b.value='0';b.textContent='Best';dlv.insertBefore(b,dlv.firstChild);}});` +
       `dlp.addEventListener('click',(ev)=>{if(ev.target===dlp)dlp.style.display='none'});` +
       `document.getElementById('dlpick').addEventListener('click',async()=>{if(!window.cytto)return;const dir=await window.cytto.invoke('video:pick-folder');if(dir)dlf.value=dir;});` +
-      `dlstart.addEventListener('click',async()=>{if(!window.cytto){dlstatus.textContent='Unavailable';return}const f=dlf.value.trim();const args=['video:download',VID,Number(dlv.value)||0,dla.value,f?f:null];dlstatus.textContent='Startingâ€¦';dlstart.disabled=true;try{const ok=await window.cytto.invoke.apply(null,args);dlstatus.textContent=ok?'Download started â€” see the Downloads page':"Couldn't start";}catch(e){dlstatus.textContent='Failed to start'}dlstart.disabled=false;setTimeout(()=>{dlstatus.textContent=''},5000)});` +
-      `dlsong.addEventListener('click',async()=>{if(!window.cytto){dlsstatus.textContent='Unavailable';return}const f=dlf.value.trim();dlsstatus.textContent='Startingâ€¦';dlsong.disabled=true;try{const ok=await window.cytto.invoke.apply(null,['video:download-song',VID,dla.value,f?f:null]);dlsstatus.textContent=ok?'Song started â€” see the Downloads page':"Couldn't start";}catch(e){dlsstatus.textContent='Failed to start'}dlsong.disabled=false;setTimeout(()=>{dlsstatus.textContent=''},5000)});` +
+      `dlstart.addEventListener('click',async()=>{if(!window.cytto){dlstatus.textContent='Unavailable';return}const f=dlf.value.trim();const args=['video:download',VID,Number(dlv.value)||0,dla.value,f?f:null];dlstatus.textContent='Starting…';dlstart.disabled=true;try{const ok=await window.cytto.invoke.apply(null,args);dlstatus.textContent=ok?'Download started — see the Downloads page':"Couldn't start";}catch(e){dlstatus.textContent='Failed to start'}dlstart.disabled=false;setTimeout(()=>{dlstatus.textContent=''},5000)});` +
+      `dlsong.addEventListener('click',async()=>{if(!window.cytto){dlsstatus.textContent='Unavailable';return}const f=dlf.value.trim();dlsstatus.textContent='Starting…';dlsong.disabled=true;try{const ok=await window.cytto.invoke.apply(null,['video:download-song',VID,dla.value,f?f:null]);dlsstatus.textContent=ok?'Song started — see the Downloads page':"Couldn't start";}catch(e){dlsstatus.textContent='Failed to start'}dlsong.disabled=false;setTimeout(()=>{dlsstatus.textContent=''},5000)});` +
       `vol.addEventListener('input',()=>{const x=Number(vol.value)/100;v.volume=x;if(a.src)a.volume=x;if(v.muted){v.muted=false}});` +
       `spd.addEventListener('change',()=>{const r=Number(spd.value);v.playbackRate=r;if(a.src)a.playbackRate=r});` +
       `v.addEventListener('loadedmetadata',()=>{if(pos>0){v.currentTime=pos}});` +

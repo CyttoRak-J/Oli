@@ -69,8 +69,9 @@ export function LinkDownloadForm({
       }
     } catch {
       setStatus('Failed to start')
+    } finally {
+      setBusy(false)
     }
-    setBusy(false)
   }
 
   return (

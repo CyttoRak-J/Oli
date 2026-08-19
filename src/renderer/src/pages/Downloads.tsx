@@ -76,10 +76,15 @@ export function Downloads(): React.JSX.Element {
       return
     }
     setEnqueueing(true)
-    await enqueueDownload(url.trim(), title.trim())
-    setUrl('')
-    setTitle('')
-    setEnqueueing(false)
+    try {
+      await enqueueDownload(url.trim(), title.trim())
+      setUrl('')
+      setTitle('')
+    } catch {
+      // keep the URL so the user can retry; the button must never stick
+    } finally {
+      setEnqueueing(false)
+    }
     void downloads.refetch()
   }
 

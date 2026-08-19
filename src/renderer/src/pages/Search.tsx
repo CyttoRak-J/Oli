@@ -25,9 +25,15 @@ export function Search(): React.JSX.Element {
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState(() => params.get('q') ?? '')
   const [debounced, setDebounced] = useState(() => params.get('q') ?? '')
+  const [dismissedFor, setDismissedFor] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const link = useMemo(() => detectYtInput(debounced), [debounced])
+  // The user can dismiss the detected-link form for the current query text;
+  // editing the query re-detects the link for the new text.
+  const link = useMemo(
+    () => (dismissedFor === debounced ? null : detectYtInput(debounced)),
+    [debounced, dismissedFor]
+  )
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -99,7 +105,11 @@ export function Search(): React.JSX.Element {
           {link && (
             <section>
               <h2 className="mb-2 text-[14px] font-bold text-ink-0">YouTube link detected</h2>
-              <LinkDownloadForm link={link} onEnqueued={() => void results.refetch()} />
+              <LinkDownloadForm
+                link={link}
+                onEnqueued={() => void results.refetch()}
+                onClose={() => setDismissedFor(debounced)}
+              />
             </section>
           )}
 

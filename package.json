@@ -1,7 +1,7 @@
 {
   "name": "oli",
   "productName": "Oli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A premium desktop music player and local library manager for Windows.",
   "main": "./out/main/index.js",
   "author": {
@@ -10,10 +10,10 @@
   },
   "license": "MIT",
   "private": true,
-  "homepage": "https://github.com/CyttosPlay/CyttosPlay",
+  "homepage": "https://github.com/cyttorak-j/Oli",
   "repository": {
     "type": "git",
-    "url": "https://github.com/CyttosPlay/CyttosPlay.git"
+    "url": "https://github.com/cyttorak-j/Oli.git"
   },
   "engines": {
     "node": ">=18.0.0"

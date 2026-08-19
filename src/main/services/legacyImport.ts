@@ -169,7 +169,28 @@ export async function importLegacyData(
           nFavorites++
         }
       }
-      if (nFavorites > 0) merged.push(`favorites (+${nFavorites})`)
+      if (nFavorites > 0) {
+        merged.push(`favorites (+${nFavorites})`)
+        // The UI also reads the per-item favorite columns (Songs tab filter,
+        // heart icons); the import only copied the table, so surface the
+        // imported favorites there too, like FavoritesService.toggle does.
+        db.run(
+          `UPDATE songs SET favorite = 1
+           WHERE id IN (SELECT item_id FROM favorites WHERE item_type = 'song')`
+        )
+        db.run(
+          `UPDATE albums SET favorite = 1
+           WHERE id IN (SELECT item_id FROM favorites WHERE item_type = 'album')`
+        )
+        db.run(
+          `UPDATE artists SET favorite = 1
+           WHERE id IN (SELECT item_id FROM favorites WHERE item_type = 'artist')`
+        )
+        db.run(
+          `UPDATE playlists SET favorite = 1
+           WHERE id IN (SELECT item_id FROM favorites WHERE item_type = 'playlist')`
+        )
+      }
 
       // -------------------------------------------------------------- playlists
       const playlistIds = new Set(

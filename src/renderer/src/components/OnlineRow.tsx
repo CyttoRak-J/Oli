@@ -10,7 +10,6 @@ import {
 } from '../lib/ipc'
 import { onlineToTrack } from '../lib/onlineTracks'
 import { usePlayer } from '../store/player'
-import { useTrackInfo } from '../lib/useTrackInfo'
 import { formatDuration } from '../lib/format'
 import { cn } from './cn'
 
@@ -33,7 +32,6 @@ export function OnlineRow({
   const [dlFolder, setDlFolder] = useState('')
   const [dlBusy, setDlBusy] = useState(false)
   const [dlStatus, setDlStatus] = useState('')
-  const openInfo = useTrackInfo()
 
   const resolve = (): Promise<string[]> => {
     if (!result.videoId) return Promise.resolve([])
@@ -54,7 +52,9 @@ export function OnlineRow({
 
   const playByName = (): void => {
     if (result.localMatch) {
-      openInfo(result.localMatch)
+      usePlayer
+        .getState()
+        .playTrack(result.localMatch, { source: 'search', sourceId: null })
       return
     }
     if (!result.videoId) return
@@ -364,17 +364,31 @@ function PreviewButton({ url }: { url: string }): React.JSX.Element {
     } else {
       const el = new Audio(url)
       audioRef.current = el
-      el.onended = () => {
+      const stop = (): void => {
         setPlaying(false)
         audioRef.current = null
       }
-      void el.play()
+      el.onended = stop
+      el.onerror = stop
+      // A blocked/failed stream (CORS, geo, expired URL) rejects play() or
+      // errors asynchronously; stop must run so the button never sticks.
+      el.play().catch(stop)
       setPlaying(true)
     }
   }
 
   useEffect(() => {
+    // Stop the preview when the main player starts a track so the two
+    // audio streams never overlap.
+    const unsub = usePlayer.subscribe((s, prev) => {
+      if (s.status === 'playing' && prev.status !== 'playing') {
+        audioRef.current?.pause()
+        audioRef.current = null
+        setPlaying(false)
+      }
+    })
     return () => {
+      unsub()
       audioRef.current?.pause()
       audioRef.current = null
     }

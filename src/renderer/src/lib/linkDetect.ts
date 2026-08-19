@@ -12,7 +12,11 @@ export function detectYtInput(raw: string): DetectedLink | null {
     const host = u.hostname.replace(/^(www\.|m\.|music\.)/i, '')
     if (host === 'youtube.com' || host === 'youtu.be') {
       const short = /^\/([\w-]{11})\/?$/.exec(u.pathname)
-      if (short) return { kind: 'video', videoId: short[1] }
+      // Short URLs can also carry a playlist/radio list (e.g. youtu.be/xxx?list=…).
+      if (short) {
+        if (u.searchParams.get('list')) return { kind: 'both', videoId: short[1], playlistUrl: trimmed }
+        return { kind: 'video', videoId: short[1] }
+      }
       const m = /^\/(?:shorts|embed)\/([\w-]{11})/.exec(u.pathname)
       if (m) return { kind: 'video', videoId: m[1] }
       if (u.pathname === '/watch') {

@@ -311,7 +311,7 @@ if (!gotLock) {
       setTimeout(() => {
         notifications.show({
           title: APP_NAME,
-          body: 'Welcome. Add your music folders in Settings â†’ Library.'
+          body: 'Welcome. Add your music folders in Settings → Library.'
         })
       }, 4000)
     }
