@@ -77,6 +77,7 @@ export interface ResolvedPlaylistEntry {
   videoId: string
   title: string
   duration?: number
+  thumbnail?: string | null
   track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
 }
 
@@ -866,7 +867,7 @@ export class ProviderService {
     if (!stdout) return { entries: [] }
     try {
       const info = JSON.parse(stdout) as {
-        entries?: Array<{ id?: string; title?: string; duration?: number }>
+        entries?: Array<{ id?: string; title?: string; duration?: number; thumbnails?: Array<{ url?: string }> }>
       }
       const all = (info.entries ?? []).filter(
         (e) => e.id && /^[\w-]{11}$/.test(e.id) && e.title
@@ -874,7 +875,8 @@ export class ProviderService {
       const entries = all.slice(0, 200).map((e) => ({
         videoId: e.id as string,
         title: e.title as string,
-        duration: typeof e.duration === 'number' ? e.duration : undefined
+        duration: typeof e.duration === 'number' ? e.duration : undefined,
+        thumbnail: e.thumbnails?.find((t) => t.url)?.url ?? null
       }))
       return { entries, capped: all.length > 200 }
     } catch {

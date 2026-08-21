@@ -51,38 +51,65 @@ export function LinkDownloadForm({
         setStatus('No songs found in that playlist')
         return
       }
-      const videoIds = resolved.entries.map((e) => e.videoId)
-      setStatus(`Loading streams for ${videoIds.length} songs…`)
+      const entries = resolved.entries
+      const INITIAL_BATCH = 8
+      const firstBatch = entries.slice(0, INITIAL_BATCH)
+      const rest = entries.slice(INITIAL_BATCH)
+      const videoIds = firstBatch.map((e) => e.videoId)
+      setStatus(`Loading first ${videoIds.length} songs…`)
       const batch = await resolveYouTubeStreamBatch(videoIds)
       const urlMap = new Map(batch.map((b) => [b.videoId, b.urls]))
-      const tracks = resolved.entries
-        .map((entry) => {
-          const urls = urlMap.get(entry.videoId) ?? []
-          if (urls.length === 0) return null
-          return onlineToTrack(
-            {
-              provider: 'youtube',
-              id: `youtube:${entry.videoId}`,
-              title: entry.title,
-              artist: entry.track?.artists?.join(', ') ?? 'YouTube',
-              album: entry.track?.album ?? null,
-              duration: entry.duration ?? null,
-              year: null,
-              artworkUrl: null,
-              url: `https://www.youtube.com/watch?v=${entry.videoId}`,
-              previewUrl: null,
-              videoId: entry.videoId
-            },
-            urls
-          )
-        })
-        .filter(Boolean) as ReturnType<typeof onlineToTrack>[]
+      const toTrack = (entry: (typeof entries)[0]) => {
+        const urls = urlMap.get(entry.videoId) ?? []
+        return onlineToTrack(
+          {
+            provider: 'youtube',
+            id: `youtube:${entry.videoId}`,
+            title: entry.title,
+            artist: entry.track?.artists?.join(', ') ?? 'YouTube',
+            album: entry.track?.album ?? null,
+            duration: entry.duration ?? null,
+            year: null,
+            artworkUrl: entry.thumbnail ?? null,
+            url: `https://www.youtube.com/watch?v=${entry.videoId}`,
+            previewUrl: null,
+            videoId: entry.videoId
+          },
+          urls
+        )
+      }
+      const initialTracks = firstBatch.map(toTrack).filter((t) => (t.streamUrls?.length ?? 0) > 0)
+      const pendingTracks = rest.map((t) => { const track = toTrack(t); track.streamUrls = []; track.streamUrl = ''; return track })
+      const tracks = [...initialTracks, ...pendingTracks]
       if (tracks.length === 0) {
         setStatus('Could not resolve any playable streams')
         return
       }
       usePlayer.getState().playTracks(tracks, 0, { source: 'search', sourceId: null })
-      setStatus(`Playing ${tracks.length} songs from playlist`)
+      setStatus(`Playing — resolving remaining ${pendingTracks.length} songs in background…`)
+      // Resolve remaining streams in background batches of 8
+      void (async () => {
+        const REMAINING_BATCH = 8
+        for (let i = 0; i < rest.length; i += REMAINING_BATCH) {
+          const slice = rest.slice(i, i + REMAINING_BATCH)
+          const ids = slice.map((e) => e.videoId)
+          try {
+            const batch = await resolveYouTubeStreamBatch(ids)
+            const batchMap = new Map(batch.map((b) => [b.videoId, b.urls]))
+            const s = usePlayer.getState()
+            const updated = s.queue.map((item) => {
+              const vid = item.id.startsWith('youtube:') ? item.id.replace('youtube:', '') : null
+              if (vid && batchMap.has(vid)) {
+                const urls = batchMap.get(vid)!
+                return urls.length > 0 ? { ...item, streamUrls: urls, streamUrl: urls[0] } : item
+              }
+              return item
+            })
+            usePlayer.setState({ queue: updated })
+          } catch { /* ignore batch errors */ }
+        }
+        setStatus('')
+      })()
     } catch (e) {
       setStatus(`Failed: ${e instanceof Error ? e.message : String(e)}`)
     } finally {

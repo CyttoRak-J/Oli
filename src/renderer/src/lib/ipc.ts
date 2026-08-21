@@ -141,6 +141,7 @@ export const resolvePlaylistEntries = (
     videoId: string
     title: string
     duration?: number
+    thumbnail?: string | null
     track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
   }>
   error?: string
