@@ -127,6 +127,22 @@ export const search = (
 ): Promise<SearchResults> => call(IPC.search, query, filters, record)
 export const resolveYouTubeStream = (videoId: string): Promise<string[]> =>
   call(IPC.resolveYouTubeStream, videoId)
+export const resolveYouTubeStreamBatch = (
+  videoIds: string[]
+): Promise<Array<{ videoId: string; urls: string[] }>> =>
+  call(IPC.resolveYouTubeStreamBatch, videoIds)
+export const resolvePlaylistEntries = (
+  url: string
+): Promise<{
+  entries: Array<{
+    videoId: string
+    title: string
+    duration?: number
+    track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
+  }>
+  error?: string
+  capped?: boolean
+}> => call(IPC.resolvePlaylistEntries, url)
 export const resolveDownloadYouTubeAudio = (videoId: string): Promise<string | null> =>
   call(IPC.downloadYouTubeAudio, videoId)
 export const transcodeLocalFile = (filePath: string): Promise<string | null> =>

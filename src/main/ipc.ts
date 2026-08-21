@@ -273,6 +273,18 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
   ipcMain.handle(IPC.resolveYouTubeStream, (_e, videoId: string) =>
     toResult(() => providers.resolveYouTubeStream(videoId))
   )
+  ipcMain.handle(IPC.resolveYouTubeStreamBatch, (_e, videoIds: string[]) =>
+    toResult(() => providers.resolveYouTubeStreamBatch(videoIds))
+  )
+  ipcMain.handle(IPC.resolvePlaylistEntries, async (_e, url: string) => {
+    const cfg = {
+      spotifyClientId: settings.get('spotifyClientId'),
+      spotifyClientSecret: settings.get('spotifyClientSecret'),
+      youtubeApiKey: settings.get('youtubeApiKey'),
+      acoustidApiKey: settings.get('acoustidApiKey')
+    }
+    return providers.resolvePlaylistEntries(url, cfg)
+  })
   ipcMain.handle(IPC.downloadYouTubeAudio, (_e, videoId: string) =>
     toResult(() => providers.downloadYouTubeAudio(videoId))
   )

@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { Download as DownloadIcon, Loader2 } from 'lucide-react'
-import { enqueuePlaylist, pickVideoFolder, videoDownload, videoDownloadSong } from '../lib/ipc'
+import { Download as DownloadIcon, Loader2, Play } from 'lucide-react'
+import { enqueuePlaylist, pickVideoFolder, videoDownload, videoDownloadSong, resolveYouTubeStreamBatch, resolvePlaylistEntries } from '../lib/ipc'
+import { onlineToTrack } from '../lib/onlineTracks'
+import { usePlayer } from '../store/player'
 import type { DetectedLink } from '../lib/linkDetect'
 
 const VIDEO_QUALITIES = [0, 2160, 1440, 1080, 720, 480, 360]
@@ -8,7 +10,8 @@ const VIDEO_QUALITIES = [0, 2160, 1440, 1080, 720, 480, 360]
 /**
  * Download form for a pasted YouTube/Spotify link. For a watch URL that also
  * carries a playlist (radio mixes etc.) the user picks between "this video"
- * (song/video + quality + audio) and "the whole playlist" (tagged audio).
+ * (song/video + quality + audio) and "the whole playlist" (tagged audio or
+ * stream playback).
  */
 export function LinkDownloadForm({
   link,
@@ -33,6 +36,59 @@ export function LinkDownloadForm({
   const videoId = link.kind === 'video' || link.kind === 'both' ? link.videoId : null
   const playlistUrl = link.kind === 'playlist' || link.kind === 'both' ? link.playlistUrl : null
   const shownUrl = link.kind === 'both' ? (isPlaylist ? playlistUrl : videoId) : videoId ?? playlistUrl
+
+  const playPlaylist = async (): Promise<void> => {
+    if (!playlistUrl) return
+    setBusy(true)
+    setStatus('Resolving playlist…')
+    try {
+      const resolved = await resolvePlaylistEntries(playlistUrl)
+      if (resolved.error) {
+        setStatus(resolved.error)
+        return
+      }
+      if (resolved.entries.length === 0) {
+        setStatus('No songs found in that playlist')
+        return
+      }
+      const videoIds = resolved.entries.map((e) => e.videoId)
+      setStatus(`Loading streams for ${videoIds.length} songs…`)
+      const batch = await resolveYouTubeStreamBatch(videoIds)
+      const urlMap = new Map(batch.map((b) => [b.videoId, b.urls]))
+      const tracks = resolved.entries
+        .map((entry) => {
+          const urls = urlMap.get(entry.videoId) ?? []
+          if (urls.length === 0) return null
+          return onlineToTrack(
+            {
+              provider: 'youtube',
+              id: `youtube:${entry.videoId}`,
+              title: entry.title,
+              artist: entry.track?.artists?.join(', ') ?? 'YouTube',
+              album: entry.track?.album ?? null,
+              duration: entry.duration ?? null,
+              year: null,
+              artworkUrl: null,
+              url: `https://www.youtube.com/watch?v=${entry.videoId}`,
+              previewUrl: null,
+              videoId: entry.videoId
+            },
+            urls
+          )
+        })
+        .filter(Boolean) as ReturnType<typeof onlineToTrack>[]
+      if (tracks.length === 0) {
+        setStatus('Could not resolve any playable streams')
+        return
+      }
+      usePlayer.getState().playTracks(tracks, 0, { source: 'search', sourceId: null })
+      setStatus(`Playing ${tracks.length} songs from playlist`)
+    } catch (e) {
+      setStatus(`Failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const start = async (): Promise<void> => {
     setBusy(true)
@@ -157,6 +213,16 @@ export function LinkDownloadForm({
           </span>
         </label>
         <span className="flex items-center gap-2">
+          {isPlaylist && (
+            <button
+              className="flex items-center gap-1.5 rounded-lg border border-accent/60 bg-surface-2 px-3.5 py-2 text-[12.5px] font-semibold text-accent transition-opacity hover:bg-accent hover:text-white disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void playPlaylist()}
+            >
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} className="ml-0.5 fill-current" />}
+              Play
+            </button>
+          )}
           <button
             className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
             disabled={busy}

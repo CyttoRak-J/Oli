@@ -2104,7 +2104,6 @@ export class ProviderService {
     }
     const output = path.join(destDir, `%(title)s [${videoId}].%(ext)s`)
     const ffmpeg = await this.findFfmpeg()
-    const videoSel = opts.height && opts.height > 0 ? `bv*[height<=${opts.height}]` : 'bv*'
     const audioSel =
       opts.audio === 'm4a' ? 'ba[ext=m4a]/ba' : opts.audio === 'opus' ? 'ba[ext=webm]/ba' : 'ba'
     const args = [
@@ -2120,11 +2119,21 @@ export class ProviderService {
       output
     ]
     if (ffmpeg) {
-      args.push('-f', `${videoSel}+${audioSel}/${videoSel}/b`)
+      // `bv*+ba` selects the best video-only DASH + best audio and merges
+      // them with ffmpeg into a single MP4.  Without a height cap
+      // (height=0) the first choice is simply `bv*+ba`; with a cap it
+      // becomes `bv*[height<=1080]+ba`.  The trailing fallbacks cover
+      // cases where DASH is unavailable (e.g. live streams) — `bv*` is a
+      // muxed single file with both streams, and `b` is any best file.
+      const heightPart = opts.height && opts.height > 0 ? `[height<=${opts.height}]` : ''
+      args.push('-f', `bv*${heightPart}+${audioSel}/bv*+${audioSel}/bv*/b`)
       args.push('--merge-output-format', 'mp4')
       if (ffmpeg !== 'ffmpeg') args.push('--ffmpeg-location', path.dirname(ffmpeg))
     } else {
-      args.push('-f', `${videoSel}/b`)
+      // Without ffmpeg only single-file formats work (muxed video+audio).
+      // `b` is the absolute best single file (muxed up to 720p on YouTube);
+      // `bv*` selects muxed-only as a narrower fallback.
+      args.push('-f', 'bv*/b')
     }
     args.push(`https://www.youtube.com/watch?v=${videoId}`)
     return new Promise((resolve) => {
@@ -2170,9 +2179,6 @@ export class ProviderService {
             // ignore
           }
         } else if (Date.now() - lastBytesAt > 90_000) {
-          // No bytes for 90s: the download is stuck (e.g. yt-dlp retry-looping
-          // on a bot-check or a dead connection). Kill it so the job fails
-          // cleanly instead of hanging at "Downloading" forever.
           getLogger().warn(`yt-dlp video download stalled for ${videoId}; killing`)
           try {
             child.kill()
@@ -2198,9 +2204,6 @@ export class ProviderService {
           return
         }
         try {
-          // The finished file is the newest non-temp file yt-dlp produced
-          // for THIS video (matched by id so concurrent jobs never attribute
-          // each other's files).
           const files = fs
             .readdirSync(destDir)
             .filter(
@@ -2688,6 +2691,33 @@ export class ProviderService {
     }
     if (await isFfmpegBinary('ffmpeg')) return 'ffmpeg'
     return null
+  }
+
+  /**
+   * Resolve playable audio stream URLs for multiple YouTube videos in one
+   * batch call. Used by "Play playlist" so the player can queue every track
+   * without N separate IPC round-trips.
+   */
+  async resolveYouTubeStreamBatch(
+    videoIds: string[]
+  ): Promise<Array<{ videoId: string; urls: string[] }>> {
+    const results: Array<{ videoId: string; urls: string[] }> = []
+    const BATCH = 4
+    for (let i = 0; i < videoIds.length; i += BATCH) {
+      const slice = videoIds.slice(i, i + BATCH)
+      const settled = await Promise.allSettled(
+        slice.map(async (id) => {
+          const urls = await this.resolveYouTubeStream(id)
+          return { videoId: id, urls }
+        })
+      )
+      for (let j = 0; j < settled.length; j++) {
+        const s = settled[j]
+        if (s.status === 'fulfilled') results.push(s.value)
+        else results.push({ videoId: slice[j], urls: [] })
+      }
+    }
+    return results
   }
 
   /**

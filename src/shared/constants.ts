@@ -1,6 +1,6 @@
 ﻿export const APP_NAME = 'Oli'
 export const APP_NAME_COMPACT = 'Oli'
-export const APP_VERSION = '1.0.0'
+export const APP_VERSION = '1.0.2'
 export const APP_ID = 'com.cyttos.oli'
 
 export const MAIN_WINDOW = 'main'

@@ -1,7 +1,7 @@
 {
   "name": "oli",
   "productName": "Oli",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A premium desktop music player and local library manager for Windows.",
   "main": "./out/main/index.js",
   "author": {

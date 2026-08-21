@@ -67,6 +67,8 @@ export const IPC = {
   unpinSearch: 'search:unpin',
   isProviderConfigured: 'provider:configured',
   resolveYouTubeStream: 'youtube:resolve-stream',
+  resolveYouTubeStreamBatch: 'youtube:resolve-stream-batch',
+  resolvePlaylistEntries: 'youtube:resolve-playlist-entries',
   downloadYouTubeAudio: 'youtube:download-audio',
   openVideoWindow: 'video:open',
   videoDownload: 'video:download',

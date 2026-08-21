@@ -432,7 +432,11 @@ export class DownloadService extends EventEmitter {
     title: string,
     opts: { height?: number; audio?: 'best' | 'm4a' | 'opus'; destDir?: string } = {}
   ): Promise<DownloadItem | null> {
-    if (!videoId || !this.hooks.downloadYouTubeVideo) return null
+    if (!videoId) return null
+    if (!this.hooks.downloadYouTubeVideo) {
+      getLogger().warn('enqueueYouTubeVideo: downloadYouTubeVideo hook not available')
+      return null
+    }
     // One active download per video: repeated clicks on the video window's
     // Download button must not spawn duplicate yt-dlp processes.
     for (const [jobId, existing] of this.ytJobs.entries()) {
@@ -484,7 +488,11 @@ export class DownloadService extends EventEmitter {
       track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
     } = {}
   ): Promise<DownloadItem | null> {
-    if (!videoId || !this.hooks.downloadYouTubeAudioFile) return null
+    if (!videoId) return null
+    if (!this.hooks.downloadYouTubeAudioFile) {
+      getLogger().warn('enqueueYouTubeSong: downloadYouTubeAudioFile hook not available')
+      return null
+    }
     for (const [jobId, existing] of this.ytJobs.entries()) {
       if (existing.videoId === videoId) {
         const row = this.getItem(jobId)
