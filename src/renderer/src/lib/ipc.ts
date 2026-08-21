@@ -192,7 +192,7 @@ export const toggleFavorite = (itemType: string, itemId: string): Promise<boolea
 
 // ----------------------------------------------------------------- playback / queue / history
 export const getQueue = (): Promise<QueueEntry[]> => call(IPC.getQueue)
-export const saveQueue = (entries: Array<{ id: string; songId: string; via?: string | null }>): Promise<void> =>
+export const saveQueue = (entries: Array<{ id: string; songId: string; via?: string | null; track?: Track }>): Promise<void> =>
   call(IPC.saveQueue, entries)
 export const clearQueue = (): Promise<void> => call(IPC.clearQueue)
 export const getPlaybackState = (): Promise<PlaybackState> => call(IPC.getPlaybackState)

@@ -143,7 +143,7 @@ function makeSnapshot(s: PlayerState): Partial<PlaybackState> {
 }
 
 function persistQueue(queue: Track[]): void {
-  void saveQueue(queue.map((t) => ({ id: t.id, songId: t.id, via: null })))
+  void saveQueue(queue.map((t) => ({ id: t.id, songId: t.id, via: null, track: t })))
 }
 
 let volumePersistTimer: ReturnType<typeof setTimeout> | null = null

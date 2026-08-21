@@ -474,6 +474,13 @@ const MIGRATIONS: Migration[] = [
         ])
       }
     }
+  },
+  {
+    version: 8,
+    name: 'queue-track-json',
+    up: (db: Database) => {
+      db.exec(`ALTER TABLE queue ADD COLUMN track_json TEXT`)
+    }
   }
 ]
 

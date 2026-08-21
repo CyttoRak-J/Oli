@@ -139,14 +139,22 @@ export class PlaybackStateStore {
 export class QueueService {
   constructor(private db: Database) {}
 
-  save(entries: Array<{ id: string; songId: string; via?: string | null }>): void {
+  save(entries: Array<{ id: string; songId: string; via?: string | null; track?: Track }>): void {
     const tx = this.db.transaction()
     try {
       this.db.run('DELETE FROM queue')
       entries.forEach((entry, index) => {
+        const isOnline = entry.track && !entry.track.path && entry.track.id.startsWith('youtube:')
         this.db.run(
-          'INSERT INTO queue (id, song_id, position, queued_at, via) VALUES (?, ?, ?, ?, ?)',
-          [entry.id ?? randomId(), entry.songId, index, Date.now(), entry.via ?? null]
+          'INSERT INTO queue (id, song_id, position, queued_at, via, track_json) VALUES (?, ?, ?, ?, ?, ?)',
+          [
+            entry.id ?? randomId(),
+            entry.songId,
+            index,
+            Date.now(),
+            entry.via ?? null,
+            isOnline ? JSON.stringify(entry.track) : null
+          ]
         )
       })
       tx.commit()
@@ -157,13 +165,30 @@ export class QueueService {
   }
 
   load(): QueueEntry[] {
-    return this.db
-      .all<Record<string, unknown>>(
-        `SELECT q.*, s.* FROM queue q
-         JOIN songs s ON s.id = q.song_id
-         ORDER BY q.position ASC`
-      )
-      .map(toQueueEntry)
+    const rows = this.db.all<Record<string, unknown>>(
+      `SELECT q.*, s.*,
+              q.track_json AS queue_track_json
+       FROM queue q
+       LEFT JOIN songs s ON s.id = q.song_id
+       ORDER BY q.position ASC`
+    )
+    return rows.map((row) => {
+      // Online track: reconstruct from stored JSON
+      if (row.queue_track_json && !row.path) {
+        try {
+          const track = JSON.parse(String(row.queue_track_json)) as Track
+          return {
+            id: String(row.id),
+            songId: String(row.song_id),
+            position: Number(row.position ?? 0),
+            queuedAt: Number(row.queued_at ?? 0),
+            track,
+            via: row.via != null ? String(row.via) : null
+          }
+        } catch { /* fall through to toQueueEntry */ }
+      }
+      return toQueueEntry(row)
+    })
   }
 
   clear(): void {
