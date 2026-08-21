@@ -12,6 +12,7 @@ import type {
   Genre,
   LibraryFolder,
   LyricsData,
+  OnlineSearchResult,
   Playlist,
   PlaylistEntry,
   PlaybackHistoryEntry,
@@ -131,6 +132,8 @@ export const resolveYouTubeStreamBatch = (
   videoIds: string[]
 ): Promise<Array<{ videoId: string; urls: string[] }>> =>
   call(IPC.resolveYouTubeStreamBatch, videoIds)
+export const resolveYouTubeUrl = (url: string): Promise<OnlineSearchResult[]> =>
+  call(IPC.resolveYouTubeUrl, url)
 export const resolvePlaylistEntries = (
   url: string
 ): Promise<{

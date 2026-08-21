@@ -276,6 +276,9 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
   ipcMain.handle(IPC.resolveYouTubeStreamBatch, (_e, videoIds: string[]) =>
     toResult(() => providers.resolveYouTubeStreamBatch(videoIds))
   )
+  ipcMain.handle(IPC.resolveYouTubeUrl, (_e, url: string) =>
+    toResult(() => providers.resolveYouTubeUrl(url))
+  )
   ipcMain.handle(IPC.resolvePlaylistEntries, async (_e, url: string) => {
     const cfg = {
       spotifyClientId: settings.get('spotifyClientId'),

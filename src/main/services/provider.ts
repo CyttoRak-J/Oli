@@ -4,6 +4,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { getLogger } from './logger'
+import { ytVideoIdFromUrl } from './downloads'
 import type { Database } from './database'
 import type { OnlineSearchResult, TrackTagInput } from '@shared/types'
 
@@ -2718,6 +2719,76 @@ export class ProviderService {
       }
     }
     return results
+  }
+
+  /**
+   * Resolve a YouTube URL (video or playlist) into OnlineSearchResult objects
+   * that can be displayed as playable rows. Single videos produce one result;
+   * playlists produce one result per entry (capped at 50).
+   */
+  async resolveYouTubeUrl(url: string): Promise<OnlineSearchResult[]> {
+    try {
+      const u = new URL(url)
+      const host = u.hostname.replace(/^(www\.|m\.|music\.)/i, '')
+      // Playlist URL
+      if (
+        (host === 'youtube.com' && u.pathname === '/playlist' && u.searchParams.get('list')) ||
+        (host === 'youtube.com' && u.searchParams.get('list') && u.searchParams.get('v'))
+      ) {
+        const listId = u.searchParams.get('list')
+        if (listId) {
+          const stdout = await this.runYtdlp(['--no-warnings', '--flat-playlist', '-J', `https://www.youtube.com/playlist?list=${listId}`], 60_000)
+          if (stdout) {
+            try {
+              const info = JSON.parse(stdout) as {
+                title?: string
+                entries?: Array<{ id?: string; title?: string; duration?: number; channel?: string; thumbnails?: Array<{ url?: string }> }>
+              }
+              const entries = (info.entries ?? []).filter((e) => e.id && /^[\w-]{11}$/.test(e.id))
+              return entries.slice(0, 50).map((e) => ({
+                provider: 'youtube',
+                id: `youtube:${e.id}`,
+                title: e.title ?? 'Untitled',
+                artist: e.channel ?? info.title ?? 'YouTube Playlist',
+                album: info.title ?? null,
+                duration: typeof e.duration === 'number' && e.duration > 0 ? e.duration : null,
+                year: null,
+                artworkUrl: e.thumbnails?.find((t) => t.url)?.url ?? null,
+                url: `https://www.youtube.com/watch?v=${e.id}`,
+                previewUrl: null,
+                videoId: e.id
+              }))
+            } catch {
+              return []
+            }
+          }
+        }
+        return []
+      }
+      // Single video URL
+      const videoId = ytVideoIdFromUrl(url)
+      if (videoId) {
+        const meta = await this.getYouTubeMeta(videoId)
+        if (meta) {
+          return [{
+            provider: 'youtube',
+            id: `youtube:${videoId}`,
+            title: meta.title,
+            artist: meta.channel ?? 'YouTube',
+            album: null,
+            duration: null,
+            year: null,
+            artworkUrl: meta.thumbnail,
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            previewUrl: null,
+            videoId
+          }]
+        }
+      }
+    } catch {
+      // fall through
+    }
+    return []
   }
 
   /**

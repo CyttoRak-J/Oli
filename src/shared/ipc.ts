@@ -68,6 +68,7 @@ export const IPC = {
   isProviderConfigured: 'provider:configured',
   resolveYouTubeStream: 'youtube:resolve-stream',
   resolveYouTubeStreamBatch: 'youtube:resolve-stream-batch',
+  resolveYouTubeUrl: 'youtube:resolve-url',
   resolvePlaylistEntries: 'youtube:resolve-playlist-entries',
   downloadYouTubeAudio: 'youtube:download-audio',
   openVideoWindow: 'video:open',

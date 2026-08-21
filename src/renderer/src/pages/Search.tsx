@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react'
@@ -9,7 +9,8 @@ import {
   clearSearchHistory,
   removeSearchHistory,
   pinSearch,
-  unpinSearch
+  unpinSearch,
+  resolveYouTubeUrl
 } from '../lib/ipc'
 import { useLiveOnlineSearch } from '../lib/useLiveOnlineSearch'
 import { usePlayer } from '../store/player'
@@ -17,7 +18,6 @@ import { LocalRow } from '../components/LocalRow'
 import { OnlineRow } from '../components/OnlineRow'
 import { HistoryPanel } from '../components/HistoryPanel'
 import { EmptyState } from '../components/EmptyState'
-import { LinkDownloadForm } from '../components/LinkDownloadForm'
 import { detectYtInput } from '../lib/linkDetect'
 
 export function Search(): React.JSX.Element {
@@ -25,15 +25,9 @@ export function Search(): React.JSX.Element {
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState(() => params.get('q') ?? '')
   const [debounced, setDebounced] = useState(() => params.get('q') ?? '')
-  const [dismissedFor, setDismissedFor] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // The user can dismiss the detected-link form for the current query text;
-  // editing the query re-detects the link for the new text.
-  const link = useMemo(
-    () => (dismissedFor === debounced ? null : detectYtInput(debounced)),
-    [debounced, dismissedFor]
-  )
+  const link = detectYtInput(debounced)
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -49,6 +43,14 @@ export function Search(): React.JSX.Element {
     queryFn: () => runSearch(debounced),
     enabled: debounced.length > 2 && !link
   })
+
+  // When a YouTube URL is pasted, resolve it to playable results
+  const urlResults = useQuery({
+    queryKey: ['resolve-url', debounced],
+    queryFn: () => resolveYouTubeUrl(debounced),
+    enabled: !!link && debounced.length > 5
+  })
+
   const history = useQuery({
     queryKey: ['search-history'],
     queryFn: getSearchHistory,
@@ -57,6 +59,7 @@ export function Search(): React.JSX.Element {
 
   const local: Track[] = results.data?.local ?? []
   const online = results.data?.online ?? []
+  const urlItems = urlResults.data ?? []
   useLiveOnlineSearch(debounced)
 
   return (
@@ -68,7 +71,7 @@ export function Search(): React.JSX.Element {
         <input
           autoFocus
           className="w-full rounded-full border border-surface-4 bg-surface-2 py-2.5 pl-11 pr-10 text-[14px] text-ink-0 outline-none focus:border-accent"
-          placeholder="Search your library, then providers…"
+          placeholder="Search your library, paste a link, or type a name…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -102,17 +105,35 @@ export function Search(): React.JSX.Element {
 
       {debounced.length > 0 && (
         <div className="space-y-8">
-          {link && (
+          {/* YouTube URL resolved to playable results */}
+          {link && urlResults.isLoading && (
+            <div className="flex items-center gap-2 py-4 text-[12.5px] text-ink-3">
+              <Loader2 size={14} className="animate-spin" />
+              Resolving link…
+            </div>
+          )}
+
+          {link && urlItems.length > 0 && (
             <section>
-              <h2 className="mb-2 text-[14px] font-bold text-ink-0">YouTube link detected</h2>
-              <LinkDownloadForm
-                link={link}
-                onEnqueued={() => void results.refetch()}
-                onClose={() => setDismissedFor(debounced)}
-              />
+              <h2 className="mb-2 text-[14px] font-bold text-ink-0">
+                {urlItems.length === 1 ? 'YouTube video' : `YouTube playlist (${urlItems.length} songs)`}
+              </h2>
+              <div className="flex flex-col">
+                {urlItems.map((r) => (
+                  <OnlineRow key={r.id} result={r} />
+                ))}
+              </div>
             </section>
           )}
 
+          {link && !urlResults.isLoading && urlItems.length === 0 && urlResults.isFetched && (
+            <EmptyState
+              title="Could not resolve link"
+              description="This URL could not be resolved. Check the link and try again."
+            />
+          )}
+
+          {/* Normal search results */}
           {!link && local.length > 0 && (
             <section>
               <h2 className="mb-2 text-[14px] font-bold text-ink-0">Library</h2>
