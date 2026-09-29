@@ -8,7 +8,7 @@ import { playlistTarget, PLAYLIST_LIMIT, MIX_LIMIT } from '../util/playlistUrl'
 import { ytVideoIdFromUrl } from './downloads'
 import type { Database } from './database'
 import type { YtdlpEngine } from './ytdlpEngine'
-import type { OnlineSearchResult, TrackTagInput } from '@shared/types'
+import type { OnlineSearchResult, TrackTagInput, ProviderConfig } from '@shared/types'
 
 /** Download options for YouTube videos (merged audio). */
 export interface YouTubeDownloadOptions {
@@ -72,13 +72,7 @@ function killProcessTree(child: ChildProcess): void {
 
 const YT_EMBED_ARGS = ['--extractor-args', 'youtube:player_client=web_embedded']
 
-export interface ProviderConfig {
-  spotifyClientId: string
-  spotifyClientSecret: string
-  youtubeApiKey: string
-  /** Free AcoustID API key (acoustid.org) enabling audio-fingerprint matching. */
-  acoustidApiKey: string
-}
+export type { ProviderConfig }
 
 /**
  * Rich track metadata resolved from a music catalog (Spotify when

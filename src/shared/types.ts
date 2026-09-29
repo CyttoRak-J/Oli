@@ -473,3 +473,12 @@ export interface YtEngineStatus {
   /** The "update automatically" setting. */
   auto: boolean
 }
+
+/** Keys for the online metadata / search providers (all optional; typed by the user in Preferences). */
+export interface ProviderConfig {
+  spotifyClientId: string
+  spotifyClientSecret: string
+  youtubeApiKey: string
+  /** Free AcoustID API key (acoustid.org) enabling audio-fingerprint matching. */
+  acoustidApiKey: string
+}

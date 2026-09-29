@@ -45,6 +45,7 @@ What I want next:
   pre-release (first one: `android-v0.1.0`, signature verified by apksigner in CI). It has Internet Archive search/download, the phone layout, settings; it has
   NOT been run on a real phone; no phone-music scan, background playback, playlists persistence or YouTube yet. Plan, status table and open decisions
   (native rewrite vs Capacitor, YouTube in Android, real signing key) are in `ANDROID_PLAN.md`.
+- Android now runs the shared desktop services inside the phone app (see HANDOFF.md "Android phase 1a" and the parity checklist in `ANDROID_PLAN.md`). Owner's goals: all PC features incl. YouTube + Archive, and a native rewrite if the phone app lags/crashes/loses background playback.
 - After adding npm packages, check `node_modules/electron/dist` still exists (newer npm skips install scripts); if not, run `node node_modules/electron/install.js`.
 - Test-window trick that works here: the browser pane cannot open local pages (and Chromium blocks port 5060); serve `out/renderer-android` on port 8765 and open it
   in a throwaway Electron window without the desktop preload (`window.cytto` is then installed by the web backend), driven over the debug port.

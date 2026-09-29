@@ -10,6 +10,9 @@ export interface CyttoBridge {
 }
 
 declare global {
+  /** true in the Android/web build, false in the desktop build (set in the Vite configs). */
+  const __OLI_WEB__: boolean
+
   interface Window {
     cytto: CyttoBridge
   }

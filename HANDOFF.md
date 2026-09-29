@@ -79,6 +79,15 @@ Checks at the end of the bug-fix session: typecheck, lint and build clean; **76 
   `ANDROID_PLAN.md`. Signed with a public alpha key (`android/keystore`).
 - To continue in a new chat, paste the block in `CONTINUE_PROMPT.md`.
 
+## Android phase 1a: shared desktop logic inside the phone app (2026-09-29)
+- Owner's decision: Android must have ALL PC features (YouTube + Archive included), any technology; if the phone app lags/crashes/loses background play, rewrite natively (triggers listed in `ANDROID_PLAN.md`).
+- Refactors that keep desktop behaviour: `services/libraryQueries.ts` (portable read half of `LibraryService`, which now extends it), `Database` accepts an optional storage plug-in (`DatabasePersistence`) and `wasmUrl`,
+  `SearchService` takes a small `SearchProviders` interface, `ProviderConfig` moved to `shared/types.ts`, `services/coreHandlers.ts` (IPC answers that need only the shared services), `shared/archiveCore.ts`.
+- Phone side: `platform/androidCore.ts` (database in IndexedDB + services), `platform/webBackend.ts` (Archive + downloads + "not yet" answers), `platform/shims/*` (browser stand-ins for node:events/path/crypto/fs and the logger),
+  `vite.android.config.ts` (aliases, phone-only CSP `'wasm-unsafe-eval'`), `__OLI_WEB__` flag (desktop build gets an empty stand-in, checked: no phone code or wasm in the desktop bundle).
+- Verified in a phone-size test window: DB start, restart persistence, playlists/favorites/queue/history/search, Archive download -> song. Not verified on a phone. Android version is now 0.2.0 (`android/app/build.gradle`).
+- Next: `NativeAudio` + Media3 foreground service, MediaStore scanner, then downloads/YouTube (see the checklist in `ANDROID_PLAN.md`).
+
 ## Not verified / open ideas
 - Never heard audio (only "player reports playing and advancing"). The packaged installer (`npm run build:win`) builds and its
   unpacked app boots with `resources/bin/yt-dlp.exe`, but running the installer itself and upgrades are untested.

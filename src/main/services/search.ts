@@ -3,11 +3,18 @@ import { getLogger } from './logger'
 import { toTrack } from './mappers'
 import { fuzzyScore, normalizeText } from './text'
 import type { Database } from './database'
-import type { ProviderService } from './provider'
 import type { SettingsStore } from './settingsStore'
-import type { OnlineSearchResult, SearchFilters, SearchResults, Track } from '@shared/types'
+import type { OnlineSearchResult, ProviderConfig, SearchFilters, SearchResults, Track } from '@shared/types'
 
 const LOCAL_LIMIT = 60
+
+/** The part of the provider service that search needs (the Android app supplies its own). */
+export interface SearchProviders {
+  isSpotifyConfigured(config: ProviderConfig): boolean
+  isYouTubeConfigured(config: ProviderConfig): boolean
+  searchSpotify(query: string, config: ProviderConfig): Promise<OnlineSearchResult[]>
+  searchYouTube(query: string, config: ProviderConfig): Promise<OnlineSearchResult[]>
+}
 
 function escapeFts(input: string): string {
   return input
@@ -21,7 +28,7 @@ export class SearchService {
 
   constructor(
     private db: Database,
-    private providers: ProviderService,
+    private providers: SearchProviders,
     private settings: SettingsStore
   ) {
     this.hasFts5 = db

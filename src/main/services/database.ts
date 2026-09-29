@@ -8,8 +8,22 @@ import initSqlJs, {
 } from 'sql.js'
 import { getLogger } from './logger'
 
+/**
+ * Where the database bytes are kept when there is no plain file (the Android app stores them in the web view's
+ * IndexedDB). Desktop leaves this unset and uses `file` as before.
+ */
+export interface DatabasePersistence {
+  /** The saved database, or null when nothing was saved yet. */
+  load(): Promise<Uint8Array | null>
+  /** Save the database. Called from timers; failures are reported, never thrown. */
+  save(bytes: Uint8Array): Promise<void>
+}
+
 export interface DatabaseOptions {
   file: string
+  persistence?: DatabasePersistence
+  /** URL of sql-wasm.wasm when it cannot be found through Node (browser / Android). */
+  wasmUrl?: string
 }
 
 type Params = unknown[] | Record<string, unknown>
@@ -31,10 +45,10 @@ function rawWasmPath(): string {
   return path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')
 }
 
-export async function loadSqlJs(): Promise<SqlJsStatic> {
+export async function loadSqlJs(wasmUrl?: string): Promise<SqlJsStatic> {
   if (!sqlJsPromise) {
     sqlJsPromise = initSqlJs({
-      locateFile: () => rawWasmPath()
+      locateFile: () => wasmUrl ?? rawWasmPath()
     })
   }
   return sqlJsPromise
@@ -57,17 +71,27 @@ export class Database extends EventEmitter {
   private readonly persistDelayMs = 4000
   private readonly periodicMs = 60_000
   private file: string
+  private persistence: DatabasePersistence | null
+  private wasmUrl: string | undefined
 
   constructor(opts: DatabaseOptions) {
     super()
     this.file = opts.file
+    this.persistence = opts.persistence ?? null
+    this.wasmUrl = opts.wasmUrl
   }
 
   async init(): Promise<void> {
     const log = getLogger()
-    const SQL = await loadSqlJs()
+    const SQL = await loadSqlJs(this.wasmUrl)
     let bytes: Uint8Array | null = null
-    if (fs.existsSync(this.file)) {
+    if (this.persistence) {
+      try {
+        bytes = await this.persistence.load()
+      } catch (err) {
+        log.warn('Saved database unreadable, starting fresh', err)
+      }
+    } else if (fs.existsSync(this.file)) {
       try {
         bytes = fs.readFileSync(this.file)
       } catch (err) {
@@ -107,6 +131,7 @@ export class Database extends EventEmitter {
 
   /** Copy an unreadable/corrupt database file aside before it can be overwritten. */
   private preserveDamagedFile(): void {
+    if (this.persistence) return // no plain file to keep aside
     try {
       if (!fs.existsSync(this.file)) return
       const aside = `${this.file}.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}`
@@ -142,6 +167,7 @@ export class Database extends EventEmitter {
   }
 
   private async tryRestoreFromBackup(): Promise<boolean> {
+    if (this.persistence) return false // backups are files on desktop
     // BackupService writes to <userData>/backups; older builds wrote next to
     // the database. Look in both (this used to check only the latter, so
     // automatic recovery never found a single backup).
@@ -161,7 +187,7 @@ export class Database extends EventEmitter {
     for (let i = backups.length - 1; i >= 0; i--) {
       try {
         const bytes = fs.readFileSync(backups[i])
-        const SQL = await loadSqlJs()
+        const SQL = await loadSqlJs(this.wasmUrl)
         const candidate = new SQL.Database(bytes)
         if (!isHealthy(candidate)) {
           candidate.close()
@@ -265,6 +291,16 @@ export class Database extends EventEmitter {
       return 0
     }
     if (bytes.length === 0) return 0
+    if (this.persistence) {
+      // Not a file: hand the bytes over. The write finishes on its own; close() waits for the last one.
+      const write = this.persistence.save(bytes).then(
+        () => undefined,
+        (err) => this.onPersistError(err)
+      )
+      this.pendingWrite = write
+      this.dirty = false
+      return bytes.length
+    }
     const tmp = `${this.file}.tmp`
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true })
@@ -306,6 +342,7 @@ export class Database extends EventEmitter {
   }
 
   private suspended = false
+  private pendingWrite: Promise<void> = Promise.resolve()
 
   /**
    * Bulk operations (library scans) can defer disk persistence to avoid a full
@@ -341,6 +378,7 @@ export class Database extends EventEmitter {
     if (this.persistTimer) clearTimeout(this.persistTimer)
     if (this.periodicTimer) clearInterval(this.periodicTimer)
     this.flushToDisk()
+    await this.pendingWrite
     try {
       this.raw?.close()
     } catch {
@@ -351,7 +389,7 @@ export class Database extends EventEmitter {
 
   /** Replace the live database with bytes from a backup. */
   async replaceFromBytes(bytes: Uint8Array): Promise<boolean> {
-    const SQL = await loadSqlJs()
+    const SQL = await loadSqlJs(this.wasmUrl)
     try {
       const next = new SQL.Database(bytes)
       // Validate BEFORE swapping: a corrupt or unrelated .sqlite file used to
