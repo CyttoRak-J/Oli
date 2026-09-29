@@ -21,6 +21,7 @@ import { IPC } from '@shared/ipc'
 import type { Track } from '@shared/types'
 import type { PhoneStore } from './phoneLibrary'
 import { createPhoneStore } from './phoneStore'
+import { applySongEdits, type FileTagWriter, type TrackEdit } from './songEdits'
 
 // ------------------------------------------------------------------ database storage (IndexedDB)
 const IDB_NAME = 'oli'
@@ -68,6 +69,10 @@ export interface AndroidCore {
   onChange(listener: (channel: string, payload: unknown) => void): void
   /** Database side of the phone-music scanner (phoneLibrary.ts). */
   phone: PhoneStore
+  /** Edit a song's tags (library always, file too when it is one of Oli's own downloads). */
+  editSong(songId: string, edits: TrackEdit, writeFileTags?: FileTagWriter): Promise<boolean>
+  /** After the library database was replaced by a backup: migrate, reload settings, refresh the screens. */
+  afterRestore(): void
 }
 
 const noProviders = {
@@ -141,10 +146,20 @@ export async function initAndroidCore(): Promise<AndroidCore> {
 
   const phone = createPhoneStore(db, library, flush)
 
+  const afterRestore = (): void => {
+    runMigrations(db)
+    settings.load()
+    library.rebuildAggregates()
+    emit(IPC.onLibraryChanged, library.getStats())
+    flush()
+  }
+
   return {
     db,
     handlers,
     phone,
+    editSong: (songId, edits, writeFileTags) => applySongEdits(db, library, songId, edits, writeFileTags),
+    afterRestore,
     upsertTrack,
     onChange: (l) => {
       listeners.push(l)

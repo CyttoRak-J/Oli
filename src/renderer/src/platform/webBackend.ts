@@ -9,7 +9,6 @@
  *
  * Status and next steps: ANDROID_PLAN.md.
  */
-import { Directory, Filesystem } from '@capacitor/filesystem'
 import {
   ARCHIVE_ITEM_CACHE_MS,
   ARCHIVE_TIMEOUT_MS,
@@ -17,7 +16,8 @@ import {
   buildSearchUrl,
   isValidIdentifier,
   parseHits,
-  parseItem
+  parseItem,
+  pickCover
 } from '@shared/archiveCore'
 import { IPC } from '@shared/ipc'
 import type {
@@ -28,9 +28,13 @@ import type {
   Track,
   YtEngineStatus
 } from '@shared/types'
+import { Directory, Filesystem } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
 import { deviceFileUrl } from '../lib/platform'
 import { initAndroidCore, trackIds, type AndroidCore } from './androidCore'
 import { getMediaPlugin, PHONE_LIBRARY_ID, PhoneLibrary } from './phoneLibrary'
+import { PhoneBackup, base64ToBytes, bytesToBase64, pickFileBytes, type BackupStorage } from './phoneBackup'
+import { DownloadQueue, getDownloadPlugin, type CompletedFile, type DownloadJob, type DownloadStore } from './downloadQueue'
 
 type Handler = (...args: never[]) => unknown
 type Listener = (...args: unknown[]) => void
@@ -54,7 +58,6 @@ function writeJson(key: string, value: unknown): void {
     // storage full or blocked: keep working in memory
   }
 }
-const uid = (): string => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 /** File and folder names: same rules as the desktop app (no path characters, capped length). */
 const safeName = (s: string): string =>
   s.replace(/[<>:"/\\|?*]/g, '_').replace(/\p{C}/gu, '_').trim().slice(0, 120) || 'download'
@@ -178,89 +181,42 @@ async function archiveItem(identifier: string): Promise<ArchiveItem> {
   }
 }
 
-// ------------------------------------------------------------------ downloads (saved into the app's storage on the phone)
-interface Job {
+// ------------------------------------------------------------------ downloads (native queue, see downloadQueue.ts)
+const JOBS_KEY = 'oli.downloadJobs'
+let queue: DownloadQueue | null = null
+
+const downloadStore: DownloadStore = {
+  loadItems: () => readJson<DownloadItem[]>(DOWNLOADS_KEY, []),
+  saveItems: (items) => writeJson(DOWNLOADS_KEY, items),
+  loadJobs: () => readJson<Record<string, DownloadJob>>(JOBS_KEY, {}),
+  saveJobs: (jobs) => writeJson(JOBS_KEY, jobs)
+}
+
+interface ArchiveJobMeta {
   file: ArchiveFile
+  /** The item without its file lists (they are big and not needed to make the song). */
   item: ArchiveItem
-  relPath: string
 }
 
-let downloads: DownloadItem[] = readJson<DownloadItem[]>(DOWNLOADS_KEY, []).map((d) =>
-  // A download that was running when the app closed cannot continue: show it as failed so it can be retried.
-  d.state === 'downloading' || d.state === 'queued' ? { ...d, state: 'failed', error: 'Interrupted', speed: 0 } : d
-)
-const jobs = new Map<string, Job>()
-let pumping = false
-
-function publishDownloads(): void {
-  writeJson(DOWNLOADS_KEY, downloads.slice(0, 200))
-  emit(IPC.onDownloadsChanged, [...downloads])
+/** A finished file becomes a song; its real format is read from the file. */
+async function downloadCompleted(_d: DownloadItem, job: DownloadJob, file: CompletedFile): Promise<void> {
+  const meta = job.meta as ArchiveJobMeta | undefined
+  if (!meta) return
+  const track = makeTrack(meta.file, meta.item, file.path, file.size)
+  core.upsertTrack(track)
+  await phoneLib?.describeFile(track.id, file.path)
 }
 
-function patchDownload(id: string, patch: Partial<DownloadItem>): void {
-  downloads = downloads.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d))
-  publishDownloads()
-}
-
-async function pumpDownloads(): Promise<void> {
-  if (pumping) return
-  pumping = true
-  try {
-    for (;;) {
-      const next = [...downloads].reverse().find((d) => d.state === 'queued' && jobs.has(d.id))
-      if (!next) break
-      await downloadOne(next, jobs.get(next.id) as Job)
-    }
-  } finally {
-    pumping = false
-  }
-}
-
-async function downloadOne(row: DownloadItem, job: Job): Promise<void> {
-  patchDownload(row.id, { state: 'downloading', error: null })
-  const startedAt = Date.now()
-  const handle = await Filesystem.addListener('progress', (ev) => {
-    if (ev.url !== row.url) return
-    const total = ev.contentLength > 0 ? ev.contentLength : job.file.size
-    const elapsed = Math.max(1, (Date.now() - startedAt) / 1000)
-    const speed = ev.bytes / elapsed
-    patchDownload(row.id, {
-      downloadedBytes: ev.bytes,
-      totalBytes: total || null,
-      progress: total ? Math.min(1, ev.bytes / total) : 0,
-      speed: Math.round(speed),
-      etaSeconds: total && speed > 0 ? Math.round((total - ev.bytes) / speed) : null
-    })
+async function startDownloads(): Promise<void> {
+  const plugin = getDownloadPlugin()
+  if (!plugin) return
+  queue = new DownloadQueue({
+    plugin,
+    store: downloadStore,
+    publish: (items) => emit(IPC.onDownloadsChanged, items),
+    onCompleted: downloadCompleted
   })
-  try {
-    const res = await Filesystem.downloadFile({
-      url: row.url,
-      path: job.relPath,
-      directory: Directory.External,
-      recursive: true,
-      progress: true
-    })
-    const uri = (await Filesystem.getUri({ path: job.relPath, directory: Directory.External })).uri
-    const stat = await Filesystem.stat({ path: job.relPath, directory: Directory.External })
-    if (job.file.size > 0 && stat.size !== job.file.size) {
-      throw new Error(`Incomplete download (${stat.size} of ${job.file.size} bytes)`)
-    }
-    core.upsertTrack(makeTrack(job.file, job.item, uri, stat.size))
-    patchDownload(row.id, {
-      state: 'completed',
-      progress: 1,
-      speed: 0,
-      etaSeconds: null,
-      downloadedBytes: stat.size,
-      totalBytes: stat.size,
-      destPath: res.path ?? uri
-    })
-  } catch (err) {
-    patchDownload(row.id, { state: 'failed', speed: 0, error: (err as Error).message || 'Download failed' })
-  } finally {
-    void handle.remove()
-    jobs.delete(row.id)
-  }
+  await queue.start()
 }
 
 async function archiveEnqueue(identifier: string, fileNames: string[]): Promise<{ found: number; enqueued: number }> {
@@ -268,40 +224,101 @@ async function archiveEnqueue(identifier: string, fileNames: string[]): Promise<
   const item = await archiveItem(identifier)
   const wanted = new Set(fileNames.filter((n) => typeof n === 'string').slice(0, 500))
   const chosen = item.files.filter((f) => wanted.has(f.name))
-  let enqueued = 0
-  for (const f of chosen) {
-    const url = buildDownloadUrl(identifier, f.name)
+  if (!queue) return { found: chosen.length, enqueued: 0 }
+  const lite: ArchiveItem = { ...item, files: [], images: [] }
+  const year = item.date ? Number.parseInt(item.date.slice(0, 4), 10) : NaN
+  const entries = chosen.map((f) => {
     const base = f.name.split('/').pop() ?? f.name
     const dot = base.lastIndexOf('.')
     const ext = dot > 0 ? base.slice(dot, dot + 9) : ''
-    const relPath = `Oli/${safeName(item.title || identifier)}/${safeName(dot > 0 ? base.slice(0, dot) : base)}${ext}`
-    if (downloads.some((d) => d.url === url && (d.state === 'queued' || d.state === 'downloading'))) continue
-    const id = uid()
-    const now = Date.now()
-    jobs.set(id, { file: f, item, relPath })
-    downloads = [
-      {
-        id,
-        title: f.title ?? base,
-        url,
-        destPath: relPath,
-        state: 'queued',
-        progress: 0,
-        totalBytes: f.size || null,
-        downloadedBytes: 0,
-        speed: 0,
-        etaSeconds: null,
-        error: null,
-        createdAt: now,
-        updatedAt: now
-      },
-      ...downloads
-    ]
-    enqueued++
+    const cover = pickCover(item.images, f.name)
+    const meta: ArchiveJobMeta = { file: f, item: lite }
+    return {
+      title: f.title ?? base,
+      job: {
+        url: buildDownloadUrl(identifier, f.name),
+        relPath: `Oli/${safeName(item.title || identifier)}/${safeName(dot > 0 ? base.slice(0, dot) : base)}${ext}`,
+        size: f.size,
+        md5: f.md5 ?? '',
+        coverUrl: cover ? buildDownloadUrl(identifier, cover.name) : undefined,
+        tags: {
+          title: f.title ?? undefined,
+          artist: f.artist ?? item.creator ?? undefined,
+          albumArtist: item.creator ?? undefined,
+          album: f.album ?? item.title ?? undefined,
+          genre: f.genre ?? undefined,
+          trackNo: Number.parseInt(f.track ?? '', 10) || undefined,
+          year: Number.isFinite(year) ? year : undefined
+        },
+        meta
+      } satisfies DownloadJob
+    }
+  })
+  return { found: chosen.length, enqueued: queue.add(entries) }
+}
+
+// ------------------------------------------------------------------ backup and restore (see phoneBackup.ts)
+const BACKUP_DIR = 'Oli/backups'
+const backupStorage: BackupStorage = {
+  async list() {
+    try {
+      const r = await Filesystem.readdir({ path: BACKUP_DIR, directory: Directory.External })
+      return r.files.map((f) => ({ name: f.name, createdAt: Number(f.mtime ?? f.ctime ?? 0), size: Number(f.size ?? 0) }))
+    } catch {
+      return []
+    }
+  },
+  async write(name, bytes) {
+    await Filesystem.writeFile({ path: `${BACKUP_DIR}/${name}`, data: bytesToBase64(bytes), directory: Directory.External, recursive: true })
+  },
+  async read(name) {
+    const r = await Filesystem.readFile({ path: `${BACKUP_DIR}/${name}`, directory: Directory.External })
+    return base64ToBytes(String(r.data))
+  },
+  async remove(name) {
+    await Filesystem.deleteFile({ path: `${BACKUP_DIR}/${name}`, directory: Directory.External })
   }
-  publishDownloads()
-  void pumpDownloads()
-  return { found: chosen.length, enqueued }
+}
+let phoneBackup: PhoneBackup | null = null
+
+/** Restore: the newest automatic backup if the owner agrees, otherwise a file they pick. */
+async function restoreInteractive(): Promise<boolean> {
+  if (!phoneBackup) return false
+  const list = await phoneBackup.list()
+  if (list.length > 0 && window.confirm(`Restore the automatic backup from ${new Date(list[0].createdAt).toLocaleString()}?
+
+The current library is replaced. Cancel = choose a backup file instead.`)) {
+    return phoneBackup.restoreNamed(list[0].name)
+  }
+  const bytes = await pickFileBytes()
+  return bytes ? phoneBackup.restoreBytes(bytes) : false
+}
+
+async function exportLibraryFile(): Promise<boolean> {
+  if (!phoneBackup) return false
+  try {
+    const name = `Oli-library-backup-${new Date().toISOString().slice(0, 10)}.sqlite`
+    const w = await Filesystem.writeFile({ path: name, data: bytesToBase64(phoneBackup.snapshot()), directory: Directory.Cache })
+    await Share.share({ title: 'Oli library backup', url: w.uri, dialogTitle: 'Save or send your Oli library' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** A backup every day the app is used (the newest 8 are kept), like the PC. */
+async function startBackups(): Promise<void> {
+  phoneBackup = new PhoneBackup(core.db, backupStorage, () => core.afterRestore())
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const list = await phoneBackup!.list()
+        if (list.length === 0 || Date.now() - list[0].createdAt > 24 * 3600 * 1000) await phoneBackup!.create()
+      } catch {
+        // a failed automatic backup is not worth interrupting the owner
+      }
+    })()
+  }, 15000)
 }
 
 // ------------------------------------------------------------------ phone-specific channels and "not built yet" answers
@@ -369,32 +386,56 @@ const phoneHandlers: Record<string, Handler> = {
   [IPC.resolveYouTubeStreamBatch]: empty,
   [IPC.resolveYouTubeUrl]: empty,
   [IPC.resolvePlaylistEntries]: () => ({ entries: [], error: 'YouTube is not available in the Android app yet.' }),
-  // backup
-  [IPC.listBackups]: empty,
+  // backup and restore
+  [IPC.createBackup]: (async () => (await phoneBackup?.create()) ?? null) as Handler,
+  [IPC.listBackups]: (async () => (await phoneBackup?.list()) ?? []) as Handler,
+  [IPC.restoreBackup]: (() => restoreInteractive()) as Handler,
+  [IPC.exportLibrary]: (() => exportLibraryFile()) as Handler,
+  [IPC.importLibrary]: (async () => {
+    const bytes = await pickFileBytes()
+    return bytes && phoneBackup ? phoneBackup.restoreBytes(bytes) : false
+  }) as Handler,
+  // tag editing
+  [IPC.editMetadata]: ((songId: string, edits: Record<string, unknown>) =>
+    core.editSong(songId, edits, async (path, tags) => {
+      const plugin = getDownloadPlugin()
+      return plugin ? (await plugin.writeTags({ path, tags })).written : false
+    })) as Handler,
+  [IPC.refreshMetadata]: (async (songId: string) => {
+    const loc = core.phone.songLocation(songId)
+    if (!loc || !phoneLib) return false
+    await phoneLib.describeFile(songId, loc.path)
+    return true
+  }) as Handler,
   // downloads
-  [IPC.getDownloads]: () => [...downloads],
+  [IPC.getDownloads]: () => queue?.list() ?? [],
   [IPC.cancelDownload]: ((id: string) => {
-    jobs.delete(id)
-    patchDownload(id, { state: 'canceled', speed: 0 })
+    queue?.cancel(id)
     return null
   }) as Handler,
   [IPC.removeDownload]: ((id: string) => {
-    jobs.delete(id)
-    downloads = downloads.filter((d) => d.id !== id)
-    publishDownloads()
+    queue?.remove(id)
     return null
   }) as Handler,
   [IPC.clearCompleted]: () => {
-    downloads = downloads.filter((d) => !['completed', 'failed', 'canceled'].includes(d.state))
-    publishDownloads()
+    queue?.clearCompleted()
     return null
   },
-  [IPC.clearPending]: () => 0,
-  [IPC.pauseAllDownload]: () => 0,
-  [IPC.resumeAllDownload]: () => 0,
-  [IPC.pauseDownload]: noop,
-  [IPC.resumeDownload]: noop,
-  [IPC.retryDownload]: noop,
+  [IPC.clearPending]: () => queue?.clearPending() ?? 0,
+  [IPC.pauseAllDownload]: () => queue?.pauseAll() ?? 0,
+  [IPC.resumeAllDownload]: () => queue?.resumeAll() ?? 0,
+  [IPC.pauseDownload]: ((id: string) => {
+    queue?.pause(id)
+    return null
+  }) as Handler,
+  [IPC.resumeDownload]: ((id: string) => {
+    queue?.resume(id)
+    return null
+  }) as Handler,
+  [IPC.retryDownload]: ((id: string) => {
+    queue?.retry(id)
+    return null
+  }) as Handler,
   [IPC.revealDownload]: () => false,
   [IPC.openDownloadsFolder]: noop,
   [IPC.videoPickFolder]: noop,
@@ -442,6 +483,8 @@ export async function installWebBackend(platform: 'android' | 'web'): Promise<vo
     }
   }
   void startPhoneLibrary()
+  void startDownloads()
+  void startBackups()
 }
 
 /** Connects the phone's music: scan on launch when allowed, ask once on the very first start, follow changes. */

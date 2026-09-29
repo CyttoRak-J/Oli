@@ -94,7 +94,7 @@ export function Downloads(): React.JSX.Element {
   }
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="mx-auto max-w-3xl p-4 sm:p-6">
       <h1 className="mb-4 flex items-center gap-2 text-2xl font-bold text-ink-0">
         <DownloadIcon size={22} /> Downloads
       </h1>
@@ -141,7 +141,7 @@ export function Downloads(): React.JSX.Element {
         />
       ) : (
         <div className="flex flex-col gap-2">
-          <div className="flex justify-end gap-2 pb-1">
+          <div className="flex flex-wrap justify-end gap-2 pb-1">
             {pendingCount > 0 && (
               <button
                 className="flex items-center gap-1.5 rounded-lg border border-surface-4 bg-surface-2 px-3 py-1.5 text-[12px] text-ink-2 hover:border-red-400/60 hover:text-red-300"
@@ -273,11 +273,11 @@ function DownloadRow({
 
   return (
     <div data-download-id={item.id} className="rounded-xl border border-edge bg-surface-1 p-3">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-ink-3">
           <DownloadIcon size={16} />
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-40">
           <div className="truncate text-[13px] font-medium text-ink-0">{item.title}</div>
           <div className="flex items-center gap-2 text-[11.5px] text-ink-3">
             <StateBadge state={item.state} />
@@ -330,7 +330,7 @@ function DownloadRow({
             <Trash2 size={14} />
           </IconButton>
         </div>
-        <div className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] tabular-nums text-ink-3">
+        <div className="order-last flex w-full flex-wrap items-center gap-x-1.5 text-[11.5px] tabular-nums text-ink-3 sm:order-none sm:w-auto sm:flex-nowrap sm:whitespace-nowrap">
           {item.totalBytes != null && item.totalBytes > 0 ? (
             <>
               <span>{Math.round(item.progress * 100)}%</span>

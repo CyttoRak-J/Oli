@@ -151,7 +151,13 @@ public class OliDownloadPlugin extends Plugin {
   @PluginMethod
   public void cancel(PluginCall call) {
     String id = call.getString("id");
+    String rel = call.getString("relPath");
     if (id != null) OliDownloadService.engine().cancel(id);
+    // a paused / failed download has no running task: remove its partial file here
+    if (rel != null && !rel.contains("..")) {
+      //noinspection ResultOfMethodCallIgnored
+      new File(root(), rel + ".part").delete();
+    }
     call.resolve();
   }
 
@@ -163,5 +169,49 @@ public class OliDownloadPlugin extends Plugin {
     JSObject o = new JSObject();
     o.put("ids", ids);
     call.resolve(o);
+  }
+
+  /**
+   * {path, tags} -> {written, note}. Writes tags into a FLAC / MP3 file that lives in the app's own folder (the songs
+   * downloaded by Oli). Files anywhere else are refused: the page must not be able to rewrite arbitrary files.
+   */
+  @PluginMethod
+  public void writeTags(PluginCall call) {
+    String path = call.getString("path");
+    JSObject tags = call.getObject("tags");
+    JSObject out = new JSObject();
+    if (path == null || tags == null) {
+      call.reject("path and tags are required");
+      return;
+    }
+    try {
+      File f = new File(path.startsWith("file://") ? android.net.Uri.parse(path).getPath() : path);
+      String canonical = f.getCanonicalPath();
+      String rootPath = root().getCanonicalPath() + File.separator;
+      if (!canonical.startsWith(rootPath)) {
+        out.put("written", false);
+        out.put("note", "this file is not in Oli's own folder");
+        call.resolve(out);
+        return;
+      }
+      String name = f.getName().toLowerCase(java.util.Locale.ROOT);
+      TagFields t = tagsOf(tags);
+      boolean ok;
+      if (name.endsWith(".flac")) ok = FlacTagWriter.write(f, t);
+      else if (name.endsWith(".mp3")) ok = Id3TagWriter.write(f, t);
+      else {
+        out.put("written", false);
+        out.put("note", "tags can be written to FLAC and MP3 files only");
+        call.resolve(out);
+        return;
+      }
+      out.put("written", ok);
+      out.put("note", ok ? "" : "file format not recognised");
+      call.resolve(out);
+    } catch (Exception e) {
+      out.put("written", false);
+      out.put("note", String.valueOf(e.getMessage()));
+      call.resolve(out);
+    }
   }
 }

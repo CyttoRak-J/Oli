@@ -18,10 +18,15 @@ const server = http.createServer((req, res) => {
   let file
   if (url.startsWith('/file/')) {
     file = url.slice('/file/'.length).replace(/\//g, '\\')
-    if (!file.toLowerCase().startsWith(FLAC_ROOT.toLowerCase())) {
+    const downloads = path.join(require('os').tmpdir(), 'oli-harness-files', path.sep).toLowerCase()
+    if (!file.toLowerCase().startsWith(FLAC_ROOT.toLowerCase()) && !path.normalize(file).toLowerCase().startsWith(downloads)) {
       res.writeHead(403).end()
       return
     }
+  } else if (url === '/harness/cover.jpg') {
+    // a tiny JPEG for the cover of the harness download item
+    res.writeHead(200, { 'Content-Type': 'image/jpeg' }).end(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 64, 0, 64, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]), Buffer.alloc(2000, 7), Buffer.from([0xff, 0xd9])]))
+    return
   } else if (url.startsWith('/_capacitor_file_/')) {
     // what Capacitor's convertFileSrc() produces on the phone: only the harness cover folder is served
     file = path.normalize(url.slice('/_capacitor_file_/'.length))

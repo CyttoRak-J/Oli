@@ -304,6 +304,18 @@ export class PhoneLibrary {
     void this.scan()
   }
 
+  /** Reads the real format of one file (a fresh download) into its song row. */
+  async describeFile(songId: string, uri: string): Promise<void> {
+    try {
+      const res = (await this.opts.plugin.probeFiles({ uris: [uri] })).results[0]
+      if (!res) return
+      this.opts.store.patchSongs([{ id: songId, patch: probeToPatch(res, {}) }])
+      this.opts.store.finish(PHONE_LIBRARY_ID)
+    } catch {
+      // the song plays anyway; only the badge lacks details
+    }
+  }
+
   /** Resolves when no scan is running or waiting (a scan asked for during a scan runs right after it). */
   async whenIdle(): Promise<void> {
     while (this.running) await this.running.catch(() => undefined)
