@@ -295,6 +295,8 @@ export interface AppSettings {
   volume: number
   playbackSpeed: number
   preservePitch: boolean
+  /** Android only: ask the phone for bit-perfect output on a USB DAC (Android 14+). */
+  bitPerfectOutput: boolean
   shuffle: boolean
   repeat: RepeatMode
   resumeOnLaunch: boolean

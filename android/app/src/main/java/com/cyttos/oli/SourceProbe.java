@@ -20,6 +20,14 @@ final class SourceProbe {
   int bitDepth;
   /** "flac", "wav" or "" when unknown. */
   String container = "";
+  /** MIME type reported by MediaExtractor for other formats ("" when unknown). */
+  String mime = "";
+
+  /** True for formats that are lossy by nature (they never carry more than 16 useful bits). */
+  boolean isLossy() {
+    return mime.startsWith("audio/mpeg") || mime.startsWith("audio/mp4a") || mime.startsWith("audio/opus")
+        || mime.startsWith("audio/vorbis") || mime.startsWith("audio/3gpp") || mime.startsWith("audio/amr");
+  }
 
   static SourceProbe probe(Context ctx, Uri uri, int bitDepthHint) {
     SourceProbe p = new SourceProbe();
@@ -110,6 +118,7 @@ final class SourceProbe {
         MediaFormat f = mx.getTrackFormat(i);
         String mime = f.getString(MediaFormat.KEY_MIME);
         if (mime != null && mime.startsWith("audio/")) {
+          p.mime = mime;
           if (f.containsKey(MediaFormat.KEY_SAMPLE_RATE)) p.sampleRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE);
           if (f.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) p.channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
           break;

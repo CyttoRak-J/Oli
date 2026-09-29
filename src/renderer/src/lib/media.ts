@@ -1,5 +1,6 @@
 import { getMediaBase } from './ipc'
 import { deviceFileUrl, shellPlatform } from './platform'
+import { getNativePlugin } from '../platform/nativeAudio'
 
 let base = ''
 
@@ -18,8 +19,8 @@ export async function initMedia(): Promise<void> {
  * after pause) work; the old custom protocol is only a fallback.
  */
 export function localMediaUrl(filePath: string): string {
-  // Android: files live in the app's storage and are served by the web view itself.
-  if (shellPlatform() !== 'desktop') return deviceFileUrl(filePath)
+  // Android: the native player opens the file itself; without it (a browser test) the web view serves the file.
+  if (shellPlatform() !== 'desktop') return getNativePlugin() ? filePath : deviceFileUrl(filePath)
   return base
     ? `${base}${encodeURIComponent(filePath)}`
     : `cyttos-local://file/${encodeURIComponent(filePath)}`

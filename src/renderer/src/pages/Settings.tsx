@@ -38,6 +38,8 @@ import { IPC } from '@shared/ipc'
 import { cn } from '../components/cn'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { usePlayer } from '../store/player'
+import { useNativeOutput } from '../lib/useNativeOutput'
+import { outputRows } from '../lib/outputText'
 
 export function Settings(): React.JSX.Element {
   const store = useSettings()
@@ -148,6 +150,8 @@ export function Settings(): React.JSX.Element {
             />
           </Row>
         </Section>
+
+        <NativeAudioSection bitPerfect={s.bitPerfectOutput} onBitPerfect={(v) => set({ bitPerfectOutput: v })} />
 
         <Section title="Behavior">
           <ToggleRow label="Resume playback on launch" checked={s.resumeOnLaunch} onChange={(v) => set({ resumeOnLaunch: v })} />
@@ -453,6 +457,40 @@ function LibrarySection(): React.JSX.Element {
         </div>
       </Row>
     </>
+  )
+}
+
+/** Android only: what the native player really sends to the hardware, and the bit-perfect switch. */
+function NativeAudioSection({
+  bitPerfect,
+  onBitPerfect
+}: {
+  bitPerfect: boolean
+  onBitPerfect: (v: boolean) => void
+}): React.JSX.Element | null {
+  const { info, refresh, native } = useNativeOutput()
+  if (!native) return null
+  return (
+    <Section title="Audio output">
+      <ToggleRow label="Bit-perfect output (USB DAC, Android 14+)" checked={bitPerfect} onChange={onBitPerfect} />
+      <dl className="flex flex-col gap-1.5 text-[12.5px]">
+        {outputRows(info).map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-4">
+            <dt className="shrink-0 text-ink-2">{label}</dt>
+            <dd className="text-right text-ink-0">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-[11.5px] text-ink-3">
+        Play a song, then refresh. The lines above come from Android itself, not from the file&apos;s tags.
+      </p>
+      <button
+        className="w-fit rounded-lg border border-surface-4 bg-surface-2 px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-accent"
+        onClick={refresh}
+      >
+        Refresh
+      </button>
+    </Section>
   )
 }
 

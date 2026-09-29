@@ -216,7 +216,7 @@ function MainShell(): React.JSX.Element {
   const audioSettings = useSettings((s) => s.settings)
   useEffect(() => {
     if (audioSettings) applyAudioSettings(audioSettings)
-  }, [audioSettings?.playbackSpeed, audioSettings?.preservePitch, audioSettings?.replayGainMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioSettings?.playbackSpeed, audioSettings?.preservePitch, audioSettings?.replayGainMode, audioSettings?.bitPerfectOutput]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useGlobalShortcuts(() => setShortcutsOpen(true))
   const mobile = isMobileShell()

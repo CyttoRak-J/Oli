@@ -2,6 +2,10 @@ import { Pause, Play, SkipBack, SkipForward } from 'lucide-react'
 import { Artwork } from './Artwork'
 import { usePlayer } from '../store/player'
 import { usePanels } from '../store/panels'
+import { audioQuality } from '../lib/format'
+import { useNativeOutput } from '../lib/useNativeOutput'
+import { describeOutput } from '../lib/outputText'
+import { cn } from './cn'
 
 /** Compact player for the phone layout: cover, title, previous / play / next, and a thin progress line. */
 export function MobilePlayerBar(): React.JSX.Element {
@@ -13,6 +17,9 @@ export function MobilePlayerBar(): React.JSX.Element {
   const next = usePlayer((s) => s.next)
   const previous = usePlayer((s) => s.previous)
   const togglePanel = usePanels((s) => s.toggle)
+  const { info } = useNativeOutput()
+  const quality = current ? audioQuality(current) : null
+  const out = describeOutput(info)
   const busy = status === 'playing' || status === 'loading'
   const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0
 
@@ -21,7 +28,7 @@ export function MobilePlayerBar(): React.JSX.Element {
       <div className="absolute inset-x-0 top-0 h-0.5 bg-surface-3">
         <div className="h-full bg-accent" style={{ width: `${progress}%` }} />
       </div>
-      <div className="flex h-14 items-center gap-3 px-3">
+      <div className="flex min-h-14 items-center gap-3 px-3 py-1">
         <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => togglePanel('nowplaying')} aria-label="Now playing">
           <Artwork
             hasEmbedded={Boolean(current?.hasEmbeddedArtwork)}
@@ -32,6 +39,20 @@ export function MobilePlayerBar(): React.JSX.Element {
           <span className="min-w-0">
             <span className="block truncate text-[13px] font-semibold text-ink-0">{current?.title ?? 'Nothing playing'}</span>
             <span className="block truncate text-[11.5px] text-ink-2">{current?.artist ?? 'Pick a track to begin'}</span>
+            {quality && (
+              <span
+                className={cn('block truncate text-[9.5px] font-semibold uppercase tracking-wide', quality.hires ? 'text-accent' : 'text-ink-3')}
+              >
+                {quality.hires ? 'Hi-Res ' : ''}
+                {quality.label}
+                {out.text && (
+                  <span className={cn('normal-case', out.kind === 'converted' || out.kind === 'lossy' ? 'text-amber-400' : '')}>
+                    {' '}
+                    {out.text}
+                  </span>
+                )}
+              </span>
+            )}
           </span>
         </button>
         <button className="p-2 text-ink-2" onClick={previous} aria-label="Previous">

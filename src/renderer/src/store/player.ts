@@ -18,11 +18,12 @@ import {
 } from '../lib/ipc'
 import { clamp } from '../lib/format'
 import { initMedia, localMediaUrl } from '../lib/media'
+import { getNativeAudio, type AudioLike } from '../platform/nativeAudio'
 
 export type PlayerStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'ended'
 export type RepeatMode = 'off' | 'queue' | 'one'
 
-let audio: HTMLAudioElement | null = null
+let audio: AudioLike | null = null
 
 /** Renderer-side debug log (forwarded to the app log via console-message). */
 const dbg = (...args: unknown[]): void => {
@@ -33,7 +34,7 @@ const dbg = (...args: unknown[]): void => {
   }
 }
 
-const srcHost = (el: HTMLAudioElement): string => {
+const srcHost = (el: AudioLike): string => {
   try {
     const u = new URL(el.src)
     return u.hostname.slice(0, 28) || '(none)'
@@ -42,9 +43,10 @@ const srcHost = (el: HTMLAudioElement): string => {
   }
 }
 
-function getAudio(): HTMLAudioElement {
+function getAudio(): AudioLike {
   if (!audio) {
-    audio = new Audio()
+    // Android: the native Media3 player behind an object that looks like an audio element (background play, hi-res).
+    audio = (typeof __OLI_WEB__ !== 'undefined' && __OLI_WEB__ ? getNativeAudio() : null) ?? new Audio()
     audio.preload = 'auto'
   }
   return audio
@@ -132,7 +134,7 @@ function effectiveVolume(volume: number, track: Track | null): number {
   return clamp(volume * factor, 0, 1)
 }
 
-function applyRate(el: HTMLAudioElement): void {
+function applyRate(el: AudioLike): void {
   // defaultPlaybackRate survives new sources; playbackRate resets on load.
   el.defaultPlaybackRate = audioPrefs.speed
   el.playbackRate = audioPrefs.speed
@@ -143,13 +145,13 @@ function applyRate(el: HTMLAudioElement): void {
  * Remember the current position so a reload of the SAME track (transcode,
  * fallback stream, download) continues where it was instead of restarting.
  */
-function rememberPosition(el: HTMLAudioElement): void {
+function rememberPosition(el: AudioLike): void {
   const t = el.currentTime
   if (pendingSeekPos === 0 && Number.isFinite(t) && t > 0.5) pendingSeekPos = t
 }
 
 /** Point the element at a new source (resets per-source retry bookkeeping). */
-function switchSrc(el: HTMLAudioElement, url: string): void {
+function switchSrc(el: AudioLike, url: string): void {
   playedOk = false
   srcRetries = 0
   el.src = url
@@ -294,6 +296,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (upcoming.length > 0) prefetchYouTubeStreams(upcoming, true)
     }
     el.volume = effectiveVolume(get().volume, track)
+    // Native player: labels for the notification / lock screen.
+    el.setMetadata?.({
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      artworkUri: track.artworkUrl && /^https?:/.test(track.artworkUrl) ? track.artworkUrl : '',
+      bitDepth: track.bitDepth ?? undefined
+    })
     // Online tracks resolve their stream at play time (see freshResolveOnline).
     if (track.id.startsWith('youtube:') && !track.path) {
       freshResolveOnline(track)
@@ -784,6 +794,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (listenersAttached) return
       listenersAttached = true
 
+      // Notification / lock screen / headset asked for another song (the queue lives here, not in the native player).
+      el.addEventListener('nativecommand', (e) => {
+        const cmd = (e as CustomEvent<string>).detail
+        if (cmd === 'next') get().next()
+        else if (cmd === 'previous') get().previous()
+      })
       el.addEventListener('timeupdate', () => {
         const s = get()
         if (s.status === 'playing') {
@@ -1264,6 +1280,7 @@ export function applyAudioSettings(s: {
   playbackSpeed?: number
   preservePitch?: boolean
   replayGainMode?: string
+  bitPerfectOutput?: boolean
 }): void {
   const speed = Number(s.playbackSpeed)
   audioPrefs.speed = Number.isFinite(speed) && speed >= 0.25 && speed <= 4 ? speed : 1
@@ -1272,6 +1289,7 @@ export function applyAudioSettings(s: {
     s.replayGainMode === 'track' || s.replayGainMode === 'album' ? s.replayGainMode : 'off'
   const el = getAudio()
   applyRate(el)
+  void el.setBitPerfect?.(s.bitPerfectOutput === true)?.catch(() => undefined)
   const st = usePlayer.getState()
   el.volume = effectiveVolume(st.volume, st.current)
 }

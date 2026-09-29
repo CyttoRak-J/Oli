@@ -293,7 +293,8 @@ final class OliAudioEngine {
     player.setWakeMode(local ? C.WAKE_MODE_LOCAL : C.WAKE_MODE_NETWORK);
 
     probe = SourceProbe.probe(ctx, uri, bitDepthHint);
-    allowFloat = probe.bitDepth == 0 || probe.bitDepth > 16;
+    // Float only where it can matter: hi-res (or unknown) sources. Lossy and 16-bit files stay 16-bit.
+    allowFloat = !probe.isLossy() && (probe.bitDepth == 0 || probe.bitDepth > 16);
     decoderName = "";
     inputMime = "";
     trackReady = false;
@@ -593,7 +594,7 @@ final class OliAudioEngine {
 
     JSObject src = new JSObject();
     src.put("container", probe.container);
-    src.put("mime", inputMime);
+    src.put("mime", !inputMime.isEmpty() && !"null".equals(inputMime) ? inputMime : probe.mime);
     src.put("sampleRate", probe.sampleRate > 0 ? probe.sampleRate : inputRate);
     src.put("channels", probe.channels > 0 ? probe.channels : inputChannels);
     src.put("bitDepth", probe.bitDepth);

@@ -112,6 +112,7 @@ export const DEFAULT_SETTINGS = {
   volume: 0.8,
   playbackSpeed: 1,
   preservePitch: true,
+  bitPerfectOutput: false,
   shuffle: false,
   repeat: 'off',
   resumeOnLaunch: true,
