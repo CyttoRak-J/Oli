@@ -8,6 +8,13 @@
 
 `SHA256SUMS.txt` lists the checksum of every file.
 
+## What is new in 1.1.1
+
+- **Bigger YouTube playlists and Mixes**: a playlist can list and download up to 2,000 songs (was 200) and a Mix up to 500 (was 100; a Mix ends near 380 anyway).
+- **Settings > Downloads**: "Songs prepared ahead" now goes up to 10 (was 5) and "Simultaneous YouTube downloads" up to 6 (was 3). More at once is faster but can trigger YouTube's bot check: lower it if downloads start failing.
+- **Your queue comes back after a restart, also a YouTube queue**: close Oli with hundreds of YouTube songs queued and open it later: the queue is there and the song you were on resumes at the same place (only that song is looked up again). Before, only library songs were resumed.
+- **Faster start of the next YouTube songs**: the next three songs of the queue are prepared while one plays (was two).
+
 ## First start
 
 These builds are **not code-signed**, so your system shows a warning the first time:
@@ -32,4 +39,4 @@ formats (Opus, WavPack, APE) for playback, need `ffmpeg` on your PC.
 ## Known limits
 
 - macOS builds are new and have not been run on a real Mac by the author. Please open an issue if something is wrong.
-- There is no Android version yet.
+- The Android app is separate: pre-releases named `android-v*` on this page (alpha, tested on one phone so far).

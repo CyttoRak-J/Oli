@@ -39,7 +39,7 @@ first** for what was changed recently, what is verified, and what is still open.
   updates it. Use the **default client** (android_vr URLs are refused for big ranges). Resolved stream URLs are
   cached under key `ytstream2:` (bump it if the engine changes) and prefetched; prefetch yields to clicks.
 - **YouTube Mix (`list=RD...`)** only opens through the *watch* URL, never `/playlist?list=RD...`
-  (`main/util/playlistUrl.ts`). Mixes are capped at 100 entries, playlists at 200.
+  (`main/util/playlistUrl.ts`). Mixes are capped at 500 entries, playlists at 2,000 (`MIX_LIMIT`, `PLAYLIST_LIMIT`; a Mix ends near 380 songs and listing 300 takes about 14 s).
 - **Kill process trees** (`killProcessTree` in provider.ts): yt-dlp.exe starts a helper, plain `child.kill()`
   leaves the download running.
 - Windows quirks: paths over 240 chars are copied to a short temp path (`util/longPath.ts`); M4A files Chromium

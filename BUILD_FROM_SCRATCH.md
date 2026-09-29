@@ -1,7 +1,7 @@
 # BUILD FROM SCRATCH: a desktop music player (reference app "Oli")
 
 **Audience:** an AI coding agent that has never seen this project and must build the whole app, start to finish.
-**Reference app:** Oli 1.1.0 (measurements below were made on 1.0.2 to 1.1.0), an Electron + React + TypeScript desktop music player and library manager for Windows and macOS, plus an Android app (Capacitor + native Java plugins, version 0.7.0, section 20),
+**Reference app:** Oli 1.1.1 (measurements below were made on 1.0.2 to 1.1.1), an Electron + React + TypeScript desktop music player and library manager for Windows and macOS, plus an Android app (Capacitor + native Java plugins, version 0.7.0, section 20),
 with YouTube search/stream/download, Internet Archive lossless downloads, playlists, lyrics, a mini player and a
 floating bubble player.
 **How this file is built:** long code blocks marked `(verbatim)` are copied from the working reference source and are
@@ -97,7 +97,7 @@ Record the answers in a `PROJECT_DECISIONS.md` file at the project root so later
 - Stream YouTube audio through yt-dlp resolved URLs; prefetch; disk cache of resolved URLs.
 - Paste a YouTube video / playlist / Mix link (or a Spotify playlist): list entries with checkboxes, play or download
   as tagged audio or as video.
-- Download queue (3 at once; YouTube limited to 1-3), pause/resume/retry/cancel/remove, progress/speed/ETA.
+- Download queue (3 at once; YouTube limited to 1-6), pause/resume/retry/cancel/remove, progress/speed/ETA.
 - Downloaded songs are tagged (cover + title/artist/album/genre/composer) from catalog lookups (Spotify, iTunes, Deezer,
   JioSaavn, MusicBrainz, optional AcoustID fingerprint).
 - **Internet Archive** page: keyless search, format chips (24-bit FLAC, FLAC, WAV, ALAC, AIFF, MP3...), track checklist,
@@ -207,7 +207,7 @@ Line endings: **LF everywhere**. Set `git config core.autocrlf false`.
 {
   "name": "oli",
   "productName": "Oli",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A premium desktop music player and local library manager for Windows and macOS.",
   "main": "./out/main/index.js",
   "author": {
@@ -786,6 +786,13 @@ jobs:
 
 `SHA256SUMS.txt` lists the checksum of every file.
 
+## What is new in 1.1.1
+
+- **Bigger YouTube playlists and Mixes**: a playlist can list and download up to 2,000 songs (was 200) and a Mix up to 500 (was 100; a Mix ends near 380 anyway).
+- **Settings > Downloads**: "Songs prepared ahead" now goes up to 10 (was 5) and "Simultaneous YouTube downloads" up to 6 (was 3). More at once is faster but can trigger YouTube's bot check: lower it if downloads start failing.
+- **Your queue comes back after a restart, also a YouTube queue**: close Oli with hundreds of YouTube songs queued and open it later: the queue is there and the song you were on resumes at the same place (only that song is looked up again). Before, only library songs were resumed.
+- **Faster start of the next YouTube songs**: the next three songs of the queue are prepared while one plays (was two).
+
 ## First start
 
 These builds are **not code-signed**, so your system shows a warning the first time:
@@ -810,7 +817,7 @@ formats (Opus, WavPack, APE) for playback, need `ffmpeg` on your PC.
 ## Known limits
 
 - macOS builds are new and have not been run on a real Mac by the author. Please open an issue if something is wrong.
-- There is no Android version yet.
+- The Android app is separate: pre-releases named `android-v*` on this page (alpha, tested on one phone so far).
 ```
 
 `scripts/adhoc-sign.cjs` (verbatim; electron-builder `afterPack` hook, referenced as `afterPack: scripts/adhoc-sign.cjs` in `electron-builder.yml`). Without any signature,
@@ -1583,9 +1590,9 @@ export function playlistTarget(raw: string): PlaylistTarget | null {
   }
 }
 
-/** Songs to list for a playlist: a Mix never ends, so it is cut short. */
-export const PLAYLIST_LIMIT = 200
-export const MIX_LIMIT = 100
+/** Songs to list for a playlist: a Mix never ends, so it is cut short (listing 300 Mix songs takes about 14 s, 500 about 15 s). */
+export const PLAYLIST_LIMIT = 2000
+export const MIX_LIMIT = 500
 ```
 
 ### 6.6 Settings (`services/settingsStore.ts`, `shared/constants.ts`)
@@ -1602,8 +1609,8 @@ A corrupt stored value logs a warning and falls back to the default. The exact d
 - Provider keys (`spotifyClientId`, `spotifyClientSecret`, `youtubeApiKey`, `acoustidApiKey`) are user-typed and stored in
   the settings table; never hard-code keys.
 - `ytdlpAutoUpdate` (default **true**): install a missing, broken or newer yt-dlp automatically (section 10.3). Off = the banner offers a button.
-- `songsAhead` (1-5, default 3) = how many queued downloads get their catalog metadata prepared ahead of time.
-  `ytConcurrency` (1-3, default 1); more than 1 risks YouTube bot checks.
+- `songsAhead` (1-10, default 3) = how many queued downloads get their catalog metadata prepared ahead of time.
+  `ytConcurrency` (1-6, default 1); more than 1 risks YouTube bot checks.
 
 ---
 
@@ -1614,7 +1621,7 @@ A corrupt stored value logs a warning and falls back to the default. The exact d
 // src/shared/constants.ts
 export const APP_NAME = 'Oli'
 export const APP_NAME_COMPACT = 'Oli'
-export const APP_VERSION = '1.1.0'
+export const APP_VERSION = '1.1.1'
 export const APP_ID = 'com.cyttos.oli'
 
 export const MAIN_WINDOW = 'main'
@@ -2145,9 +2152,9 @@ export interface AppSettings {
   acoustidApiKey: string
   /** Install a missing or newer yt-dlp (YouTube engine) automatically. */
   ytdlpAutoUpdate: boolean
-  /** How many queued songs get their metadata prepared ahead of download time (1-5). */
+  /** How many queued songs get their metadata prepared ahead of download time (1-10). */
   songsAhead: number
-  /** How many YouTube downloads may run at once (1-3; >1 risks YouTube bot checks). */
+  /** How many YouTube downloads may run at once (1-6; >1 risks YouTube bot checks). */
   ytConcurrency: number
   lastPage: string
   lastSongId: ID | null
@@ -3926,7 +3933,7 @@ restore the last page (`lastPage` setting; the overlay panels `/queue /history /
 **Settings sections:** Library (folder list with track counts, add/remove, rescan, scan state), Appearance (theme, accent colour, reduce motion), Audio (ReplayGain
 off/track/album, playback speed, preserve pitch, shuffle default, repeat default), Behavior (resume on launch, scan on launch, watch folders, minimize/close to tray,
 tray icon, media keys, shortcuts button, taskbar progress, notifications, online lyrics, mini player on top / in taskbar), Provider keys (Spotify id/secret, YouTube key,
-AcoustID key, provider status), Downloads (songs prepared ahead 1-5, simultaneous YouTube downloads 1-3), YouTube engine (yt-dlp version and source, Check for update, Install/Update now, "update automatically" toggle), Backup & restore
+AcoustID key, provider status), Downloads (songs prepared ahead 1-10, simultaneous YouTube downloads 1-6), YouTube engine (yt-dlp version and source, Check for update, Install/Update now, "update automatically" toggle), Backup & restore
 (create / list / restore / export / import), About & updates (version, runtime versions, check for updates).
 
 **Keyboard shortcuts (`useGlobalShortcuts.ts`):** `?` shortcuts panel; `Space` play/pause; `Left/Right` seek -/+5 s; `Shift+Left/Right` previous/next track; `Up/Down` volume;
@@ -3960,7 +3967,7 @@ previous, seek, setVolume, toggleMute, toggleShuffle, cycleRepeat, removeFromQue
    are resolved just before playing while the next ones are prefetched. A seek on an online stream can error/re-buffer; the clicked position is restored on the next source.
 7. ReplayGain: attenuation only (element volume max 1): `factor = min(1, 10^(dB/20))`. Playback speed and `preservesPitch` are applied to every new source (`defaultPlaybackRate` survives loads).
 8. Every state change is reported to main (`playback:state`) so tray, taskbar, mini and bubble stay in sync; history and play counts are recorded by main on the first report of a song id.
-9. Persist volume, queue (with `track_json` for online tracks), last song id and position (`lastSongId`, `lastPositionSeconds`); `resumePlayback()` restores them after `hydrate()`.
+9. Persist volume, queue (with `track_json` for online tracks), last song id and position (`lastSongId`, `lastPositionSeconds`); `resumePlayback()` restores them after `hydrate()`: the last song comes from the library database, else from the restored queue (a YouTube song is not in the database), and the saved position is applied once the length is known (a YouTube stream needs seconds to resolve).
 10. Radio mode: when the queue runs out, append similar tracks from `library:similar-tracks`.
 11. **Hi-res reality:** FLAC decodes losslessly but the output runs at the Windows device rate; show the honest `-> 48 kHz out` note; never claim bit-perfect.
 12. **"Shuffle all" must start at index 0 of the shuffled queue.** A random start index inside an already shuffled list made playback skip every track before it when shuffle mode and repeat were off (only the rest of the queue played). Use a Fisher-Yates helper (`lib/shuffle.ts`, input not mutated, injectable rng) and `playTracks(shuffled(list), 0, ...)`. Clicking a row of a list still queues from that row onward (earlier rows are not queued); that is by design.
@@ -4252,7 +4259,7 @@ UI conventions: dark graphite surfaces, cover art and the accent colour do the t
 
 ## 13. Rules learned the hard way (do not undo)
 - Never change `hash64` (section 6.4). Never use `protocol.handle` for audio (8.4).
-- yt-dlp: bundled, current, default client, kill whole process trees, stream cache key `ytstream2:` (10.3). Mix links only through the watch URL. Mixes capped at 100, playlists at 200.
+- yt-dlp: bundled, current, default client, kill whole process trees, stream cache key `ytstream2:` (10.3). Mix links only through the watch URL. Mixes capped at 500, playlists at 200.
 - Windows paths of 240+ characters are copied to a short temp path; M4A that Chromium rejects is remuxed; Opus and similar are transcoded to MP3 (needs ffmpeg).
 - Hi-res badge is honest about the output rate; there is no bit-perfect mode in Electron (it would need a native backend such as mpv with WASAPI exclusive).
 - Migration 1 must match the real schema; migration 9 repairs older inaccurate schemas.
@@ -4369,7 +4376,7 @@ list of what is not verified.
 
 Do this only after asking the user for the repository (`owner/repo`) and confirming they want a public release (section 1).
 1. **Look at the remote first** (`git ls-remote`, or a scratch clone). An existing repository may hold a different code lineage, README, docs site, icons and tags. Never overwrite it blindly:
-   keep its history, keep the user's own icons/README/docs/LICENSE, and choose a tag that does not exist yet (the reference had `v1.0.1` and `v1.0.2` already, so the release is `v1.1.0`).
+   keep its history, keep the user's own icons/README/docs/LICENSE, and choose a tag that does not exist yet (the reference had `v1.0.1` and `v1.0.2` already, so the release was `v1.1.0`; the first fixes after it are `v1.1.1`).
 2. **Put the project on top of the remote history** without force: `git fetch origin`, then create one commit whose tree is your working tree and whose parent is `origin/main`
    (`git commit-tree HEAD^{tree} -p origin/main -m "..."`), point local `main` at it, keep your old local branch as a backup, and `git push origin main` (a normal fast-forward push).
    Pushing anything under `.github/workflows/` needs a Git login that has the `workflow` scope; Git Credential Manager's browser sign-in normally grants it.
@@ -4444,7 +4451,7 @@ The PC app has "Add folders"; the phone has **Settings > Library > Choose folder
 ### 20.5 YouTube: `OliYouTube` (phase 3)
 - **Engine:** `io.github.junkfood02.youtubedl-android:library` and `:ffmpeg` 0.18.1 run yt-dlp (Python) as a process from the extracted native libraries. `android/app/build.gradle`: `packagingOptions { jniLibs { useLegacyPackaging = true } }` (required), `ndk { abiFilters "arm64-v8a", "armeabi-v7a" }` (no x86; the APK is about 104 MB). The first start unpacks Python (seconds).
 - **Java:** `OliYouTubePlugin`: `status` (starts the engine, reports the version), `updateEngine {channel}` (the library downloads the newest yt-dlp from GitHub), `search {query, count}`, `playlist {url, limit}`, `info {videoId, streams?}` — each returns yt-dlp's own JSON in `{json}` (client chain default -> `web_embedded` -> `android_vr` for streams, as on the PC; at most 3 yt-dlp processes at once; a watchdog kills a process after its time limit); only YouTube addresses and video ids of 11 characters are accepted and only options built in the plugin are used. Downloads (`enqueue {id, videoId, mode: song|video, audio, height, relBase, title, artist, album}`, `pause` = kill the process (yt-dlp continues from its `.part` file), `resume`, `cancel`, `getActive`) emit the same `dlProgress`/`dlState` events as `OliDownload`. A **song** is `-f "ba[ext=m4a]/ba"` with `--embed-metadata --embed-thumbnail --convert-thumbnails jpg` and `--parse-metadata "<value>:%(meta_title|artist|album)s"`; the value is escaped by `YtDlpOutput.metadataLiteral` (`%` doubled, `:` becomes backslash-colon, backslashes are NOT doubled, a trailing backslash is dropped — checked against yt-dlp 2026.08.19). A **video** merges into mp4 up to the chosen height. Progress comes from parsing `[download] 12.3% of ~ 3.45MiB at 1.2MiB/s ETA 00:02` (`YtDlpOutput.parse`).
-- **JavaScript:** `platform/youtubeCore.ts` (pure, tested on real yt-dlp output in `test/fixtures/yt`: `parseSearch`, `parsePlaylist` (limits 200, Mix 100), `parseVideoMeta`, `extractStreams` (MP4/AAC audio first, then other audio, then muxed, manifests skipped, only User-Agent/Accept/Accept-Language/Referer/Origin headers survive — never cookies), `streamExpiry`, `cleanTrackTitle`, `songTagsFor` (YouTube Music tags > "Topic" channel > "Artist - Title" > channel), `videoIdFromUrl`), `platform/youtubeService.ts` (`YouTubeService`: search cache 1 h, playlist cache 10 min, stream addresses cached until 10 minutes before their expiry, identical questions share one yt-dlp run, prefetch one at a time, engine status `checking/ok/broken/failed/installing/update-available`, automatic update when `ytdlpAutoUpdate`), `webBackend.ts` (providers for `SearchService`, all YouTube channels, `enqueueDownload` (a YouTube link becomes a song download whose tags are read first via `prepare`), `enqueuePlaylist`, `enqueueEntries`, `videoDownloadSong`, `videoDownload`; a finished YouTube song becomes a song row, a video does not; the desktop's separate video window does not exist on the phone).
+- **JavaScript:** `platform/youtubeCore.ts` (pure, tested on real yt-dlp output in `test/fixtures/yt`: `parseSearch`, `parsePlaylist` (limits 2,000, Mix 500), `parseVideoMeta`, `extractStreams` (MP4/AAC audio first, then other audio, then muxed, manifests skipped, only User-Agent/Accept/Accept-Language/Referer/Origin headers survive — never cookies), `streamExpiry`, `cleanTrackTitle`, `songTagsFor` (YouTube Music tags > "Topic" channel > "Artist - Title" > channel), `videoIdFromUrl`), `platform/youtubeService.ts` (`YouTubeService`: search cache 1 h, playlist cache 10 min, stream addresses cached until 10 minutes before their expiry, identical questions share one yt-dlp run, prefetch one at a time, engine status `checking/ok/broken/failed/installing/update-available`, automatic update when `ytdlpAutoUpdate`), `webBackend.ts` (providers for `SearchService`, all YouTube channels, `enqueueDownload` (a YouTube link becomes a song download whose tags are read first via `prepare`), `enqueuePlaylist`, `enqueueEntries`, `videoDownloadSong`, `videoDownload`; a finished YouTube song becomes a song row, a video does not; the desktop's separate video window does not exist on the phone).
 - **Tests:** `test/youtubeCore.test.ts`, `test/youtubeService.test.ts`, `test/downloadQueueYoutube.test.ts`, `test/androidYtOutput.test.ts` (Java parser).
 - **Not verified:** yt-dlp actually running on a phone (Python unpack, the client chain, bot checks on the phone's network, `--embed-thumbnail` producing a cover in m4a), and how long start-up takes. YouTube may refuse requests ("Sign in to confirm you are not a bot"); the app then reports an empty answer instead of crashing.
 

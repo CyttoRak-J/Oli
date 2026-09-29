@@ -42,7 +42,7 @@ What I want next:
 
 ## State when this file was written (2026-09-30)
 
-- Desktop version 1.1.0. Windows installer and macOS disk images are built by GitHub Actions when a `v*` tag is pushed
+- Desktop version 1.1.1. Windows installer and macOS disk images are built by GitHub Actions when a `v*` tag is pushed
   (`.github/workflows/build.yml`) and published as a GitHub Release with `SHA256SUMS.txt`. The macOS build is ad-hoc signed
   (`scripts/adhoc-sign.cjs`) and has **not** been run on a real Mac.
 - **Android 0.9.0** (pre-releases `android-v0.1.0` ... `android-v0.9.0`, built by `.github/workflows/android.yml` on a tag `android-v*`; a push to

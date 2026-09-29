@@ -325,9 +325,9 @@ export interface AppSettings {
   acoustidApiKey: string
   /** Install a missing or newer yt-dlp (YouTube engine) automatically. */
   ytdlpAutoUpdate: boolean
-  /** How many queued songs get their metadata prepared ahead of download time (1-5). */
+  /** How many queued songs get their metadata prepared ahead of download time (1-10). */
   songsAhead: number
-  /** How many YouTube downloads may run at once (1-3; >1 risks YouTube bot checks). */
+  /** How many YouTube downloads may run at once (1-6; >1 risks YouTube bot checks). */
   ytConcurrency: number
   lastPage: string
   lastSongId: ID | null
