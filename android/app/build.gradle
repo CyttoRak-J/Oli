@@ -18,11 +18,21 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 5
         versionName "0.5.0"
+        // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a"
+        }
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    packagingOptions {
+        // youtubedl-android runs Python and ffmpeg from the extracted native libraries.
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
     lint {
@@ -55,6 +65,9 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-session:$media3Version"
     implementation "androidx.media3:media3-common:$media3Version"
+    // YouTube (phase 3): yt-dlp in Python plus ffmpeg, packaged for Android. Big (about 100 MB of native code).
+    implementation "io.github.junkfood02.youtubedl-android:library:$youtubedlVersion"
+    implementation "io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlVersion"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
