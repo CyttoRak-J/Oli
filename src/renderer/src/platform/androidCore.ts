@@ -19,6 +19,8 @@ import { buildCoreHandlers, type ChannelHandler } from '@main/services/coreHandl
 import { albumIdFor, artistIdFor, songIdForPath } from '@main/util/identity'
 import { IPC } from '@shared/ipc'
 import type { Track } from '@shared/types'
+import type { PhoneStore } from './phoneLibrary'
+import { createPhoneStore } from './phoneStore'
 
 // ------------------------------------------------------------------ database storage (IndexedDB)
 const IDB_NAME = 'oli'
@@ -64,6 +66,8 @@ export interface AndroidCore {
   upsertTrack(track: Track): void
   /** Called when the library changed (after adding songs). */
   onChange(listener: (channel: string, payload: unknown) => void): void
+  /** Database side of the phone-music scanner (phoneLibrary.ts). */
+  phone: PhoneStore
 }
 
 const noProviders = {
@@ -135,9 +139,12 @@ export async function initAndroidCore(): Promise<AndroidCore> {
     library.notifyChanged()
   }
 
+  const phone = createPhoneStore(db, library, flush)
+
   return {
     db,
     handlers,
+    phone,
     upsertTrack,
     onChange: (l) => {
       listeners.push(l)

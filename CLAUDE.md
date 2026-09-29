@@ -5,7 +5,7 @@ first** for what was changed recently, what is verified, and what is still open.
 
 ## Commands
 - `npm run dev` runs the app (uses the user's REAL library in `%APPDATA%\Oli`, see "Data safety").
-- `npm run typecheck`, `npm run lint`, `npm test` (vitest, 138 tests), `npm run build`. Keep all four green.
+- `npm run typecheck`, `npm run lint`, `npm test` (vitest, 151 tests), `npm run build`. Keep all four green.
 - Git repo (`core.autocrlf=false`, files are LF). GitHub: https://github.com/CyttoRak-J/Oli (branch `main`; the pre-2026-09-29
   history there is an older, different code lineage that this project was committed on top of). Pushing a `v*` tag runs
   `.github/workflows/build.yml` (Windows installer + macOS dmg/zip, then a GitHub Release with SHA256SUMS). The pre-git code is in

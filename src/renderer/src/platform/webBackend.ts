@@ -28,7 +28,9 @@ import type {
   Track,
   YtEngineStatus
 } from '@shared/types'
+import { deviceFileUrl } from '../lib/platform'
 import { initAndroidCore, trackIds, type AndroidCore } from './androidCore'
+import { getMediaPlugin, PHONE_LIBRARY_ID, PhoneLibrary } from './phoneLibrary'
 
 type Handler = (...args: never[]) => unknown
 type Listener = (...args: unknown[]) => void
@@ -70,6 +72,8 @@ function emit(channel: string, ...args: unknown[]): void {
 }
 
 let core: AndroidCore
+/** The phone's own music (null in a plain browser, where there is no native plugin). */
+let phoneLib: PhoneLibrary | null = null
 
 // ------------------------------------------------------------------ songs made from downloaded files
 function makeTrack(file: ArchiveFile, item: ArchiveItem, uri: string, size: number): Track {
@@ -332,14 +336,27 @@ const phoneHandlers: Record<string, Handler> = {
     window.open(url ?? 'https://github.com/CyttoRak-J/Oli/releases', '_blank')
     return null
   }) as Handler,
-  // library actions that need the phone scanner (not built yet)
-  [IPC.getScanState]: noop,
-  [IPC.addLibraryFolder]: noop,
-  [IPC.removeLibraryFolder]: noop,
-  [IPC.rescanLibrary]: noop,
-  [IPC.cancelScan]: noop,
+  // the phone's own music (MediaStore through the native OliMedia plugin, see phoneLibrary.ts)
+  [IPC.getScanState]: () => phoneLib?.getState() ?? null,
+  [IPC.addLibraryFolder]: (async () => {
+    if (!phoneLib || !(await phoneLib.addAndScan())) return null
+    return core.handlers[IPC.getLibrary]()
+  }) as Handler,
+  [IPC.removeLibraryFolder]: ((id: string) => {
+    if (id === PHONE_LIBRARY_ID) phoneLib?.remove()
+    return null
+  }) as Handler,
+  [IPC.rescanLibrary]: () => {
+    void phoneLib?.scan()
+    return null
+  },
+  [IPC.cancelScan]: () => {
+    phoneLib?.cancel()
+    return null
+  },
   [IPC.metaNeedsAttention]: empty,
-  [IPC.getEmbeddedArtwork]: noop,
+  [IPC.getEmbeddedArtwork]: ((songId: string) =>
+    phoneLib ? phoneLib.artworkFor(songId, (p) => deviceFileUrl(`file://${p}`)) : null) as Handler,
   [IPC.revealInExplorer]: () => false,
   [IPC.getMediaBase]: () => '',
   [IPC.probeDuration]: noop,
@@ -423,5 +440,30 @@ export async function installWebBackend(platform: 'android' | 'web'): Promise<vo
       })
       return off
     }
+  }
+  void startPhoneLibrary()
+}
+
+/** Connects the phone's music: scan on launch when allowed, ask once on the very first start, follow changes. */
+async function startPhoneLibrary(): Promise<void> {
+  const plugin = getMediaPlugin()
+  if (!plugin) return
+  phoneLib = new PhoneLibrary({ plugin, store: core.phone, emitProgress: (p) => emit(IPC.onScanProgress, p) })
+  try {
+    await plugin.addListener('mediaChanged', () => phoneLib?.onMediaChanged())
+  } catch {
+    // no change notifications: rescans happen on launch and on request
+  }
+  const settings = (await core.handlers[IPC.getSettings]()) as { scanOnLaunch?: boolean }
+  const hasLocation = (core.handlers[IPC.getLibrary]() as Array<{ id: string }>).some((f) => f.id === PHONE_LIBRARY_ID)
+  const granted = (await plugin.getPermission().catch(() => ({ granted: false }))).granted
+  if (hasLocation && granted) {
+    if (settings.scanOnLaunch !== false) void phoneLib.scan()
+    return
+  }
+  // First start: ask once (Settings > Library has the button for later).
+  if (!hasLocation && localStorage.getItem('oli.phoneMusicAsked') !== '1') {
+    localStorage.setItem('oli.phoneMusicAsked', '1')
+    await phoneLib.addAndScan()
   }
 }

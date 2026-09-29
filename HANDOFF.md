@@ -1,18 +1,23 @@
 # Handoff: state at the end of the bug-fix session (2026-09-29)
 
-## START HERE (latest handoff: end of the Android phase 1b chat, 2026-09-29)
+## START HERE (latest handoff: end of the Android phase 1c chat, 2026-09-29)
 **Where things are**
 - GitHub https://github.com/CyttoRak-J/Oli, branch `main`. Local folder `A:\oli-project-source`. Branch `android-dev` = build-only CI for the APK (no release).
-- Releases: **v1.1.0** (Windows + macOS) and Android pre-releases **android-v0.1.0 ... android-v0.3.0** (`Oli-0.3.0-android.apk`). Desktop version 1.1.0; Android versionName 0.3.0 / versionCode 3.
-- Checks: `npm run typecheck`, `npm run lint`, `npm test` (138 tests, 19 files) green. CI: `.github/workflows/build.yml` (tag `v*`) and `.github/workflows/android.yml` (tag `android-v*`, or push to `android-dev`).
-- Docs to read: `CLAUDE.md` (rules), this file, `ANDROID_PLAN.md`, `ANDROID_PHASE_1B.md` (what was built + the owner's phone checklist), `ANDROID_PHASE_1C.md` (next task), `BUILD_FROM_SCRATCH.md` (full spec, NOT yet updated for phase 1b), `CONTINUE_PROMPT.md` / `NEXT_CHAT_PROMPT.md` (paste-in prompts).
+- Releases: **v1.1.0** (Windows + macOS) and Android pre-releases **android-v0.1.0 ... android-v0.4.0** (`Oli-0.4.0-android.apk`). Desktop version 1.1.0; Android versionName 0.4.0 / versionCode 4.
+- Checks: `npm run typecheck`, `npm run lint`, `npm test` (151 tests, 20 files) green. CI: `.github/workflows/build.yml` (tag `v*`) and `.github/workflows/android.yml` (tag `android-v*`, or push to `android-dev`).
+- Docs to read: `CLAUDE.md` (rules), this file, `ANDROID_PLAN.md`, `ANDROID_PHASE_1B.md` and `ANDROID_PHASE_1C.md` (top sections: what was built + the owner's phone checklists), `ANDROID_PHASE_2.md` (next task), `BUILD_FROM_SCRATCH.md` (full spec, NOT yet updated for phases 1b/1c), `CONTINUE_PROMPT.md` / `NEXT_CHAT_PROMPT.md` (paste-in prompts).
 
 **Owner's goals and rules**
 - Android must have ALL PC features, YouTube and Internet Archive included; technology does not matter to the owner. If the phone app lags, crashes or loses background playback: rewrite natively for Android (triggers in `ANDROID_PLAN.md`), everything hosted on GitHub.
-- Order: 1b native audio (**done, unverified on a phone**), then 1c (MediaStore scanner, cover art, folder picker), 2 (downloads/tags/backup), 3 (YouTube).
+- Order: 1b native audio (**done**), 1c phone music scan (**done**) - both unverified on a phone - then 2 (downloads/tags/backup), 3 (YouTube).
 - Owner works in plain language, wants measured proof, wants unverified things stated plainly, often uses the desktop app while tests run (back up `%APPDATA%\Oli\library.sqlite`, isolated `--user-data-dir` with a pre-created folder for risky tests, never restart their app silently). The owner's songs are in `A:\Flac`.
 
-**Android phase 1b (this chat)**
+**Android phase 1c (latest chat)**
+- Built: `OliMedia` plugin (MediaStore listing, FLAC tags, cover cache, change observer), `phoneLibrary.ts` + `phoneStore.ts` (scan, diff, missing, background detail reading, covers), Settings > Library wording. Details, decisions, not-done list and the phone checklist: top of `ANDROID_PHASE_1C.md`.
+- Proof: CI compiled the Java; `test/phoneLibrary.test.ts` (real sql.js database + fake plugin; it found a real SQL placeholder bug); `scripts/android-harness/e2e-library.cjs` in the PC test window (19 checks, plus 3 for the permission-refused run) with a stand-in OliMedia listing 60 real songs of `A:\Flac`. `run-window.ps1` starts the window on a fresh profile.
+- **NOT verified (no phone):** the OliMedia plugin at runtime (MediaStore columns per Android version, permission dialog, scan speed on thousands of songs, `loadThumbnail`, ContentObserver) and the cover URLs from the cache folder.
+
+**Android phase 1b (earlier chat)**
 - Built: native Media3 player in a foreground service, `OliAudio` plugin, `NativeAudio` adapter, honest output report, bit-perfect switch, notification/lock-screen/headset/audio-focus handling. Details, design decisions and the phone checklist: `ANDROID_PHASE_1B.md` top section.
 - Proof: CI compiled and packaged the Java (branch `android-dev`, then the tag build); `scripts/android-harness` (README inside) ran the real phone build in a throwaway Electron window with Capacitor's real native bridge and a stand-in for the plugin: 20/20 checks (play hi-res, seek, pause/resume, unplug/notification mirroring, lock-screen next, auto-advance, skip a missing file, volume, Settings report). Store-on-adapter unit tests in `test/playerNative.test.ts`.
 - **NOT verified (no phone here, no Android SDK on the PC):** the Java player at runtime (decoding, float output really reaching AudioTrack, the service/notification/lock screen, audio focus, headphone-unplug, Bluetooth buttons), the report's real numbers, bit-perfect on a USB DAC.

@@ -40,6 +40,7 @@ import { ThemedSelect } from '../components/ThemedSelect'
 import { usePlayer } from '../store/player'
 import { useNativeOutput } from '../lib/useNativeOutput'
 import { outputRows } from '../lib/outputText'
+import { isMobileShell } from '../lib/platform'
 
 export function Settings(): React.JSX.Element {
   const store = useSettings()
@@ -368,17 +369,18 @@ function LibrarySection(): React.JSX.Element {
   const pct =
     scan && scan.filesFound > 0 ? Math.min(100, Math.round((scan.filesProcessed / scan.filesFound) * 100)) : 0
   const folders = foldersQuery.data
+  const phoneApp = isMobileShell()
 
   return (
     <>
-      <Row label="Music folders">
+      <Row label={phoneApp ? 'Music on this phone' : 'Music folders'}>
         <button
           className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           disabled={busy !== null}
           onClick={() => void doAdd()}
         >
           {busy === 'add' ? <Loader2 size={13} className="animate-spin" /> : <FolderPlus size={13} />}
-          Add folders
+          {phoneApp ? 'Scan phone music' : 'Add folders'}
         </button>
       </Row>
 
@@ -387,7 +389,9 @@ function LibrarySection(): React.JSX.Element {
       ) : !folders || folders.length === 0 ? (
         <div className="flex items-center gap-2 text-[12.5px] text-ink-3">
           <FolderOpen size={14} />
-          No folders added yet. Click "Add folders" and pick your music directory.
+          {phoneApp
+            ? 'Not scanned yet. Tap "Scan phone music" and allow Oli to read your music.'
+            : 'No folders added yet. Click "Add folders" and pick your music directory.'}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -422,7 +426,11 @@ function LibrarySection(): React.JSX.Element {
           <div className="flex items-center justify-between text-[11.5px] text-ink-2">
             <span className="flex items-center gap-1.5">
               <ScanLine size={12} className="animate-pulse" />
-              {scan.phase === 'discovering' ? 'Discovering files…' : 'Indexing library…'}
+              {scan.phase === 'discovering'
+                ? 'Discovering files…'
+                : phoneApp && scan.phase === 'indexing'
+                  ? 'Reading song details (sample rate, bit depth, tags)…'
+                  : 'Indexing library…'}
               {scan.filesFound > 0 && (
                 <span className="text-ink-3">
                   {scan.filesProcessed}/{scan.filesFound}
@@ -443,7 +451,14 @@ function LibrarySection(): React.JSX.Element {
         </div>
       )}
 
-      <Row label="Rescan folders">
+      {!scanning && scan?.phase === 'error' && scan.message && (
+        <div className="text-[12px] text-red-400">{scan.message}</div>
+      )}
+      {!scanning && scan?.phase === 'finished' && scan.message && phoneApp && (
+        <div className="text-[11.5px] text-ink-3">{scan.message}</div>
+      )}
+
+      <Row label={phoneApp ? 'Rescan phone music' : 'Rescan folders'}>
         <div className="flex items-center gap-2">
           <button
             className="flex items-center gap-1.5 rounded-lg border border-surface-4 px-3 py-1.5 text-[12px] text-ink-2 hover:border-accent disabled:opacity-50"

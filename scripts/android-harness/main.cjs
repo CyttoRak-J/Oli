@@ -22,6 +22,13 @@ const server = http.createServer((req, res) => {
       res.writeHead(403).end()
       return
     }
+  } else if (url.startsWith('/_capacitor_file_/')) {
+    // what Capacitor's convertFileSrc() produces on the phone: only the harness cover folder is served
+    file = path.normalize(url.slice('/_capacitor_file_/'.length))
+    if (!file.toLowerCase().startsWith(path.join(require('os').tmpdir(), 'oli-harness-art', path.sep).toLowerCase())) {
+      res.writeHead(403).end()
+      return
+    }
   } else {
     file = path.join(bundleDir, url === '/' ? 'index.html' : url)
   }
