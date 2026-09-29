@@ -1,5 +1,29 @@
 # Handoff: state at the end of the bug-fix session (2026-09-29)
 
+## START HERE (latest handoff: end of the Android phase 1a chat, 2026-09-29)
+**Where things are**
+- GitHub https://github.com/CyttoRak-J/Oli, branch `main` (this commit is on top of the older history; old tags v1.0.1/v1.0.2 kept). Local folder `A:\oli-project-source`.
+- Releases: **v1.1.0** (Windows installer + macOS dmg/zip, built by CI, hashes verified for Windows) and Android pre-releases **android-v0.1.0**, **android-v0.2.0** (`Oli-0.2.0-android.apk`, apksigner OK, checksum OK). Desktop version 1.1.0; Android versionName 0.2.0 / versionCode 2.
+- Checks: `npm run typecheck`, `npm run lint`, `npm test` (111 tests, 17 files) are green. CI: `.github/workflows/build.yml` (tag `v*`) and `.github/workflows/android.yml` (tag `android-v*`).
+- Docs to read: `CLAUDE.md` (rules), this file, `ANDROID_PLAN.md` (architecture, parity checklist, native-rewrite triggers), `ANDROID_PHASE_1B.md` (next task), `BUILD_FROM_SCRATCH.md` (full spec), `CONTINUE_PROMPT.md` / `NEXT_CHAT_PROMPT.md` (paste-in prompts).
+
+**Owner's goals and rules**
+- Android must have ALL PC features, YouTube and Internet Archive included; technology does not matter to the owner. If the phone app lags, crashes or loses background playback: rewrite natively for Android (triggers in `ANDROID_PLAN.md`), everything hosted on GitHub.
+- Next task: **Android phase 1b: native Media3 audio with real hi-res output** (details and acceptance tests in `ANDROID_PHASE_1B.md`); then 1c (MediaStore scanner), 2 (downloads/tags/backup), 3 (YouTube).
+- Owner works in plain language, wants measured proof, wants unverified things stated plainly, often uses the desktop app while tests run (back up `%APPDATA%\Oli\library.sqlite`, isolated `--user-data-dir` with a pre-created folder for risky tests, never restart their app silently).
+
+**State of Android (alpha 0.2.0)**
+- Works (tested only in a phone-size test window on the PC, never on a phone): phone layout; the shared desktop services in the web view (database in IndexedDB, settings, library screens, playlists, favorites, queue, history, search, lyrics lookup); Internet Archive search + download, downloads become songs.
+- Not built: native audio/background play (phase 1b), scanning the phone's music, YouTube, tags/cover/md5 for downloads, tag editing, backup, transcoding, real signing key (APK uses a public alpha key).
+
+**Traps to remember**
+- The browser pane cannot open local pages and Chromium blocks port 5060: test the phone build in a throwaway Electron window without the desktop preload (serve `out/renderer-android` on port 8765; see `CONTINUE_PROMPT.md`).
+- After `npm install <pkg>` check `node_modules/electron/dist` exists (new npm skips install scripts); repair with `node node_modules/electron/install.js`.
+- Phone-build-only page policy change lives in `vite.android.config.ts` (`'wasm-unsafe-eval'`); desktop `index.html` stays strict. The desktop bundle must contain no phone code or wasm (`__OLI_WEB__`, empty `webBackend` stand-in in `electron.vite.config.ts`).
+- Never change `hash64`; never bring back a custom protocol for desktop audio; never commit `bin/` (yt-dlp is fetched by `npm install`).
+- Bash/PowerShell/Write tools sometimes fail with a transient "classifier" error: retry once.
+
+
 Checks at the end of the bug-fix session: typecheck, lint and build clean; **76 tests pass** (95 after the Archive work); app relaunched with no log errors.
 
 ## What was done (by area)

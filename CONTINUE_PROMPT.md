@@ -30,7 +30,7 @@ How I want you to work:
   session can continue, and by pushing to GitHub.
 
 What I want next:
-<write the next task here, for example: "continue the Android app from ANDROID_PLAN.md, phase 1">
+<write the next task here. For Android phase 1b use the ready-made prompt in NEXT_CHAT_PROMPT.md instead of this file>
 ```
 
 ---
