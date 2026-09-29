@@ -22,6 +22,19 @@ export interface DownloadTags {
   year?: number
 }
 
+/** A YouTube song / video download (yt-dlp does the transfer; see OliYouTubePlugin). */
+export interface YouTubeJob {
+  videoId: string
+  mode: 'song' | 'video'
+  audio: string
+  height: number
+  /** Path below the app folder, without extension (yt-dlp adds it). */
+  relBase: string
+  title: string
+  artist: string
+  album: string
+}
+
 /** Everything needed to (re)start a download and to make a song out of it afterwards. */
 export interface DownloadJob {
   url: string
@@ -32,6 +45,8 @@ export interface DownloadJob {
   coverUrl?: string
   tags?: DownloadTags
   headers?: Record<string, string>
+  /** Set for YouTube downloads (then url is the watch address and relPath the base name). */
+  youtube?: YouTubeJob
   /** Opaque data for the caller (which archive item / file this is). */
   meta?: unknown
 }
@@ -39,6 +54,21 @@ export interface DownloadJob {
 export interface DownloadEnqueue {
   title: string
   job: DownloadJob
+  /**
+   * Work to finish before the transfer starts (for example reading a video's tags so they can be embedded). It may
+   * change the title, the YouTube fields and the caller's data; a failure or a 25 s wait just starts without it.
+   */
+  prepare?: () => Promise<{ title?: string; youtube?: Partial<YouTubeJob>; meta?: unknown } | null>
+}
+
+/** The YouTube half of the native side: same events as OliDownload, different start command. */
+export interface YouTubeDownloadPlugin {
+  enqueue(o: YouTubeJob & { id: string }): Promise<void>
+  pause(o: { id: string }): Promise<void>
+  resume(o: { id: string }): Promise<void>
+  cancel(o: { id: string }): Promise<void>
+  getActive(): Promise<{ ids: string[] }>
+  addListener(event: string, cb: (data: never) => void): Promise<ListenerHandle> | ListenerHandle
 }
 
 interface ListenerHandle {
@@ -101,6 +131,8 @@ interface StateEvent {
 
 export interface DownloadQueueOptions {
   plugin: OliDownloadPlugin
+  /** Absent in a build without YouTube. */
+  youtube?: YouTubeDownloadPlugin
   store: DownloadStore
   /** The list changed (send it to the Downloads screen). */
   publish: (items: DownloadItem[]) => void
@@ -128,17 +160,22 @@ export class DownloadQueue {
 
   /** Connect to the plugin and carry on with what was interrupted (queued / running downloads continue from their part files). */
   async start(): Promise<void> {
-    try {
-      await this.opts.plugin.addListener('dlProgress', (d: ProgressEvent) => this.onProgress(d))
-      await this.opts.plugin.addListener('dlState', (d: StateEvent) => void this.onState(d))
-    } catch {
-      // without events the list would not move; nothing else to do
+    for (const p of [this.opts.plugin, this.opts.youtube]) {
+      if (!p) continue
+      try {
+        await p.addListener('dlProgress', (d: ProgressEvent) => this.onProgress(d))
+        await p.addListener('dlState', (d: StateEvent) => void this.onState(d))
+      } catch {
+        // without events the list would not move; nothing else to do
+      }
     }
-    let active = new Set<string>()
-    try {
-      active = new Set((await this.opts.plugin.getActive()).ids)
-    } catch {
-      // treat as none
+    const active = new Set<string>()
+    for (const p of [this.opts.plugin, this.opts.youtube]) {
+      try {
+        if (p) for (const id of (await p.getActive()).ids) active.add(id)
+      } catch {
+        // treat as none
+      }
     }
     for (const item of this.items) {
       if ((item.state === 'queued' || item.state === 'downloading') && !active.has(item.id)) {
@@ -184,15 +221,50 @@ export class DownloadQueue {
         ...this.items
       ]
       added++
-      void this.send(id)
+      if (e.prepare) void this.prepareThenSend(id, e.prepare)
+      else void this.send(id)
     }
     this.commit()
     return added
   }
 
+  private async prepareThenSend(id: string, prepare: NonNullable<DownloadEnqueue['prepare']>): Promise<void> {
+    try {
+      const r = await Promise.race([prepare(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 25000))])
+      const job = this.jobs[id]
+      if (r && job && this.find(id)?.state === 'queued') {
+        if (r.youtube && job.youtube) job.youtube = { ...job.youtube, ...r.youtube }
+        if (r.meta !== undefined) job.meta = r.meta
+        if (r.title) this.patch(id, { title: r.title })
+        this.commit()
+      }
+    } catch {
+      // start without the extra information
+    }
+    // the user may have cancelled or paused while we waited
+    if (this.find(id)?.state === 'queued') await this.send(id)
+  }
+
+  /** Renames a download in the list (for example once a video's real title is known). */
+  updateTitle(id: string, title: string): void {
+    if (!this.find(id) || !title) return
+    this.patch(id, { title })
+    this.commit()
+  }
+
   private async send(id: string): Promise<void> {
     const job = this.jobs[id]
     if (!job) return
+    if (job.youtube) {
+      try {
+        if (!this.opts.youtube) throw new Error('YouTube downloads are not available in this build')
+        await this.opts.youtube.enqueue({ id, ...job.youtube })
+      } catch (err) {
+        this.patch(id, { state: 'failed', speed: 0, error: String((err as Error)?.message ?? err) })
+        this.commit()
+      }
+      return
+    }
     try {
       await this.opts.plugin.enqueue({
         id,
@@ -213,7 +285,7 @@ export class DownloadQueue {
   pause(id: string): void {
     const d = this.find(id)
     if (!d || (d.state !== 'queued' && d.state !== 'downloading')) return
-    void this.opts.plugin.pause({ id }).catch(() => undefined)
+    void (this.jobs[id]?.youtube ? this.opts.youtube : this.opts.plugin)?.pause({ id }).catch(() => undefined)
     // the plugin confirms with a "paused" event; a queued item that never started is paused right away
     if (d.state === 'queued') this.patch(id, { state: 'paused', speed: 0 })
     this.commit()
@@ -239,7 +311,8 @@ export class DownloadQueue {
     const d = this.find(id)
     const job = this.jobs[id]
     if (!d || !job || d.state === 'completed' || d.state === 'canceled') return
-    void this.opts.plugin.cancel({ id, relPath: job.relPath }).catch(() => undefined)
+    if (job.youtube) void this.opts.youtube?.cancel({ id }).catch(() => undefined)
+    else void this.opts.plugin.cancel({ id, relPath: job.relPath }).catch(() => undefined)
     this.patch(id, { state: 'canceled', speed: 0, etaSeconds: null })
     this.commit()
   }

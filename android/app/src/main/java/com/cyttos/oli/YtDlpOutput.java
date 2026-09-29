@@ -58,10 +58,13 @@ final class YtDlpOutput {
   }
 
   /**
-   * Text for yt-dlp's --parse-metadata "FROM:TO": FROM is an output template, so "%" is doubled and ":" escaped, or a
-   * title like "50% : Live" would be read as a field or cut in two.
+   * Text for yt-dlp's --parse-metadata "FROM:TO": FROM is an output template, so "%" is doubled, and ":" must be escaped
+   * as backslash-colon or the value would be cut in two. Backslashes are NOT doubled (yt-dlp keeps them as they are; checked
+   * against yt-dlp 2026.08.19). A trailing backslash is dropped: it would turn the separating colon into an escaped one.
    */
   static String metadataLiteral(String value) {
-    return value.replace("\\", "\\\\").replace("%", "%%").replace(":", "\\:");
+    String v = value;
+    while (v.endsWith("\\")) v = v.substring(0, v.length() - 1);
+    return v.replace("%", "%%").replace(":", "\\:");
   }
 }

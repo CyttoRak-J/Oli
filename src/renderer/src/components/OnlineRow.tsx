@@ -13,6 +13,7 @@ import { onlineToTrack } from '../lib/onlineTracks'
 import { usePlayer } from '../store/player'
 import { formatDuration } from '../lib/format'
 import { cn } from './cn'
+import { isMobileShell } from '../lib/platform'
 
 export type OnlineRowVariant = 'home' | 'search'
 
@@ -111,7 +112,7 @@ export function OnlineRow({
 
   return (
     <div
-      className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-surface-1"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg px-2 py-2 hover:bg-surface-1 sm:flex-nowrap"
       // Pointing at a result is a strong hint it will be played: start resolving now.
       onMouseEnter={() => {
         if (result.videoId && !result.localMatch) prefetchYouTubeStreams([result.videoId], true)
@@ -124,7 +125,7 @@ export function OnlineRow({
           {result.provider}
         </div>
       )}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-40 sm:basis-0">
         <button
           className="block w-full min-w-0 break-words text-left text-[13px] font-medium leading-snug text-ink-0 hover:text-accent"
           onClick={playByName}
@@ -206,14 +207,16 @@ export function OnlineRow({
             >
               <SkipForward size={13} />
             </button>
-            <button
-              title="Open video window"
-              aria-label="Open video window"
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-surface-4 bg-surface-2 text-ink-2 transition-colors hover:border-accent hover:text-ink-0"
-              onClick={() => void openVideoWindow(result.videoId!)}
-            >
-              <MonitorPlay size={13} />
-            </button>
+            {!isMobileShell() && (
+              <button
+                title="Open video window"
+                aria-label="Open video window"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-surface-4 bg-surface-2 text-ink-2 transition-colors hover:border-accent hover:text-ink-0"
+                onClick={() => void openVideoWindow(result.videoId!)}
+              >
+                <MonitorPlay size={13} />
+              </button>
+            )}
             <button
               title="Download video"
               aria-label="Download video"
@@ -246,13 +249,15 @@ export function OnlineRow({
             >
               {queuing ? 'Adding…' : 'Play next'}
             </button>
-            <button
-              className="flex items-center gap-1 rounded-md border border-surface-4 bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-2 hover:border-accent"
-              onClick={() => void openVideoWindow(result.videoId!)}
-            >
-              <MonitorPlay size={12} />
-              Video
-            </button>
+            {!isMobileShell() && (
+              <button
+                className="flex items-center gap-1 rounded-md border border-surface-4 bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-2 hover:border-accent"
+                onClick={() => void openVideoWindow(result.videoId!)}
+              >
+                <MonitorPlay size={12} />
+                Video
+              </button>
+            )}
           </div>
         )
       ) : result.previewUrl ? (

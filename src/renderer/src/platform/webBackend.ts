@@ -31,10 +31,20 @@ import type {
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
 import { deviceFileUrl } from '../lib/platform'
-import { initAndroidCore, trackIds, type AndroidCore } from './androidCore'
+import { setStreamHeaders } from './nativeAudio'
+import { initAndroidCore, trackIds, type AndroidCore, type AndroidProviders } from './androidCore'
+import { YouTubeService, getYouTubePlugin } from './youtubeService'
+import { songTagsFor, videoIdFromUrl, isYouTubeUrl, type SongTags } from './youtubeCore'
 import { getMediaPlugin, PHONE_LIBRARY_ID, PhoneLibrary } from './phoneLibrary'
 import { PhoneBackup, base64ToBytes, bytesToBase64, pickFileBytes, type BackupStorage } from './phoneBackup'
-import { DownloadQueue, getDownloadPlugin, type CompletedFile, type DownloadJob, type DownloadStore } from './downloadQueue'
+import {
+  DownloadQueue,
+  getDownloadPlugin,
+  type CompletedFile,
+  type DownloadEnqueue,
+  type DownloadJob,
+  type DownloadStore
+} from './downloadQueue'
 
 type Handler = (...args: never[]) => unknown
 type Listener = (...args: unknown[]) => void
@@ -75,6 +85,8 @@ function emit(channel: string, ...args: unknown[]): void {
 }
 
 let core: AndroidCore
+/** YouTube (yt-dlp on the phone); null in a plain browser. */
+let yt: YouTubeService | null = null
 /** The phone's own music (null in a plain browser, where there is no native plugin). */
 let phoneLib: PhoneLibrary | null = null
 
@@ -198,11 +210,79 @@ interface ArchiveJobMeta {
   item: ArchiveItem
 }
 
+interface YouTubeJobMeta {
+  kind: 'youtube'
+  duration: number | null
+  thumbnail: string | null
+}
+interface FileJobMeta {
+  kind: 'file'
+  title: string
+}
+
+/** A song row for a file that is not from the Internet Archive (a YouTube download, a direct link). */
+function makeSimpleTrack(tags: SongTags, path: string, size: number, durationSec: number | null): Track {
+  const now = Date.now()
+  const ext = (path.split('.').pop() ?? '').toLowerCase().slice(0, 8)
+  const codec = ext === 'm4a' || ext === 'mp4' || ext === 'aac' ? 'aac' : ext === 'webm' || ext === 'opus' ? 'opus' : ext === 'flac' ? 'flac' : ext === 'mp3' ? 'mp3' : null
+  const artist = tags.artist || 'Unknown Artist'
+  const album = tags.album || 'Unknown Album'
+  return {
+    id: trackIds.songIdForPath(path),
+    title: tags.title || 'Untitled',
+    artist,
+    artistId: trackIds.artistIdFor(artist),
+    albumArtist: artist,
+    album,
+    albumId: trackIds.albumIdFor('', album),
+    genre: null,
+    composer: null,
+    year: null,
+    releaseDate: null,
+    trackNo: null,
+    discNo: null,
+    isrc: null,
+    rating: null,
+    duration: durationSec ?? 0,
+    bitrate: null,
+    sampleRate: null,
+    bitDepth: null,
+    channels: null,
+    codec,
+    format: ext ? ext.toUpperCase() : null,
+    fileSize: size,
+    path,
+    folderId: null,
+    libraryId: null,
+    hash: null,
+    replayGain: null,
+    replayGainAlbum: null,
+    lyrics: null,
+    hasEmbeddedArtwork: false,
+    addedAt: now,
+    modifiedAt: now,
+    lastPlayedAt: null,
+    playCount: 0,
+    favorite: false,
+    missing: false,
+    error: null
+  }
+}
+
 /** A finished file becomes a song; its real format is read from the file. */
 async function downloadCompleted(_d: DownloadItem, job: DownloadJob, file: CompletedFile): Promise<void> {
-  const meta = job.meta as ArchiveJobMeta | undefined
+  const meta = job.meta as ArchiveJobMeta | YouTubeJobMeta | FileJobMeta | undefined
   if (!meta) return
-  const track = makeTrack(meta.file, meta.item, file.path, file.size)
+  let track: Track | null = null
+  if ('file' in meta) {
+    track = makeTrack(meta.file, meta.item, file.path, file.size)
+  } else if (meta.kind === 'youtube' && job.youtube?.mode === 'song') {
+    const y = job.youtube
+    track = makeSimpleTrack({ title: y.title, artist: y.artist, album: y.album }, file.path, file.size, meta.duration)
+  } else if (meta.kind === 'file') {
+    track = makeSimpleTrack({ title: meta.title, artist: '', album: '' }, file.path, file.size, null)
+  }
+  if (!track) return // a downloaded video is a file in the app folder, not a song
   core.upsertTrack(track)
   await phoneLib?.describeFile(track.id, file.path)
 }
@@ -212,6 +292,7 @@ async function startDownloads(): Promise<void> {
   if (!plugin) return
   queue = new DownloadQueue({
     plugin,
+    youtube: getYouTubePlugin() ?? undefined,
     store: downloadStore,
     publish: (items) => emit(IPC.onDownloadsChanged, items),
     onCompleted: downloadCompleted
@@ -255,6 +336,156 @@ async function archiveEnqueue(identifier: string, fileNames: string[]): Promise<
     }
   })
   return { found: chosen.length, enqueued: queue.add(entries) }
+}
+
+// ------------------------------------------------------------------ YouTube (see youtubeService.ts)
+const YT_ENGINE_LATEST = 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest'
+const watchUrl = (id: string): string => `https://www.youtube.com/watch?v=${id}`
+
+async function latestYtdlp(): Promise<string | null> {
+  try {
+    const res = await fetch(YT_ENGINE_LATEST, { headers: { Accept: 'application/vnd.github+json' } })
+    if (!res.ok) return null
+    const tag = ((await res.json()) as { tag_name?: string }).tag_name
+    return tag ?? null
+  } catch {
+    return null
+  }
+}
+
+async function startYouTube(): Promise<void> {
+  const plugin = getYouTubePlugin()
+  if (!plugin) return
+  const svc = new YouTubeService({
+    plugin,
+    latestVersion: latestYtdlp,
+    setStreamHeaders,
+    emitStatus: (st) => emit(IPC.onYtEngineStatus, st),
+    autoUpdate: () => (core.handlers[IPC.getSettings]() as { ytdlpAutoUpdate?: boolean }).ytdlpAutoUpdate !== false
+  })
+  yt = svc
+  // The first start unpacks Python (seconds); then look for a newer yt-dlp at most once a day.
+  await svc.start()
+  const last = Number(readJson<number>('oli.ytdlpCheckedAt', 0))
+  if (Date.now() - last > 24 * 3600 * 1000) {
+    writeJson('oli.ytdlpCheckedAt', Date.now())
+    void svc.check()
+  }
+}
+
+/** Queue entries for YouTube songs or videos. */
+function youtubeEntries(
+  list: Array<{ videoId: string; title: string; duration?: number; channel?: string | null; track?: { name: string; artists: string[]; album: string | null } }>,
+  mode: 'song' | 'video',
+  audio: string,
+  height: number,
+  withPrepare = false
+): DownloadEnqueue[] {
+  return list.map((e) => {
+    const channel = e.channel ?? yt?.channelOf(e.videoId) ?? null
+    const tags = songTagsFor(e.title, channel, e.track ? { track: e.track.name, artist: e.track.artists.join(', '), album: e.track.album } : null)
+    const relBase =
+      mode === 'video'
+        ? `Oli/Videos/${safeName(e.title)} [${e.videoId}]`
+        : `Oli/YouTube/${safeName(`${tags.artist} - ${tags.title}`)} [${e.videoId}]`
+    const meta: YouTubeJobMeta = { kind: 'youtube', duration: e.duration ?? null, thumbnail: null }
+    return {
+      title: mode === 'video' ? e.title : tags.title,
+      job: {
+        url: watchUrl(e.videoId),
+        relPath: relBase,
+        size: 0,
+        md5: '',
+        youtube: { videoId: e.videoId, mode, audio, height, relBase, title: tags.title, artist: tags.artist, album: tags.album },
+        meta
+      } satisfies DownloadJob,
+      // a single song: read the video's own tags first (YouTube Music uploads have exact ones)
+      prepare:
+        withPrepare && mode === 'song' && yt
+          ? async () => {
+              const m = await yt!.meta(e.videoId)
+              if (!m) return null
+              const t = songTagsFor(m.title, m.channel, m)
+              return { title: t.title, youtube: { title: t.title, artist: t.artist, album: t.album, relBase: `Oli/YouTube/${safeName(`${t.artist} - ${t.title}`)} [${e.videoId}]` }, meta: { kind: 'youtube', duration: m.duration, thumbnail: m.thumbnail } satisfies YouTubeJobMeta }
+            }
+          : undefined
+    }
+  })
+}
+
+function audioChoice(a: unknown): string {
+  return a === 'm4a' || a === 'opus' ? a : 'best'
+}
+
+const youtubeHandlers: Record<string, Handler> = {
+  [IPC.ytEngineInfo]: (() => yt?.getStatus() ?? engineStatus) as Handler,
+  [IPC.ytEngineCheck]: (() => (yt ? yt.check() : engineStatus)) as Handler,
+  [IPC.ytEngineUpdate]: (() => (yt ? yt.install() : engineStatus)) as Handler,
+  [IPC.resolveYouTubeStream]: ((videoId: string, fresh?: boolean) => yt?.resolveStream(videoId, fresh === true) ?? []) as Handler,
+  [IPC.resolveYouTubeStreamBatch]: ((ids: string[]) => yt?.resolveStreamBatch(Array.isArray(ids) ? ids : []) ?? []) as Handler,
+  [IPC.prefetchYouTubeStreams]: ((ids: string[], priority?: boolean) => {
+    if (Array.isArray(ids)) yt?.prefetch(ids.filter((i) => typeof i === 'string').slice(0, 12), priority === true)
+    return null
+  }) as Handler,
+  [IPC.resolveYouTubeUrl]: ((url: string) => yt?.resolveUrl(String(url)) ?? []) as Handler,
+  [IPC.resolvePlaylistEntries]: (async (url: string) => {
+    if (!yt) return { entries: [], error: 'YouTube is not available in this build of the app.' }
+    return yt.playlistEntries(String(url))
+  }) as Handler,
+  // the PC plays the audio of a video that refuses to stream by downloading it first; here the stream is all there is
+  [IPC.downloadYouTubeAudio]: (() => null) as Handler,
+  [IPC.videoFallbackUrl]: (() => null) as Handler,
+  [IPC.openVideoWindow]: (() => false) as Handler,
+  [IPC.videoRetry]: (() => false) as Handler,
+  [IPC.videoDownloadSong]: (async (videoId: string, audio?: string) => {
+    if (!queue || !yt || !videoId) return null
+    const title = 'YouTube song'
+    const entries = youtubeEntries([{ videoId, title }], 'song', audioChoice(audio), 0, true)
+    entries[0].title = title
+    queue.add(entries)
+    return queue.list().find((d) => d.url === watchUrl(videoId))?.id ?? null
+  }) as Handler,
+  [IPC.videoDownload]: (async (videoId: string, height?: number, audio?: string) => {
+    if (!queue || !yt || !videoId) return null
+    const entries = youtubeEntries([{ videoId, title: 'YouTube video' }], 'video', audioChoice(audio), Number(height) || 0)
+    queue.add(entries)
+    const id = queue.list().find((d) => d.url === watchUrl(videoId))?.id ?? null
+    void yt.meta(videoId).then((m) => id && m && queue?.updateTitle(id, m.title))
+    return id
+  }) as Handler,
+  [IPC.enqueuePlaylist]: (async (url: string, audio?: string) => {
+    if (!queue || !yt) return { found: 0, enqueued: 0, error: 'YouTube is not available in this build of the app.' }
+    const r = await yt.playlistEntries(String(url))
+    if (r.entries.length === 0) return { found: 0, enqueued: 0, error: r.error }
+    const n = queue.add(youtubeEntries(r.entries, 'song', audioChoice(audio), 0))
+    return { found: r.entries.length, enqueued: n, capped: r.capped }
+  }) as Handler,
+  [IPC.enqueueEntries]: ((entries: Array<{ videoId: string; title: string; duration?: number; track?: { name: string; artists: string[]; album: string | null } }>, opts?: { mode?: string; audio?: string; height?: number }) => {
+    if (!queue || !yt || !Array.isArray(entries)) return { found: 0, enqueued: 0 }
+    const clean = entries.filter((x) => x && typeof x.videoId === 'string' && typeof x.title === 'string').slice(0, 300)
+    const mode = opts?.mode === 'video' ? 'video' : 'song'
+    return { found: clean.length, enqueued: queue.add(youtubeEntries(clean, mode, audioChoice(opts?.audio), Number(opts?.height) || 0)) }
+  }) as Handler,
+  // a pasted address: a YouTube link becomes a song download, any other http(s) link a plain file download
+  [IPC.enqueueDownload]: (async (url: string, title?: string) => {
+    if (!queue || typeof url !== 'string') return null
+    const u = url.trim()
+    const before = new Set(queue.list().map((d) => d.id))
+    if (isYouTubeUrl(u)) {
+      const id = videoIdFromUrl(u)
+      if (!id || !yt) return null
+      queue.add(youtubeEntries([{ videoId: id, title: (title ?? '').trim() || 'YouTube song' }], 'song', 'best', 0, true))
+    } else if (/^https?:\/\//i.test(u)) {
+      const name = decodeURIComponent(u.split('?')[0].split('/').pop() ?? '') || 'download'
+      const dot = name.lastIndexOf('.')
+      const ext = dot > 0 ? name.slice(dot, dot + 9) : ''
+      const label = (title ?? '').trim() || (dot > 0 ? name.slice(0, dot) : name)
+      queue.add([{ title: label, job: { url: u, relPath: `Oli/Downloads/${safeName(label)}${ext}`, size: 0, md5: '', meta: { kind: 'file', title: label } satisfies FileJobMeta } }])
+    } else {
+      return null
+    }
+    return queue.list().find((d) => !before.has(d.id)) ?? null
+  }) as Handler
 }
 
 // ------------------------------------------------------------------ backup and restore (see phoneBackup.ts)
@@ -336,6 +567,7 @@ const empty = (): unknown[] => []
 
 /** Answered here (not by the shared services). Anything in the core handlers takes precedence over these. */
 const phoneHandlers: Record<string, Handler> = {
+  ...youtubeHandlers,
   // app and window
   [IPC.getAppInfo]: () => ({ name: 'Oli', version: APP_VERSION, electron: 'n/a (Android)', chrome: navigator.userAgent, node: 'n/a' }),
   [IPC.windowControl]: noop,
@@ -378,14 +610,6 @@ const phoneHandlers: Record<string, Handler> = {
   [IPC.getMediaBase]: () => '',
   [IPC.probeDuration]: noop,
   [IPC.transcodeLocalFile]: noop,
-  // YouTube: not available on Android yet
-  [IPC.ytEngineInfo]: () => engineStatus,
-  [IPC.ytEngineCheck]: () => engineStatus,
-  [IPC.ytEngineUpdate]: () => engineStatus,
-  [IPC.resolveYouTubeStream]: empty,
-  [IPC.resolveYouTubeStreamBatch]: empty,
-  [IPC.resolveYouTubeUrl]: empty,
-  [IPC.resolvePlaylistEntries]: () => ({ entries: [], error: 'YouTube is not available in the Android app yet.' }),
   // backup and restore
   [IPC.createBackup]: (async () => (await phoneBackup?.create()) ?? null) as Handler,
   [IPC.listBackups]: (async () => (await phoneBackup?.list()) ?? []) as Handler,
@@ -461,7 +685,14 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
 
 /** Open the database and install `window.cytto` for platforms that have no Electron preload. */
 export async function installWebBackend(platform: 'android' | 'web'): Promise<void> {
-  core = await initAndroidCore()
+  const providers: AndroidProviders = {
+    isSpotifyConfigured: () => false,
+    isYouTubeConfigured: () => yt !== null,
+    searchSpotify: async () => [],
+    searchYouTube: async (query: string) => (yt ? yt.search(query) : []),
+    status: () => ({ spotifyConfigured: false, youtubeConfigured: yt !== null })
+  } as never
+  core = await initAndroidCore(providers)
   core.onChange((channel, payload) => emit(channel, payload))
   window.cytto = {
     platform,
@@ -483,6 +714,7 @@ export async function installWebBackend(platform: 'android' | 'web'): Promise<vo
     }
   }
   void startPhoneLibrary()
+  void startYouTube()
   void startDownloads()
   void startBackups()
 }

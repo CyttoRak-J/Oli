@@ -9,6 +9,7 @@ const BASE = 'http://127.0.0.1:8765'
 const MEDIA_METHODS = ['getPermission', 'requestPermission', 'queryAudio', 'probeFiles', 'getArtwork', 'clearArtworkCache']
 const FLAC_DIR = 'A:/Flac'
 const DL_METHODS = ['getRoot', 'enqueue', 'pause', 'resume', 'cancel', 'getActive', 'writeTags']
+const YT_METHODS = ['status', 'updateEngine', 'search', 'playlist', 'info', 'enqueue', 'pause', 'resume', 'cancel', 'getActive']
 const FS_METHODS = ['readdir', 'writeFile', 'readFile', 'deleteFile', 'getUri', 'stat', 'mkdir']
 const ART_DIR = require('path').join(require('os').tmpdir(), 'oli-harness-art')
 const METHODS = [
@@ -24,7 +25,8 @@ window.Capacitor = {
     { name: 'OliMedia', methods: [...MEDIA_METHODS.map((name) => ({ name, rtype: 'promise' })), { name: 'addListener', rtype: 'callback' }, { name: 'removeListener', rtype: 'promise' }] },
     { name: 'OliDownload', methods: [...DL_METHODS.map((name) => ({ name, rtype: 'promise' })), { name: 'addListener', rtype: 'callback' }, { name: 'removeListener', rtype: 'promise' }] },
     { name: 'Filesystem', methods: FS_METHODS.map((name) => ({ name, rtype: 'promise' })) },
-    { name: 'Share', methods: ['share', 'canShare'].map((name) => ({ name, rtype: 'promise' })) }
+    { name: 'Share', methods: ['share', 'canShare'].map((name) => ({ name, rtype: 'promise' })) },
+    { name: 'OliYouTube', methods: [...YT_METHODS.map((name) => ({ name, rtype: 'promise' })), { name: 'addListener', rtype: 'callback' }, { name: 'removeListener', rtype: 'promise' }] }
   ]
 }
 window.androidBridge = { postMessage: (s) => handle(JSON.parse(s)), onmessage: null }
@@ -93,12 +95,14 @@ fake.outsideResume = () => {
 
 let pendingStart = 0
 const stubs = require('./stubs-downloads.cjs')({ BASE, FLAC_DIR })
+const ytStubs = require('./stubs-youtube.cjs')({ BASE, FLAC_DIR, FIXTURES: path.join(__dirname, '..', '..', 'test', 'fixtures', 'yt') })
 
 function handle(m) {
   if (m.pluginId === 'OliMedia') return handleMedia(m)
   if (m.pluginId === 'OliDownload') return stubs.handleDownload(m)
   if (m.pluginId === 'Filesystem') return stubs.handleFs(m)
   if (m.pluginId === 'Share') return stubs.handleShare(m)
+  if (m.pluginId === 'OliYouTube') return ytStubs.handle(m)
   if (m.type === 'js.error' || m.pluginId !== 'OliAudio') {
     if (m.callbackId && m.callbackId !== '-1' && m.pluginId) {
       // Other plugins (Filesystem, ...) are not part of this test.

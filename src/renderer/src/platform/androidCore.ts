@@ -83,7 +83,10 @@ const noProviders = {
   status: (): unknown => ({ spotifyConfigured: false, youtubeConfigured: false })
 }
 
-export async function initAndroidCore(): Promise<AndroidCore> {
+/** What search and the settings screen need from the online providers (the phone supplies YouTube). */
+export type AndroidProviders = typeof noProviders
+
+export async function initAndroidCore(providers: AndroidProviders = noProviders): Promise<AndroidCore> {
   const db = new Database({ file: 'library.sqlite', persistence: idbPersistence, wasmUrl })
   await db.init()
   runMigrations(db)
@@ -97,7 +100,7 @@ export async function initAndroidCore(): Promise<AndroidCore> {
   const queue = new QueueService(db)
   const history = new HistoryService(db)
   const analytics = new AnalyticsService(db)
-  const search = new SearchService(db, noProviders, settings)
+  const search = new SearchService(db, providers, settings)
   const lyrics = new LyricsService(db, () => settings.get('lyricsOnline') === 'enabled')
 
   const listeners: Array<(channel: string, payload: unknown) => void> = []
@@ -116,7 +119,7 @@ export async function initAndroidCore(): Promise<AndroidCore> {
   window.addEventListener('pagehide', flush)
 
   const handlers = buildCoreHandlers(
-    { settings, library, playlists, favorites, playback, queue, history, analytics, search, lyrics, providers: noProviders },
+    { settings, library, playlists, favorites, playback, queue, history, analytics, search, lyrics, providers },
     emit
   )
 

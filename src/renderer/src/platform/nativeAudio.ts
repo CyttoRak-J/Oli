@@ -119,6 +119,15 @@ const HAVE_NOTHING = 0
 const HAVE_METADATA = 1
 const HAVE_ENOUGH_DATA = 4
 
+/** Request headers some stream addresses need (YouTube wants the User-Agent yt-dlp saw); set by the YouTube service. */
+const streamHeaders = new Map<string, Record<string, string>>()
+export function setStreamHeaders(url: string, headers: Record<string, string>): void {
+  if (Object.keys(headers).length === 0) return
+  streamHeaders.set(url, headers)
+  // remember only the newest few hundred addresses
+  if (streamHeaders.size > 400) streamHeaders.delete(streamHeaders.keys().next().value as string)
+}
+
 export class NativeAudio extends EventTarget implements AudioLike {
   preload = 'auto'
   defaultPlaybackRate = 1
@@ -316,7 +325,7 @@ export class NativeAudio extends EventTarget implements AudioLike {
     void this.send(async () => {
       await this.plugin.loadSource({
         url,
-        headers: undefined,
+        headers: streamHeaders.get(url),
         autoplay: false,
         bitDepth: md?.bitDepth,
         token
