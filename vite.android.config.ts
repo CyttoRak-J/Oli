@@ -36,15 +36,23 @@ function webCsp(): Plugin {
   }
 }
 
-/** Test builds only (OLI_TEST_HOOKS=1): expose the player store as window.__oliPlayer so a test window can drive the real app. */
+/** Test builds only (OLI_TEST_HOOKS=1): expose the player store as window.__oliPlayer and the panel store as window.__oliPanels so a test window can drive the real app. */
 function testHooks(): Plugin {
   return {
     name: 'oli-test-hooks',
     transform(code, id) {
-      if (!process.env.OLI_TEST_HOOKS || !/\/store\/player\.ts$/.test(id)) return null
-      return `${code}
+      if (!process.env.OLI_TEST_HOOKS) return null
+      if (/\/store\/player\.ts$/.test(id)) {
+        return `${code}
 ;(globalThis).__oliPlayer = usePlayer
 `
+      }
+      if (/\/store\/panels\.ts$/.test(id)) {
+        return `${code}
+;(globalThis).__oliPanels = usePanels
+`
+      }
+      return null
     }
   }
 }

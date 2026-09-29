@@ -4,7 +4,11 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.0: fixes from the first phone test
+### What is new in 0.9.1: Now Playing and the tabs
+- **The tabs below now work while Now Playing, Queue, History or Lyrics is open**: tapping Home, Songs, Archive, Downloads or Settings closes the panel and shows that page (before, the page changed behind the panel).
+- **Swipe down** on Now Playing (or Queue, History, Lyrics) to slide it away and return to the page you were on. The Now Playing screen itself is unchanged. Dragging the seek bar or scrolling a list does not close it.
+
+### Already in 0.9.0: fixes from the first phone test
 - **A tap plays the song** (Songs, search results, playlists, history, Up next). Song info is in the row's ... menu.
 - **The back button / gesture goes back** a page (closes Now Playing first) and only leaves the app from the home page.
 - **Covers**: the cover inside FLAC files is now read by Oli itself (Android's reader misses many), on separate threads so the player is never held up. The notification and lock screen show the cover too.

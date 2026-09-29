@@ -19,7 +19,7 @@ Media3, yt-dlp itself, the notification, audio focus or bit-perfect output: thos
 powershell -NoProfile -File scripts\android-harness\run-all.ps1 [dataRoot]
 ```
 Builds the test bundle (`OLI_TEST_HOOKS=1 OLI_OUT_DIR=out/renderer-android-test npx vite build -c vite.android.config.ts`; the hook exposes `window.__oliPlayer`, normal builds do not have it),
-then runs each suite on a fresh profile and prints one line each. Expected: player 20/20, phone music scan 19/19, downloads/tags/backup 23/23, YouTube 27/27, chosen folders 17/17, phone fixes 19/19, big list 8/8 (133 checks).
+then runs each suite on a fresh profile and prints one line each. Expected: player 20/20, phone music scan 19/19, downloads/tags/backup 23/23, YouTube 27/27, chosen folders 17/17, phone fixes 28/28, big list 8/8 (142 checks).
 It only stops `electron.exe` processes of the test window, never a desktop Oli.
 
 ## One suite by hand
@@ -28,7 +28,7 @@ powershell -File scripts\android-harness\run-window.ps1 <freshDataDir> [deny]   
 node scripts\android-harness\e2e.cjs             # play, seek, pause/resume, unplug, lock-screen next, auto-advance, skip a missing file, volume, Audio output screen
 node scripts\android-harness\e2e-library.cjs     # first-start scan, real tags/rates, albums, covers, playing a scanned song, deleted/returning files, restart, removal (DENY=1 for the refused-permission run)
 node scripts\android-harness\e2e-folders.cjs     # (window started with OLI_HARNESS_SUBDIRS=1) choose folders: replace "all music", two folders, nested/parent folders, Settings buttons, restart
-node scripts\android-harness\e2e-phone.cjs       # the owner's first-phone fixes: tap plays, back button, Now Playing fits, download badge, play after an error, 250-song YouTube queue after a restart
+node scripts\android-harness\e2e-phone.cjs       # the owner's first-phone fixes: tap plays, back button, Now Playing fits, download badge, play after an error, 250-song YouTube queue after a restart, tabs and swipe-down with a panel open
 node scripts\android-harness\e2e-downloads.cjs   # Archive downloads: progress, pause/resume, cancel, restart mid-download, songs from files, tag editing, backup/export/restore
 node scripts\android-harness\e2e-youtube.cjs     # engine status/update, search, pasted links, playlists, playing a result with headers, song/video/playlist downloads, cancel
 $env:OLI_HARNESS_SONGS='3000'; ... run-window.ps1 ...; node scripts\android-harness\e2e-list.cjs    # windowed list with 3,000 songs

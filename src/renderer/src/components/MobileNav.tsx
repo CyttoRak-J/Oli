@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { IPC } from '@shared/ipc'
 import type { DownloadItem } from '@shared/types'
 import { getDownloads, on } from '../lib/ipc'
+import { usePanels } from '../store/panels'
 import { Archive, Download, Home, Music, Settings } from 'lucide-react'
 import { cn } from './cn'
 
@@ -36,6 +37,8 @@ export function MobileNav(): React.JSX.Element {
           key={to}
           to={to}
           end={end}
+          // tapping the tab of the page you are already on must also uncover it
+          onClick={() => usePanels.getState().close()}
           className={({ isActive }) =>
             cn(
               'flex flex-1 flex-col items-center gap-0.5 py-2 text-[10.5px] font-medium transition-colors',

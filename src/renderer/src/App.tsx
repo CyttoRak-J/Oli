@@ -221,6 +221,12 @@ function MainShell(): React.JSX.Element {
   useGlobalShortcuts(() => setShortcutsOpen(true))
   const mobile = isMobileShell()
 
+  // Phone: the panel (Now Playing, Queue, History, Lyrics) covers the page, so going anywhere else (a tab below, a link inside
+  // a page) must close it, or the new page opens hidden behind it.
+  useEffect(() => {
+    if (mobile) usePanels.getState().close()
+  }, [mobile, location.pathname])
+
   // Phone: the Android back button / back gesture closes the open panel, else goes to the previous page, else home;
   // only on the home page does it leave the app (MainActivity minimizes it when this returns false).
   useEffect(() => {

@@ -90,6 +90,57 @@ const clickNav = (c, label) => c.ev(`[...document.querySelectorAll('nav a')].fin
   check('the Queue button opens the queue', /Queue/.test(await c.ev(`return document.querySelector('.absolute.inset-0.z-30').innerText`)))
   check('back closes the panel', (await c.ev(`return window.__oliBack()`)) === true && (await c.ev(`return !document.querySelector('.absolute.inset-0.z-30')`)))
 
+  // 3b. a tab below the panel uncovers its page (the panel used to stay on top while the page changed behind it)
+  for (const panel of ['nowplaying', 'queue', 'history', 'lyrics']) {
+    await c.ev(`globalThis.__oliPanels.getState().open(${JSON.stringify(panel)}); return 1`)
+    await sleep(300)
+    await clickNav(c, 'Songs')
+    await sleep(500)
+    check(`with ${panel} open, the Songs tab shows the Songs page`, (await hash(c)) === '#/songs' && (await c.ev(`return !document.querySelector('.absolute.inset-0.z-30')`)), await hash(c))
+    await clickNav(c, 'Settings')
+    await sleep(400)
+  }
+  await c.ev(`globalThis.__oliPanels.getState().open('nowplaying'); return 1`)
+  await sleep(300)
+  await clickNav(c, 'Settings')
+  await sleep(400)
+  check('tapping the tab of the page you are already on closes the panel too', await c.ev(`return !document.querySelector('.absolute.inset-0.z-30')`))
+
+  // 3c. swipe down on a panel: it slides away, back to the page underneath
+  await c.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+  const swipe = async (x, y0, y1, steps = 8) => {
+    await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: y0 }] })
+    for (let i = 1; i <= steps; i++) {
+      await c.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y0 + ((y1 - y0) * i) / steps }] })
+      await sleep(16)
+    }
+    await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await sleep(600)
+  }
+  const panelOpen = () => c.ev(`return !!document.querySelector('.absolute.inset-0.z-30')`)
+  await clickNav(c, 'Songs')
+  await sleep(400)
+  await c.ev(`globalThis.__oliPanels.getState().open('nowplaying'); return 1`)
+  await sleep(500)
+  await swipe(150, 220, 460)
+  check('swiping down on Now Playing closes it and shows the page underneath', !(await panelOpen()) && (await hash(c)) === '#/songs', await hash(c))
+  await c.ev(`globalThis.__oliPanels.getState().open('nowplaying'); return 1`)
+  await sleep(500)
+  await swipe(150, 220, 270)
+  check('a short pull only bounces back', (await panelOpen()) && (await c.ev(`return document.querySelector('.absolute.inset-0.z-30').style.transform`)) === '')
+  const seekY = await c.ev(`const r = document.querySelector('[aria-label="Seek"]').getBoundingClientRect(); return Math.round(r.top + r.height / 2)`)
+  await swipe(150, seekY, seekY + 260)
+  check('a drag that starts on the seek bar does not close the panel', await panelOpen())
+  await c.ev(`globalThis.__oliPanels.getState().open('queue'); return 1`)
+  await sleep(500)
+  await c.ev(`const el = document.querySelector('.absolute.inset-0.z-30 .overflow-y-auto'); el.scrollTop = 200; return 1`)
+  await sleep(200)
+  const scrolled = await c.ev(`return document.querySelector('.absolute.inset-0.z-30 .overflow-y-auto').scrollTop`)
+  await swipe(150, 220, 460)
+  check('a list that is scrolled down scrolls back up first instead of closing', scrolled === 0 || (await panelOpen()), `scrollTop was ${scrolled}`)
+  await c.ev(`globalThis.__oliPanels.getState().close(); return 1`)
+  await c.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+
   // 4. the red number on the Downloads tab
   await c.ev(`window.__fakeYt.throttleMs = 150; return 1`)
   const d1 = await call(c, 'video:download-song', 'BBBBBBBBBBB', 'best')

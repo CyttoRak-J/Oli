@@ -4,7 +4,7 @@
 "Want YouTube and Archive... need ALL features as the PC app has. It won't bother me what it is made of. My point is: all the same as PC."
 Plus a rule: **if the phone app shows lag, crashes or background-play problems, rewrite it natively for Android** and keep everything on GitHub.
 
-## Status at a glance (android-v0.9.0, 2026-09-30)
+## Status at a glance (android-v0.9.1, 2026-09-30)
 Every phase of the plan is built and released as a GitHub pre-release. **Nothing native has been run on a real phone yet**: the developer PC has no Android SDK, so the Java is compiled and packaged by CI (`apksigner verify` passes), its pure parts are compiled and tested with the PC's JDK, and the JavaScript side is exercised in a PC test window against stand-ins for the plugins. The next real step is the owner's phone test (checklists at the top of each `ANDROID_PHASE_*.md`, summarised in `ANDROID_PHASE_6.md`).
 
 | Version | Phase | What |
@@ -16,6 +16,7 @@ Every phase of the plan is built and released as a GitHub pre-release. **Nothing
 | 0.6.0 | 3 | YouTube (yt-dlp on the phone): search, links, playlists, playback, song/video/playlist downloads, engine updates |
 | 0.7.0 | 5 | Windowed song list, update check, faster scan, own-key signing hook |
 | 0.8.0 | 1c+ | Choose which folders to scan (Android folder picker, several folders, phone storage or card) |
+| 0.9.1 | fixes | Tabs work while a panel is open (a panel used to hide the page they opened); swipe down closes a panel |
 | 0.9.0 | fixes | The owner's first phone test: tap plays, back button, covers, notification, resume after a call, Now Playing, download badge, Reveal, bigger limits, faster YouTube start, YouTube queue remembered |
 
 ## First real-phone test (owner, android-v0.8.0) and what 0.9.0 did about it
@@ -34,6 +35,8 @@ The owner installed 0.8.0 on a phone and reported 11 things. For the native-rewr
 | 9 | Playlist / Mix limited to 100; raise "songs prepared ahead" and "simultaneous YouTube downloads" | Constants: playlist 200, Mix 100, ahead 1-5, simultaneous 1-3 (phone: fixed 2) | Playlist 2,000, Mix 500 (a Mix ends near 380 songs; listing 300 takes ~14 s), prepared ahead 1-10 (PC feature; hidden on the phone), simultaneous YouTube downloads 1-6 on PC and phone (phone default 2, applied natively). The phone queue no longer forgets waiting items beyond 200 | unit tests + PC window |
 | 10 | YouTube resolve is slow | Questions (search, stream address of the song about to play) shared the SAME slots as downloads, so a running download queue made every tap wait; a failing client cost up to 60 s; only the next 2 songs were prepared, one at a time | Questions have their own slots; 30 s per attempt; the client that worked last is asked first; next 3 songs prepared, 2 at a time. Measured on the PC only: default client 6.6 s, android_vr 3.1 s per lookup (not made the first choice: the PC code notes that android_vr addresses are refused for big range requests; ExoPlayer untested) | **phone timing not measured** |
 | 11 | 200+ YouTube songs added; will the app remember them and continue where it stopped? | The queue was saved, but "resume on launch" looked the last song up in the library database only, so a YouTube song was never resumed | Resume finds the song in the restored queue, resolves only that one (plus the next 3 in the background), seeks to the saved place | PC window with a 250-song queue: queue back, song resumed at the saved place, 4 stream lookups |
+
+**Found by the owner right after 0.9.0 and fixed in 0.9.1:** the full-screen panels covered the page, so a tab below changed the page behind the panel (any navigation now closes the panel), and the owner asked for swipe-down to return to the previous page (a downward drag from the top of a panel; sliders and scrolled lists are left alone). The look of Now Playing was kept as it was.
 
 **Ask the owner next:** install 0.9.0; check the notification with the screen off; make a call or play other audio and press play; tell if covers appear; how long a YouTube song takes to start (first tap, and the next one in a playlist).
 
@@ -111,13 +114,13 @@ State words: **built** = code exists, compiled in CI, proven in the PC test wind
 - Signed with the public **alpha** key `android/keystore/oli-alpha.jks` (password `oli-alpha-public`) unless the GitHub secrets for an own key exist (`docs/ANDROID_SIGNING.md`).
 
 ## Verified vs not verified
-- **Proven on the PC:** the JavaScript side end to end in a PC test window with Capacitor's real bridge protocol (133 checks in seven suites, `scripts/android-harness/run-all.ps1`), 237 unit tests (real sql.js databases, real yt-dlp JSON, the Java tag writers and download engine compiled and run with the PC's JDK), CI compiles and packages every tag and verifies the signature, the desktop bundle contains no phone code, and the shared song list works on the desktop (checked on a copy of the real 1,137-song library in an isolated profile).
+- **Proven on the PC:** the JavaScript side end to end in a PC test window with Capacitor's real bridge protocol (142 checks in seven suites, `scripts/android-harness/run-all.ps1`), 237 unit tests (real sql.js databases, real yt-dlp JSON, the Java tag writers and download engine compiled and run with the PC's JDK), CI compiles and packages every tag and verifies the signature, the desktop bundle contains no phone code, and the shared song list works on the desktop (checked on a copy of the real 1,137-song library in an isolated profile).
 - **NOT verified on any phone or emulator:** everything native at run time: Media3 decoding and float output reaching the AudioTrack, the foreground services, notification/lock screen, audio focus, headset/Bluetooth buttons, bit-perfect on a USB DAC, the real values in the output report, the MediaStore queries on different Android versions, the permission dialogs, cover files served from the cache folder, downloads in the background, yt-dlp running on the phone (Python unpack, bot checks, embedded thumbnails), scan speed on thousands of songs, start-up time, memory.
 
 ## Answers already given
 - Internet Archive on Android: yes, plain HTTPS. YouTube on Android: yes via `youtubedl-android`, but Google Play forbids YouTube downloaders, so the APK lives on GitHub Releases. YouTube's terms forbid downloading; the desktop app already has it, so it is the owner's call.
 
 ## Next steps
-1. **Owner: install `Oli-0.9.0-android.apk` on a phone and report** (checklists in `ANDROID_PHASE_1B.md`, `ANDROID_PHASE_1C.md`, `ANDROID_PHASE_6.md`). Fix what breaks first: the Java has only ever been compiled, never run.
+1. **Owner: install `Oli-0.9.1-android.apk` on a phone and report** (checklists in `ANDROID_PHASE_1B.md`, `ANDROID_PHASE_1C.md`, `ANDROID_PHASE_6.md`). Fix what breaks first: the Java has only ever been compiled, never run.
 2. Decide the signing key (`docs/ANDROID_SIGNING.md`) and whether the numbers from the phone trigger the native rewrite.
 3. Then the leftovers listed above as **not built** (folders outside MediaStore, duplicates, gapless playback, notification artwork for local songs, ReplayGain/lyrics from MP3/M4A, online metadata matching, an in-app APK installer).
