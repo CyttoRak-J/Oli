@@ -8,6 +8,9 @@ on:
   push:
     tags:
       - 'android-v*'
+    # Pushing the branch `android-dev` builds and checks the APK without publishing a release.
+    branches:
+      - 'android-dev'
 
 permissions:
   contents: read
