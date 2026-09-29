@@ -43,14 +43,17 @@ export function MobilePlayerBar(): React.JSX.Element {
               <span
                 className={cn('block truncate text-[9.5px] font-semibold uppercase tracking-wide', quality.hires ? 'text-accent' : 'text-ink-3')}
               >
-                {quality.hires ? 'Hi-Res ' : ''}
                 {quality.label}
-                {out.text && (
-                  <span className={cn('normal-case', out.kind === 'converted' || out.kind === 'lossy' ? 'text-amber-400' : '')}>
-                    {' '}
-                    {out.text}
-                  </span>
+              </span>
+            )}
+            {quality && out.text && (
+              <span
+                className={cn(
+                  'block truncate text-[9.5px] font-semibold',
+                  out.kind === 'converted' || out.kind === 'lossy' ? 'text-amber-400' : 'text-ink-3'
                 )}
+              >
+                {out.text}
               </span>
             )}
           </span>

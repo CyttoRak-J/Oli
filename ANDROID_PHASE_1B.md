@@ -1,5 +1,26 @@
 # Android phase 1b brief: native audio with real hi-res output
 
+> **STATUS: built and shipped as android-v0.3.0 (versionCode 3). Not yet run on a phone.** Below: what was built, then the owner's phone checklist, then the original brief (kept for reference).
+>
+> **What exists**
+> - Java, `android/app/src/main/java/com/cyttos/oli/`: `OliAudioPlugin` (Capacitor plugin `OliAudio`: `loadSource`, `play`, `pause`, `stop`, `seekTo`, `setVolume`, `setPlaybackParams`, `setMetadata`, `setBitPerfect`, `getOutputInfo`; events `state`, `time`, `seeked`, `error`, `command`, `outputChanged`), `OliAudioService` (Media3 `MediaSessionService`, foreground type mediaPlayback, tapping the notification opens the app), `OliAudioEngine` (ExoPlayer, diagnostics, bit-perfect), `SourceProbe` (reads FLAC/WAV headers for the real rate/channels/bit depth, MediaExtractor for the rest). `MainActivity` registers the plugin and asks for the notification permission (Android 13+). Media3 1.8.0 (`variables.gradle`).
+> - JS: `src/renderer/src/platform/nativeAudio.ts` (`NativeAudio`, an audio-element look-alike; every event carries a token so events of an old song are ignored; plugin calls are serialised), `getAudio()` in `store/player.ts` uses it when the Android plugin exists (desktop keeps `new Audio()`), `lib/useNativeOutput.ts` + `lib/outputText.ts` (report wording), Settings > Audio output, the quality/output lines in `MobilePlayerBar`, setting `bitPerfectOutput`.
+> - Hi-res policy: the sink accepts float PCM only for sources that can use it (bit depth > 16 or unknown, not lossy), so 16-bit and lossy files stay 16-bit and 24-bit FLAC is decoded to 32-bit float (`ForwardingAudioSink.getFormatSupport`). The report never says "bit-perfect" unless Android holds a bit-perfect mixer setting whose rate and encoding equal the AudioTrack's.
+> - Notification/lock-screen previous/next are asked of the app (`command` event -> `nativecommand` -> store `next()` / `previous()`) because the queue lives in JS.
+> - Not done on purpose: gapless/pre-buffering of the next song, a `MediaButtonReceiver` (headset buttons work while the app/service is alive; restarting a dead app from a Bluetooth button is not built), artwork in the notification for local files (phase 1c), HTTP stream headers are supported by the plugin but no JS caller yet (phase 3).
+>
+> **Owner's phone checklist (please try and report)**
+> 1. Install `Oli-0.3.0-android.apk` (it is signed with the same alpha key as 0.1.0/0.2.0, so it should update in place). Allow notifications. Download a song from Internet Archive (Archive page) and play it.
+> 2. Play a 16-bit FLAC, a 24-bit/96 kHz FLAC (Archive: search "24bit flac"), an MP3 and an M4A. Each plays, the seek bar works, pause/resume works.
+> 3. Turn the screen off for 10 minutes: music continues, the next song starts by itself. Lock-screen and notification buttons (play/pause/previous/next, seek bar) work. Press the headset/Bluetooth button. Unplug headphones: music pauses.
+> 4. Start a call or another music app: Oli pauses, then resumes when it is over.
+> 5. Settings > Audio output while the 24/96 file plays: screenshot it. Expect on the phone speaker: `Sent to Android as PCM float (32-bit) · 96 kHz`, `Android mixer rate 48 kHz`, "Android's mixer converts 96 kHz to 48 kHz". With a USB DAC on Android 14+ switch "Bit-perfect output" on and replay: the report says yes/no honestly; the DAC's own display should show 96 kHz if yes.
+> 6. Scroll the song list while music plays: any stutter? Any crash? (These feed the native-rewrite triggers in `ANDROID_PLAN.md`.)
+>
+> **Known risks to look at first if something fails on the phone**: `OliAudioService` not starting (logcat: ForegroundServiceStartNotAllowed / permission), `POST_NOTIFICATIONS` denied (no notification but playback continues), the file URI for a downloaded file (`file:///storage/emulated/0/Android/data/com.cyttos.oli/files/...`) not opening in ExoPlayer, the decoder not honouring the float request (the report then shows PCM 16-bit and says so).
+
+---
+
 Read `ANDROID_PLAN.md` (architecture, parity checklist, native-rewrite triggers) and `HANDOFF.md` first. This file is the detailed task for the next session.
 
 ## Goal

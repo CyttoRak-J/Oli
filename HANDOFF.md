@@ -1,27 +1,31 @@
 # Handoff: state at the end of the bug-fix session (2026-09-29)
 
-## START HERE (latest handoff: end of the Android phase 1a chat, 2026-09-29)
+## START HERE (latest handoff: end of the Android phase 1b chat, 2026-09-29)
 **Where things are**
-- GitHub https://github.com/CyttoRak-J/Oli, branch `main` (this commit is on top of the older history; old tags v1.0.1/v1.0.2 kept). Local folder `A:\oli-project-source`.
-- Releases: **v1.1.0** (Windows installer + macOS dmg/zip, built by CI, hashes verified for Windows) and Android pre-releases **android-v0.1.0**, **android-v0.2.0** (`Oli-0.2.0-android.apk`, apksigner OK, checksum OK). Desktop version 1.1.0; Android versionName 0.2.0 / versionCode 2.
-- Checks: `npm run typecheck`, `npm run lint`, `npm test` (111 tests, 17 files) are green. CI: `.github/workflows/build.yml` (tag `v*`) and `.github/workflows/android.yml` (tag `android-v*`).
-- Docs to read: `CLAUDE.md` (rules), this file, `ANDROID_PLAN.md` (architecture, parity checklist, native-rewrite triggers), `ANDROID_PHASE_1B.md` (next task), `BUILD_FROM_SCRATCH.md` (full spec), `CONTINUE_PROMPT.md` / `NEXT_CHAT_PROMPT.md` (paste-in prompts).
+- GitHub https://github.com/CyttoRak-J/Oli, branch `main`. Local folder `A:\oli-project-source`. Branch `android-dev` = build-only CI for the APK (no release).
+- Releases: **v1.1.0** (Windows + macOS) and Android pre-releases **android-v0.1.0 ... android-v0.3.0** (`Oli-0.3.0-android.apk`). Desktop version 1.1.0; Android versionName 0.3.0 / versionCode 3.
+- Checks: `npm run typecheck`, `npm run lint`, `npm test` (138 tests, 19 files) green. CI: `.github/workflows/build.yml` (tag `v*`) and `.github/workflows/android.yml` (tag `android-v*`, or push to `android-dev`).
+- Docs to read: `CLAUDE.md` (rules), this file, `ANDROID_PLAN.md`, `ANDROID_PHASE_1B.md` (what was built + the owner's phone checklist), `ANDROID_PHASE_1C.md` (next task), `BUILD_FROM_SCRATCH.md` (full spec, NOT yet updated for phase 1b), `CONTINUE_PROMPT.md` / `NEXT_CHAT_PROMPT.md` (paste-in prompts).
 
 **Owner's goals and rules**
 - Android must have ALL PC features, YouTube and Internet Archive included; technology does not matter to the owner. If the phone app lags, crashes or loses background playback: rewrite natively for Android (triggers in `ANDROID_PLAN.md`), everything hosted on GitHub.
-- Next task: **Android phase 1b: native Media3 audio with real hi-res output** (details and acceptance tests in `ANDROID_PHASE_1B.md`); then 1c (MediaStore scanner), 2 (downloads/tags/backup), 3 (YouTube).
-- Owner works in plain language, wants measured proof, wants unverified things stated plainly, often uses the desktop app while tests run (back up `%APPDATA%\Oli\library.sqlite`, isolated `--user-data-dir` with a pre-created folder for risky tests, never restart their app silently).
+- Order: 1b native audio (**done, unverified on a phone**), then 1c (MediaStore scanner, cover art, folder picker), 2 (downloads/tags/backup), 3 (YouTube).
+- Owner works in plain language, wants measured proof, wants unverified things stated plainly, often uses the desktop app while tests run (back up `%APPDATA%\Oli\library.sqlite`, isolated `--user-data-dir` with a pre-created folder for risky tests, never restart their app silently). The owner's songs are in `A:\Flac`.
 
-**State of Android (alpha 0.2.0)**
-- Works (tested only in a phone-size test window on the PC, never on a phone): phone layout; the shared desktop services in the web view (database in IndexedDB, settings, library screens, playlists, favorites, queue, history, search, lyrics lookup); Internet Archive search + download, downloads become songs.
-- Not built: native audio/background play (phase 1b), scanning the phone's music, YouTube, tags/cover/md5 for downloads, tag editing, backup, transcoding, real signing key (APK uses a public alpha key).
+**Android phase 1b (this chat)**
+- Built: native Media3 player in a foreground service, `OliAudio` plugin, `NativeAudio` adapter, honest output report, bit-perfect switch, notification/lock-screen/headset/audio-focus handling. Details, design decisions and the phone checklist: `ANDROID_PHASE_1B.md` top section.
+- Proof: CI compiled and packaged the Java (branch `android-dev`, then the tag build); `scripts/android-harness` (README inside) ran the real phone build in a throwaway Electron window with Capacitor's real native bridge and a stand-in for the plugin: 20/20 checks (play hi-res, seek, pause/resume, unplug/notification mirroring, lock-screen next, auto-advance, skip a missing file, volume, Settings report). Store-on-adapter unit tests in `test/playerNative.test.ts`.
+- **NOT verified (no phone here, no Android SDK on the PC):** the Java player at runtime (decoding, float output really reaching AudioTrack, the service/notification/lock screen, audio focus, headphone-unplug, Bluetooth buttons), the report's real numbers, bit-perfect on a USB DAC.
+- Test hook: `OLI_TEST_HOOKS=1` (vite.android.config.ts) exposes `window.__oliPlayer` in a *test* build only; `OLI_OUT_DIR` picks the output folder. Normal builds contain neither.
 
 **Traps to remember**
-- The browser pane cannot open local pages and Chromium blocks port 5060: test the phone build in a throwaway Electron window without the desktop preload (serve `out/renderer-android` on port 8765; see `CONTINUE_PROMPT.md`).
+- Capacitor plugin proxies look like promises (`then` is a method): never `await`/return a plugin proxy from an async function.
+- Heredocs containing apostrophes fail in the Bash tool here: write files with the Write tool.
+- The browser pane cannot open local pages and Chromium blocks port 5060: use `scripts/android-harness` (port 8765). Stop its window by process id, never by window title "Oli".
 - After `npm install <pkg>` check `node_modules/electron/dist` exists (new npm skips install scripts); repair with `node node_modules/electron/install.js`.
-- Phone-build-only page policy change lives in `vite.android.config.ts` (`'wasm-unsafe-eval'`); desktop `index.html` stays strict. The desktop bundle must contain no phone code or wasm (`__OLI_WEB__`, empty `webBackend` stand-in in `electron.vite.config.ts`).
-- Never change `hash64`; never bring back a custom protocol for desktop audio; never commit `bin/` (yt-dlp is fetched by `npm install`).
-- Bash/PowerShell/Write tools sometimes fail with a transient "classifier" error: retry once.
+- Phone-build-only page policy change lives in `vite.android.config.ts` (`'wasm-unsafe-eval'`); desktop `index.html` stays strict. The desktop bundle must contain no phone code or wasm (`__OLI_WEB__`; `nativeAudio.ts` drops out of the desktop bundle, verified by grepping `out/renderer`).
+- Never change `hash64`; never bring back a custom protocol for desktop audio; never commit `bin/`.
+- Java changes cannot be compiled on the PC: push branch `android-dev` and read the run (`https://api.github.com/repos/CyttoRak-J/Oli/actions/runs?branch=android-dev`; `gh` is not installed).
 
 
 Checks at the end of the bug-fix session: typecheck, lint and build clean; **76 tests pass** (95 after the Archive work); app relaunched with no log errors.

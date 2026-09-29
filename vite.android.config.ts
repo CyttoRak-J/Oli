@@ -35,6 +35,19 @@ function webCsp(): Plugin {
   }
 }
 
+/** Test builds only (OLI_TEST_HOOKS=1): expose the player store as window.__oliPlayer so a test window can drive the real app. */
+function testHooks(): Plugin {
+  return {
+    name: 'oli-test-hooks',
+    transform(code, id) {
+      if (!process.env.OLI_TEST_HOOKS || !/\/store\/player\.ts$/.test(id)) return null
+      return `${code}
+;(globalThis).__oliPlayer = usePlayer
+`
+    }
+  }
+}
+
 export default defineConfig({
   root: 'src/renderer',
   base: './',
@@ -50,9 +63,9 @@ export default defineConfig({
       { find: 'node:fs', replacement: shim('fs.ts') }
     ]
   },
-  plugins: [webLogger(), webCsp(), react(), tailwindcss()],
+  plugins: [webLogger(), webCsp(), testHooks(), react(), tailwindcss()],
   build: {
-    outDir: resolve('out/renderer-android'),
+    outDir: resolve(process.env.OLI_OUT_DIR || 'out/renderer-android'),
     emptyOutDir: true,
     rollupOptions: { input: resolve('src/renderer/index.html') }
   }

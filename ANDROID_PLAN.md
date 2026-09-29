@@ -35,8 +35,9 @@ client logic (`src/shared/archiveCore.ts` ported), the metadata-matching rules, 
 | Lyrics (embedded + LRCLIB) | shared `LyricsService` (fetch) | 1a | wired, online lookup untested on phone |
 | Phone layout (bottom nav, compact player/list) | React | 0.5 | done (tested in phone-size window) |
 | Internet Archive search + download | fetch + native file download; songs go into the shared database | 0.5/1a | **done (tested); no md5/tags/cover yet** |
-| Background playback, lock-screen/notification controls, headset & Bluetooth keys, audio focus | Kotlin Media3 service + `NativeAudio` adapter | 1b | not started |
-| Play local files (FLAC 24-bit, M4A, Opus, MP3, WAV, ...), seeking, ReplayGain, speed | Media3 (native decoders) | 1b | not started |
+| Background playback, lock-screen/notification controls, headset & Bluetooth keys, audio focus | Java Media3 `MediaSessionService` (`OliAudioService`) + `NativeAudio` adapter | 1b | **built (android-v0.3.0), CI-compiled; adapter tested end to end on the PC; NOT run on a phone** |
+| Play local files (FLAC 24-bit, M4A, Opus, MP3, WAV, ...), seeking, ReplayGain, speed | Media3 (native decoders), float output for hi-res | 1b | **built; not run on a phone** |
+| Honest hi-res output report (decoder, output encoding/rate, device, bit-perfect yes/no) + bit-perfect switch (Android 14+ USB DAC) | `OliAudioEngine.outputInfo()` + Settings > Audio output + player note | 1b | **built; not run on a phone** |
 | Hi-res badge (bit depth / sample rate) | MediaExtractor / tag reader | 1c | not started |
 | Scan the phone's music, watch for changes, missing files, duplicates | Kotlin MediaStore scanner + `ContentObserver`; folder picker via storage access framework | 1c | not started |
 | Cover art (embedded + folder) | `MediaMetadataRetriever.embeddedPicture` -> cache | 1c | not started |
@@ -48,7 +49,7 @@ client logic (`src/shared/archiveCore.ts` ported), the metadata-matching rules, 
 | YouTube: search, play streams, paste links, playlists and Mixes, downloads (audio/video), tagged songs | native plugin around `youtubedl-android` (search, resolve, download) + shared metadata code | 3 | not started |
 | YouTube engine updater (yt-dlp) | `youtubedl-android` runtime updater + the same status banner | 3 | not started |
 | Sleep timer, shortcuts panel, themes, accent, lyrics page, Now Playing, queue panel, history panel | same React code | 1a | works where it does not need native audio |
-| Mini player / floating bubble / tray / taskbar / media keys | replaced by the media notification, lock screen and (optional) picture-in-picture | 1b/5 | not started |
+| Mini player / floating bubble / tray / taskbar / media keys | replaced by the media notification, lock screen and (optional) picture-in-picture | 1b/5 | notification + lock screen built in 1b; picture-in-picture not started |
 | App update check | GitHub releases API (APK link) | 5 | not started |
 | Real signing key | own keystore in GitHub secrets | 5 | open decision |
 | Performance pass (virtual lists, DB size, start-up), decision on native rewrite | measure on a real phone | 5 | not started |
@@ -57,16 +58,17 @@ client logic (`src/shared/archiveCore.ts` ported), the metadata-matching rules, 
 - Verified in a phone-size window on the PC (a throwaway Electron shell with no desktop preload, so the web backend installs as on a phone): the shared database starts (needed a CSP fix for WebAssembly, found by this test),
   data survives a restart, settings/playlists/favorites/queue/history/search work, an Archive download becomes a song with desktop-style ids and shows in albums/artists/stats.
 - CI: `android-v0.1.0` built a signed APK (Android's `apksigner verify` passed).
-- **Not verified on any phone or emulator:** everything native-facing (file saving to `Directory.External`, playback of downloaded files, CapacitorHttp vs CORS, IndexedDB size limits, start-up time).
+- Phase 1b, proven on the PC: the Java code **compiles and packages** in CI (branch `android-dev` builds; both commits green). The JS side was run for real: `scripts/android-harness` opens the phone build in a throwaway Electron window with Capacitor's own `native-bridge.js` and a stand-in for the plugin that plays real FLAC files: play, hi-res file with 24-bit hint, seek, pause/resume, headphones-unplugged and notification-Play mirroring, lock-screen next, end-of-song advance, missing file skipped, volume, Settings > Audio output: **20/20 checks**. Unit tests: `test/nativeAudio.test.ts` (adapter + wording of the output report) and `test/playerNative.test.ts` (the real player store on the adapter).
+- **Not verified on any phone or emulator:** everything native-facing: the Java player itself (Media3 decoding, float output, the foreground service, notification/lock screen, audio focus, headphone-unplug, headset/Bluetooth buttons), the output report's real values (decoder name, output encoding, mixer rate, device), bit-perfect mode on a USB DAC, file saving to `Directory.External`, playback of downloaded files, CapacitorHttp vs CORS, IndexedDB size limits, start-up time.
 
 ## How to build
-- CI: push a tag `android-vX.Y.Z` (or run the workflow by hand) -> APK artifact and a GitHub pre-release. Locally (JDK 21 + Android SDK): `npm run android:sync` then `cd android && gradlew assembleRelease`.
+- CI: push a tag `android-vX.Y.Z` (or run the workflow by hand) -> APK artifact and a GitHub pre-release. Pushing the branch `android-dev` builds and signature-checks the APK without publishing (use it to compile-check Java changes; there is no Android SDK on the PC). Locally (JDK 21 + Android SDK): `npm run android:sync` then `cd android && gradlew assembleRelease`.
 - Signed with the public **alpha** key `android/keystore/oli-alpha.jks` (password `oli-alpha-public`): testing only; a properly signed build later means uninstalling the alpha first.
 
 ## Answers already given
 - Internet Archive on Android: yes, plain HTTPS (working). YouTube on Android: yes via `youtubedl-android` or NewPipeExtractor, but Google Play forbids YouTube downloaders, so the APK lives on GitHub Releases. YouTube's terms forbid downloading; the desktop app already has it, so it is the owner's call.
 
 ## Next steps
-1. Phase 1b: `NativeAudio` + Kotlin Media3 foreground service (plugin `OliAudio`), lock-screen controls, audio focus; switch the player store to use it on Android.
-2. Phase 1c: MediaStore scanner plugin and metadata/artwork, then the folder picker.
-3. Ship `android-v0.2.0` after each phase; the owner tests on the phone and reports lag/crash/background issues (triggers above).
+1. Phase 1b: **done in android-v0.3.0** (see `ANDROID_PHASE_1B.md` for the design and the phone test checklist). Next: the owner's phone results decide whether anything in 1b must be fixed before 1c.
+2. Phase 1c (brief in `ANDROID_PHASE_1C.md`): MediaStore scanner plugin and metadata/artwork, then the folder picker.
+3. Ship a new `android-vX.Y.Z` after each phase; the owner tests on the phone and reports lag/crash/background issues (triggers above).

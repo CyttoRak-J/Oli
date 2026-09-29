@@ -476,18 +476,24 @@ let instance: NativeAudio | null = null
 interface CapacitorGlobal {
   getPlatform?: () => string
   registerPlugin?: <T>(name: string) => T
-  isPluginAvailable?: (name: string) => boolean
+  PluginHeaders?: Array<{ name: string }>
 }
 
-/** The native plugin, or null when this is not the Android app. */
+let pluginProxy: OliAudioPlugin | null = null
+
+/** The native plugin, or null when this is not the Android app (or the APK has no OliAudio plugin). */
 export function getNativePlugin(): OliAudioPlugin | null {
   // The desktop build replaces __OLI_WEB__ with false, which removes the rest of this file's phone code from it.
   if (typeof __OLI_WEB__ !== 'undefined' && !__OLI_WEB__) return null
+  if (pluginProxy) return pluginProxy
   if (typeof window === 'undefined') return null
   const cap = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor
   if (!cap || cap.getPlatform?.() !== 'android' || !cap.registerPlugin) return null
-  if (cap.isPluginAvailable && !cap.isPluginAvailable('OliAudio')) return null
-  return cap.registerPlugin<OliAudioPlugin>('OliAudio')
+  // Capacitor lists the native plugins it knows in PluginHeaders (registered by MainActivity).
+  if (Array.isArray(cap.PluginHeaders) && !cap.PluginHeaders.some((h) => h.name === 'OliAudio')) return null
+  // registerPlugin may only be called once per name.
+  pluginProxy = cap.registerPlugin<OliAudioPlugin>('OliAudio')
+  return pluginProxy
 }
 
 /** The one NativeAudio of the app (null on desktop, in a browser, or when the plugin is missing). */

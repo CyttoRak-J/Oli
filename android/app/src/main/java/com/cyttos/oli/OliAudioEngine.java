@@ -452,6 +452,11 @@ final class OliAudioEngine {
   // ---------------------------------------------------------------------------------------------------------------
   // Honest diagnostics
 
+  private static String khz(int hz) {
+    double k = hz / 1000.0;
+    return (k == Math.floor(k) ? String.valueOf((int) k) : String.format(java.util.Locale.US, "%.1f", k)) + " kHz";
+  }
+
   private static String encodingName(int e) {
     switch (e) {
       case C.ENCODING_PCM_8BIT:
@@ -664,15 +669,15 @@ final class OliAudioEngine {
       verdict = "Nothing is playing yet.";
     } else if (active) {
       verdict = "Bit-perfect: the " + (dev != null ? deviceTypeName(dev.getType()) : "output") + " receives the file's own "
-          + trackRate + " Hz " + androidEncodingName(androidEncoding(trackEncoding)) + ".";
+          + khz(trackRate) + " " + androidEncodingName(androidEncoding(trackEncoding)) + ".";
     } else if (bluetooth) {
       resampled = mixerRate > 0 && trackRate != mixerRate;
       verdict = "Bluetooth: the audio is compressed by the Bluetooth codec, so it is not lossless hi-res.";
     } else if (mixerRate > 0 && trackRate != mixerRate) {
       resampled = true;
-      verdict = "Android's mixer converts " + trackRate + " Hz to " + mixerRate + " Hz before the sound goes out.";
+      verdict = "Android's mixer converts " + khz(trackRate) + " to " + khz(mixerRate) + " before the sound goes out.";
     } else {
-      verdict = "Sent to Android's mixer at " + trackRate + " Hz (" + encodingName(trackEncoding) + "); no rate conversion.";
+      verdict = "Sent to Android's mixer at " + khz(trackRate) + " (" + encodingName(trackEncoding) + "); no rate conversion.";
     }
     o.put("resampled", resampled);
     o.put("verdict", verdict);
