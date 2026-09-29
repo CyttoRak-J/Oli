@@ -1,22 +1,41 @@
 # Phone build test window (no phone needed)
 
-Runs the **real phone build** (`out/renderer-android-test`) in a throwaway Electron window without the desktop preload, so the
-web backend installs as it does on a phone. `preload.cjs` loads Capacitor's own `native-bridge.js` and answers the `OliAudio`
-plugin calls (and an `OliMedia` stand-in for the music scan) the way the Java plugins do, playing real audio (from `A:\Flac`) through an `<audio>` element. So the real
-`NativeAudio` -> Capacitor bridge -> player store -> UI chain is exercised. It does NOT test the Java code, Media3, the
-notification, audio focus or bit-perfect output: those need a phone.
+Runs the **real phone build** (`out/renderer-android-test`) in a throwaway Electron window without the desktop preload, so the web backend installs as it does on a
+phone. `preload.cjs` loads Capacitor's own `native-bridge.js` and sets `window.androidBridge`, so `Capacitor.getPlatform()` is `android` and every plugin call travels
+Capacitor's real call/notify protocol. Stand-ins answer the plugins the way the Java code does:
 
+| Stand-in | File | What it really does |
+|---|---|---|
+| `OliAudio` | `preload.cjs` | plays real audio (from `A:\Flac`) through an `<audio>` element; can fake headset/notification buttons |
+| `OliMedia` | `preload.cjs` | lists the first 60 songs of `A:\Flac` (or `OLI_HARNESS_SONGS=N` made-up songs), reads real FLAC headers, hands out generated covers |
+| `OliDownload`, `Filesystem`, `Share`, a fake archive.org item | `stubs-downloads.cjs` | a Node downloader with Range/pause/cancel/MD5, backups on disk, the share sheet call recorded |
+| `OliYouTube` | `stubs-youtube.cjs` | answers with REAL yt-dlp JSON from `test/fixtures/yt` (stream addresses point at a local song) and copies a local FLAC for downloads |
+
+So the real `NativeAudio` -> bridge -> player store -> UI chain, the scanner, the download queue and the YouTube service are exercised. It does **NOT** test the Java code,
+Media3, yt-dlp itself, the notification, audio focus or bit-perfect output: those need a phone (the pure Java is tested separately with the PC's JDK, see `test/android*.test.ts`).
+
+## Everything at once
 ```
-# 1. test build with the store exposed as window.__oliPlayer (only when OLI_TEST_HOOKS=1)
-OLI_TEST_HOOKS=1 OLI_OUT_DIR=out/renderer-android-test npx vite build -c vite.android.config.ts
-# 2. isolated user-data folder (pre-create it), then start the window (debug port 9333)
-mkdir -p /tmp/oli-harness-data
-node_modules/electron/dist/electron.exe scripts/android-harness/main.cjs "$(pwd)/out/renderer-android-test" /tmp/oli-harness-data 9333
-# 3. drive it (prints PASS/FAIL per check; screenshots go to $SHOTS or this folder)
-node scripts/android-harness/e2e.cjs           # player: play, seek, pause, unplug, next, skip... (20 checks)
-node scripts/android-harness/e2e-library.cjs   # phone music scan, covers, changes, restart (19 checks; needs a FRESH profile)
+powershell -NoProfile -File scripts\android-harness\run-all.ps1 [dataRoot]
 ```
-`run-window.ps1 <dataDir> [deny]` starts the window on a fresh profile (`deny` = the stand-in refuses the music permission; then run
-`DENY=1 node scripts/android-harness/e2e-library.cjs`, 3 checks). The stand-in `OliMedia` lists the first 60 songs of `A:\Flac`.
-Results: phase 1b 20/20 (`e2e.cjs`), phase 1c 19/19 + 3/3 (`e2e-library.cjs`), see HANDOFF.md. The window's title is "Oli": stop it by its process id, not
-by window title, so a running desktop app is never touched. Port 8765 is used by the static server (Chromium blocks 5060).
+Builds the test bundle (`OLI_TEST_HOOKS=1 OLI_OUT_DIR=out/renderer-android-test npx vite build -c vite.android.config.ts`; the hook exposes `window.__oliPlayer`, normal builds do not have it),
+then runs each suite on a fresh profile and prints one line each. Expected: player 20/20, phone music scan 19/19, downloads/tags/backup 23/23, YouTube 27/27, big list 8/8 (97 checks).
+It only stops `electron.exe` processes of the test window, never a desktop Oli.
+
+## One suite by hand
+```
+powershell -File scripts\android-harness\run-window.ps1 <freshDataDir> [deny]     # starts the window (debug port 9333); "deny" = the music permission is refused
+node scripts\android-harness\e2e.cjs             # play, seek, pause/resume, unplug, lock-screen next, auto-advance, skip a missing file, volume, Audio output screen
+node scripts\android-harness\e2e-library.cjs     # first-start scan, real tags/rates, albums, covers, playing a scanned song, deleted/returning files, restart, removal (DENY=1 for the refused-permission run)
+node scripts\android-harness\e2e-downloads.cjs   # Archive downloads: progress, pause/resume, cancel, restart mid-download, songs from files, tag editing, backup/export/restore
+node scripts\android-harness\e2e-youtube.cjs     # engine status/update, search, pasted links, playlists, playing a result with headers, song/video/playlist downloads, cancel
+$env:OLI_HARNESS_SONGS='3000'; ... run-window.ps1 ...; node scripts\android-harness\e2e-list.cjs    # windowed list with 3,000 songs
+node scripts\android-harness\perf.cjs            # speed numbers with made-up libraries (CPU=4 slows the page 4x; PC estimates, not phone measurements)
+```
+Screenshots go to `$env:SHOTS` (or this folder). Each suite needs a FRESH profile (first-start behaviour is part of what is tested).
+
+## Notes
+- The window's title is "Oli": stop it by process id (its command line contains `android-harness`), not by window title, so a running desktop app is never touched.
+- Port 8765 is used by the static server (Chromium blocks 5060). Temp folders used: `%TEMP%\oli-harness-files`, `-cache`, `-art`.
+- A hidden Electron window does not run `requestAnimationFrame`; the drivers call `Page.bringToFront` when they need drawing.
+- Results: phase 1b 20/20, 1c 19/19 + 3/3, 2 23/23, 3 27/27, 5 8/8 (see `HANDOFF.md`).

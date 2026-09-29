@@ -6,7 +6,7 @@ Allow notifications and access to your music when asked: the lock-screen control
 
 ### What is new in 0.7.0: big libraries, updates, your own key
 - **Long lists stay smooth**: the song list only keeps the rows on screen, so a library of thousands of songs scrolls as easily as a short one (tested with 3,000 and 10,000 songs; memory dropped from 123 MB to 26 MB with 3,000). "Go to playing track" still finds a song far down the list.
-- **Update check**: Settings > About > "Check for updates" looks for a newer Oli Android release on GitHub and opens its page (nothing is installed by itself). The app now shows its real version.
+- **Update check**: Settings > About & updates > "Check for updates" looks for a newer Oli Android release on GitHub and opens its page (nothing is installed by itself). The app now shows its real version.
 - **Faster scanning**: MP3/AAC/Opus files are not read again for details Android already gives.
 - **Your own signing key** can be added later without changing the app (see docs/ANDROID_SIGNING.md); until you do, builds keep the public alpha key.
 

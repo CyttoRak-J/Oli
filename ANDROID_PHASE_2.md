@@ -1,4 +1,27 @@
-# Android phase 2 brief: downloads that behave, tags, backup
+# Android phase 2: downloads that behave, tags, backup
+
+> **STATUS: built and shipped as android-v0.5.0 (versionCode 5). Not yet run on a phone.**
+>
+> **What exists** (details: section 20.4 of `BUILD_FROM_SCRATCH.md`)
+> - Pure Java, tested on the PC with the JDK (`test/androidDownload.test.ts`, `test/androidTagWriter.test.ts`): `DownloadEngine` (2 at a time, `.part` files, HTTP Range resume, pause/cancel, retries, size + MD5 check, then tags), `FlacTagWriter`, `Id3TagWriter` (audio bytes proven identical; tags and cover read back by `music-metadata` / `node-id3`, also on a real hi-res FLAC of the owner's library), `TagFields`.
+> - Android glue: `OliDownloadService` (foreground service `dataSync`, progress notification), `OliDownloadPlugin` (`enqueue`, `pause`, `resume`, `cancel`, `getActive`, `getRoot`, `writeTags`).
+> - JS: `platform/downloadQueue.ts` (the list + jobs in localStorage, resumes what was interrupted, `prepare` step), `songEdits.ts` (tag editing incl. file write for the app's own downloads), `phoneBackup.ts` (daily automatic backup, share-sheet export, restore with validation), wiring in `webBackend.ts`; `@capacitor/share` added.
+> - Decisions: downloads stay in the app's own folder (`Android/data/com.cyttos.oli/files/Oli/`, removed on uninstall — ask the owner whether to move them to shared `Music/` through MediaStore); songs from the media library are edited inside the app only (Android owns those files); WavPack/APE transcoding was **not** built (APK size); online metadata matching ("fix metadata") moved to phase 3 and then not built.
+> - Bugs found by the PC checks on the way: the `build.gradle` byte-order mark, `java.nio.file` needs Android 8 (minSdk is 24), the Downloads screen overflowed on a phone.
+>
+> **Owner's phone checklist for 0.5.0**
+> 1. Internet Archive page: search "24bit flac", download three tracks. Progress and speed move; a notification "Downloading 3 files" stays with the screen off; the songs appear in Songs when done.
+> 2. Pause one, resume it; switch on airplane mode in the middle: it fails with "Connection problem", switch off, tap retry: it continues (does not restart from 0).
+> 3. Swipe Oli away in the middle of a download, open it again: it carries on by itself.
+> 4. Open a finished file in another app (a music player or Files): title, artist, album, track number and the cover are there.
+> 5. Edit a downloaded song's tags in Oli; check the other app shows the new tags after a rescan. Edit a song from your phone's music: the change stays in Oli.
+> 6. Settings > Backup & restore: create, export (share sheet), restore. After a restore the library is as it was.
+>
+> **If something fails first look at**: the foreground service start (`ForegroundServiceStartNotAllowed`, notification permission), scoped storage (`writeTags` refuses files outside the app folder), the Range/`.part` handling with a real archive.org redirect, the share sheet needing a cache file URI.
+
+---
+
+## Original brief
 
 Read `ANDROID_PLAN.md`, `HANDOFF.md` ("Start here") and the top of `ANDROID_PHASE_1B.md` / `ANDROID_PHASE_1C.md` first. Phases 1b and 1c were built without a phone: **start by asking for the owner's phone results of android-v0.3.0 / 0.4.0 and fix what they report before adding features.**
 

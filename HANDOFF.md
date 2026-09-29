@@ -1,18 +1,46 @@
-# Handoff: state at the end of the bug-fix session (2026-09-29)
+# Handoff (latest: end of the Android phases 2, 3 and 5 chat, 2026-09-30). Older history below.
 
-## START HERE (latest handoff: end of the Android phase 1c chat, 2026-09-29)
+## START HERE
 **Where things are**
-- GitHub https://github.com/CyttoRak-J/Oli, branch `main`. Local folder `A:\oli-project-source`. Branch `android-dev` = build-only CI for the APK (no release).
-- Releases: **v1.1.0** (Windows + macOS) and Android pre-releases **android-v0.1.0 ... android-v0.4.0** (`Oli-0.4.0-android.apk`). Desktop version 1.1.0; Android versionName 0.4.0 / versionCode 4.
-- Checks: `npm run typecheck`, `npm run lint`, `npm test` (151 tests, 20 files) green. CI: `.github/workflows/build.yml` (tag `v*`) and `.github/workflows/android.yml` (tag `android-v*`, or push to `android-dev`).
-- Docs to read: `CLAUDE.md` (rules), this file, `ANDROID_PLAN.md`, `ANDROID_PHASE_1B.md` and `ANDROID_PHASE_1C.md` (top sections: what was built + the owner's phone checklists), `ANDROID_PHASE_2.md` (next task), `BUILD_FROM_SCRATCH.md` (full spec, NOT yet updated for phases 1b/1c), `CONTINUE_PROMPT.md` / `NEXT_CHAT_PROMPT.md` (paste-in prompts).
+- GitHub https://github.com/CyttoRak-J/Oli, branch `main`. Local folder `A:\oli-project-source`. Branch `android-dev` = build-only CI for the APK (no release). The owner's songs are in `A:\Flac`.
+- Releases: **v1.1.0** (Windows + macOS) and Android pre-releases **android-v0.1.0 ... android-v0.7.0** (`Oli-0.7.0-android.apk`, about 104 MB because it contains Python + ffmpeg for YouTube). Desktop version 1.1.0; Android versionName 0.7.0 / versionCode 7. Every release was verified: checksum against `SHA256SUMS-android.txt`, the workflow's `apksigner verify` step, manifest and dex contents, no test hook in the bundle.
+- Checks: `npm run typecheck`, `npm run lint`, `npm test` (221 tests, 30 files) green. PC test window: `powershell -File scripts\android-harness\run-all.ps1` (97 checks in five suites). CI: `.github/workflows/build.yml` (tag `v*`) and `.github/workflows/android.yml` (tag `android-v*`, or push to `android-dev` for a build without a release).
+- Docs to read, in this order: `CLAUDE.md` (rules), this file, `ANDROID_PLAN.md` (status, parity table, PC speed estimates, triggers), `ANDROID_PHASE_6.md` (next task), the top of `ANDROID_PHASE_1B.md`, `_1C.md`, `_2.md`, `_3.md`, `_5.md` (what each phase built + the owner's phone checklist), `BUILD_FROM_SCRATCH.md` section 20 (the full Android specification; its code blocks are kept exact by `node scripts/sync-build-spec.mjs --fix`), `CONTINUE_PROMPT.md` / `NEXT_CHAT_PROMPT.md` (paste-in prompts).
+
+**State of the whole project**
+- Desktop app: finished and released (v1.1.0); the only desktop change since is the windowed song list (shared `SongTable`), checked on a copy of the real library in an isolated profile.
+- Android: every planned phase is built and released: 1b native audio (0.3.0), 1c phone music scan (0.4.0), 2 downloads/tags/backup (0.5.0), 3 YouTube (0.6.0), 5 performance/updates/signing hook (0.7.0). **None of the native code has ever run on a phone or emulator.** What was proven: CI compiles and packages every tag; the pure Java (tag writers, download engine, yt-dlp output parser) is compiled and tested on the PC with the JDK; the JavaScript side runs against stand-ins for the plugins in a throwaway Electron window that uses Capacitor's real bridge protocol; real yt-dlp JSON is used as fixtures.
+- Open decisions for the owner: install and test on a phone (checklists in the phase files); the real signing key (`docs/ANDROID_SIGNING.md`); whether phone results trigger the native rewrite (`ANDROID_PLAN.md`); where downloads should live (app folder now).
+- Not built: folder picker (SAF), duplicate detection, gapless playback, notification artwork for local songs, ReplayGain/lyrics from MP3/M4A tags, online "fix metadata" for YouTube songs, an in-app APK installer, WavPack/APE transcoding, the desktop's video window. All listed in `ANDROID_PLAN.md`.
 
 **Owner's goals and rules**
-- Android must have ALL PC features, YouTube and Internet Archive included; technology does not matter to the owner. If the phone app lags, crashes or loses background playback: rewrite natively for Android (triggers in `ANDROID_PLAN.md`), everything hosted on GitHub.
-- Order: 1b native audio (**done**), 1c phone music scan (**done**) - both unverified on a phone - then 2 (downloads/tags/backup), 3 (YouTube).
-- Owner works in plain language, wants measured proof, wants unverified things stated plainly, often uses the desktop app while tests run (back up `%APPDATA%\Oli\library.sqlite`, isolated `--user-data-dir` with a pre-created folder for risky tests, never restart their app silently). The owner's songs are in `A:\Flac`.
+- Android must have ALL PC features, YouTube and Internet Archive included; technology does not matter to the owner. If the phone app lags, crashes or loses background playback: rewrite natively for Android (triggers in `ANDROID_PLAN.md`, hosted on GitHub). Only the owner's real-phone reports can trigger it.
+- Owner works in plain language, wants measured proof, wants unverified things stated plainly, often uses the desktop app while tests run (back up `%APPDATA%\Oli\library.sqlite`, isolated `--user-data-dir` with a pre-created folder for risky tests — a COPY of the library works for read-only checks —, never restart or stop their app silently).
+- Do what was asked; questions get answers, not builds.
 
-**Android phase 1c (latest chat)**
+**What the last chat did (phases 2, 3, 5)** — details in the phase files
+- Phase 2: `DownloadEngine` + tag writers (pure Java, JDK-tested), download service/plugin, `downloadQueue.ts`, tag editing, backup/restore (23 PC checks).
+- Phase 3: `OliYouTube` (youtubedl-android 0.18.1), `youtubeCore/Service.ts`, YouTube downloads through the same queue, engine updates; the search rows and the Downloads rows now wrap on a phone (27 PC checks).
+- Phase 5: PC speed test with 3,000 and 10,000 made-up songs found that every scrolled row stayed in the page (123 MB, 1.9 s frames); a windowed list fixed it (26 MB, 0.12 s); update check; lossy files skipped in the detail read; signing hook; `run-all.ps1`, `perf.cjs`, `e2e-list.cjs`; `scripts/sync-build-spec.mjs`.
+- Bugs the PC checks caught before they reached a phone: a wrong SQL placeholder count that made every scan fail, `java.nio.file` (Android 8+) used with minSdk 24, a byte-order mark that broke `build.gradle`, one-letter columns in the Search and Downloads rows, the browser shifting the scroll position when rows change (`overflow-anchor`), a YouTube `--parse-metadata` escaping rule (checked against real yt-dlp).
+
+**Traps to remember**
+- Capacitor plugin proxies look like promises (`then` is a method): never `await`/return a plugin proxy from an async function.
+- Heredocs containing apostrophes or backslashes often break in the Bash tool here (and Python `"\n"`/`"\\"` inside them get mangled): write files with the Write/Edit tools; `python` scripts should be Write-d to a file, not piped.
+- Never write repository files with PowerShell `Set-Content -Encoding utf8` (adds a byte-order mark: it broke `build.gradle`) or `Remove-Item` on repo paths (blocked). Keep LF; `python A:\oli-dev-tools\scripts\eol.py` checks (`fix` restores).
+- A script that stops test windows must not match its own command line (`run-all.ps1` filters on `electron.exe`). Stop test windows by process id, never by window title "Oli".
+- The browser pane cannot open local pages and Chromium blocks port 5060: use `scripts/android-harness` (port 8765). A hidden Electron window does not run `requestAnimationFrame`: `Page.bringToFront` + `Emulation.setFocusEmulationEnabled` first.
+- After `npm install <pkg>` check `node_modules/electron/dist` exists (new npm skips install scripts); repair with `node node_modules/electron/install.js`; then `npm run android:sync` (adds the plugin to the Gradle project).
+- Phone-build-only page policy (`'wasm-unsafe-eval'`) and the `__OLI_WEB__` / `__OLI_ANDROID_VERSION__` flags live in `vite.android.config.ts`; the desktop bundle must contain no phone code (grep `out/renderer` for `nativecommand`).
+- Never change `hash64`; never bring back a custom protocol for desktop audio; never commit `bin/`.
+- Java changes cannot be compiled on the PC: push branch `android-dev` and read the run through the public API (`gh` is not installed); failures publish their messages as annotations (`check-runs/<job id>/annotations`).
+- yt-dlp from this PC's address gets "Sign in to confirm you're not a bot" with the default client; the `web_embedded` client works (same chain as the PC app).
+
+## Older history (desktop bug-fix session, 2026-09-29)
+Checks at the end of the bug-fix session: typecheck, lint and build clean; **76 tests pass** (95 after the Archive work); app relaunched with no log errors.
+
+## Earlier Android chats (phase 1b and 1c details)
+**Android phase 1c**
 - Built: `OliMedia` plugin (MediaStore listing, FLAC tags, cover cache, change observer), `phoneLibrary.ts` + `phoneStore.ts` (scan, diff, missing, background detail reading, covers), Settings > Library wording. Details, decisions, not-done list and the phone checklist: top of `ANDROID_PHASE_1C.md`.
 - Proof: CI compiled the Java; `test/phoneLibrary.test.ts` (real sql.js database + fake plugin; it found a real SQL placeholder bug); `scripts/android-harness/e2e-library.cjs` in the PC test window (19 checks, plus 3 for the permission-refused run) with a stand-in OliMedia listing 60 real songs of `A:\Flac`. `run-window.ps1` starts the window on a fresh profile.
 - **NOT verified (no phone):** the OliMedia plugin at runtime (MediaStore columns per Android version, permission dialog, scan speed on thousands of songs, `loadThumbnail`, ContentObserver) and the cover URLs from the cache folder.
@@ -23,17 +51,6 @@
 - **NOT verified (no phone here, no Android SDK on the PC):** the Java player at runtime (decoding, float output really reaching AudioTrack, the service/notification/lock screen, audio focus, headphone-unplug, Bluetooth buttons), the report's real numbers, bit-perfect on a USB DAC.
 - Test hook: `OLI_TEST_HOOKS=1` (vite.android.config.ts) exposes `window.__oliPlayer` in a *test* build only; `OLI_OUT_DIR` picks the output folder. Normal builds contain neither.
 
-**Traps to remember**
-- Capacitor plugin proxies look like promises (`then` is a method): never `await`/return a plugin proxy from an async function.
-- Heredocs containing apostrophes fail in the Bash tool here: write files with the Write tool.
-- The browser pane cannot open local pages and Chromium blocks port 5060: use `scripts/android-harness` (port 8765). Stop its window by process id, never by window title "Oli".
-- After `npm install <pkg>` check `node_modules/electron/dist` exists (new npm skips install scripts); repair with `node node_modules/electron/install.js`.
-- Phone-build-only page policy change lives in `vite.android.config.ts` (`'wasm-unsafe-eval'`); desktop `index.html` stays strict. The desktop bundle must contain no phone code or wasm (`__OLI_WEB__`; `nativeAudio.ts` drops out of the desktop bundle, verified by grepping `out/renderer`).
-- Never change `hash64`; never bring back a custom protocol for desktop audio; never commit `bin/`.
-- Java changes cannot be compiled on the PC: push branch `android-dev` and read the run (`https://api.github.com/repos/CyttoRak-J/Oli/actions/runs?branch=android-dev`; `gh` is not installed).
-
-
-Checks at the end of the bug-fix session: typecheck, lint and build clean; **76 tests pass** (95 after the Archive work); app relaunched with no log errors.
 
 ## What was done (by area)
 **Playback engine (`store/player.ts`)**

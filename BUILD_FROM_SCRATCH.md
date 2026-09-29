@@ -1,7 +1,7 @@
 # BUILD FROM SCRATCH: a desktop music player (reference app "Oli")
 
 **Audience:** an AI coding agent that has never seen this project and must build the whole app, start to finish.
-**Reference app:** Oli 1.1.0 (measurements below were made on 1.0.2 to 1.1.0), an Electron + React + TypeScript desktop music player and library manager for Windows,
+**Reference app:** Oli 1.1.0 (measurements below were made on 1.0.2 to 1.1.0), an Electron + React + TypeScript desktop music player and library manager for Windows and macOS, plus an Android app (Capacitor + native Java plugins, version 0.7.0, section 20),
 with YouTube search/stream/download, Internet Archive lossless downloads, playlists, lyrics, a mini player and a
 floating bubble player.
 **How this file is built:** long code blocks marked `(verbatim)` are copied from the working reference source and are
@@ -162,8 +162,10 @@ app this does not matter; for the existing library it does (see the legacy migra
   build/icon.png tray-16.png tray-32.png tray-prev.png tray-pause.png tray-next.png license.txt
   scripts/fetch-yt-dlp.mjs adhoc-sign.cjs icon-gen.mjs electron-icon-main.cjs
   .github/workflows/build.yml  .github/release-notes.md
-  README.md  LICENSE  CONTINUE_PROMPT.md  ANDROID_PLAN.md  capacitor.config.ts  vite.android.config.ts  android/ (Capacitor Android project)
-  .github/workflows/android.yml  .github/android-release-notes.md
+  README.md  LICENSE  CONTINUE_PROMPT.md  NEXT_CHAT_PROMPT.md  ANDROID_PLAN.md  ANDROID_PHASE_1B.md 1C 2 3 5 6 (briefs and results)
+  capacitor.config.ts  vite.android.config.ts  android/ (Capacitor Android project: Java plugins in app/src/main/java/<app id path>/)
+  .github/workflows/android.yml  .github/android-release-notes.md  docs/ANDROID_SIGNING.md
+  scripts/android-harness/ (PC test window for the phone build)  scripts/android-tags/ (Java test entry points)  scripts/sync-build-spec.mjs
   docs/ (GitHub Pages help site: index faq troubleshooting support .html + style.css)
   src/
     shared/   constants.ts  ipc.ts  types.ts
@@ -181,6 +183,9 @@ app this does not matter; for the existing library it does (see the legacy migra
            store/  player.ts settings.ts panels.ts sleepTimer.ts
            lib/    ipc.ts artwork.ts audioOutput.ts favorites.ts format.ts linkDetect.ts media.ts onlineTracks.ts
                    useGlobalShortcuts.ts useIncrementalRender.ts useLiveOnlineSearch.ts useTrackInfo.ts
+                   platform.ts outputText.ts useNativeOutput.ts useRowWindow.ts
+           platform/  (phone only) install.ts androidCore.ts webBackend.ts nativeAudio.ts phoneLibrary.ts phoneStore.ts
+                   downloadQueue.ts songEdits.ts phoneBackup.ts youtubeCore.ts youtubeService.ts androidUpdate.ts shims/
            pages/  Home Songs SongDetail Albums AlbumDetail Artists ArtistDetail Genres GenreDetail Composers
                    ComposerDetail Playlists PlaylistDetail Favorites Search Lyrics Queue History Downloads Archive
                    Settings NowPlaying NotFound
@@ -188,7 +193,7 @@ app this does not matter; for the existing library it does (see the legacy migra
                         AlphabetFilter ListJumpButtons SearchBox ThemedSelect Tip EmptyState HistoryPanel YtEngineBanner
                         LibraryStatsTabs LinkDownloadForm AddToPlaylistDialog SleepTimer ShortcutsPanel cn.ts
            mini/MiniPlayer.tsx   bubble/Bubble.tsx
-  test/   12 + 3 files, see section 15
+  test/   30 files (+ test/fixtures/yt), see section 15
 ```
 Path aliases: `@shared/*` -> `src/shared/*` (main, preload, renderer, tests); `@renderer/*` -> `src/renderer/src/*`.
 Line endings: **LF everywhere**. Set `git config core.autocrlf false`.
@@ -243,8 +248,10 @@ Line endings: **LF everywhere**. Set `git config core.autocrlf false`.
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
+    "@capacitor/browser": "^8.0.4",
     "@capacitor/core": "^8.5.2",
     "@capacitor/filesystem": "^8.1.3",
+    "@capacitor/share": "^8.0.2",
     "@tanstack/react-query": "^5.101.4",
     "clsx": "^2.1.1",
     "framer-motion": "^13.0.0",
@@ -428,7 +435,8 @@ import { resolve } from 'path'
 export default defineConfig({
   resolve: {
     alias: {
-      '@shared': resolve(__dirname, 'src/shared')
+      '@shared': resolve(__dirname, 'src/shared'),
+      '@main': resolve(__dirname, 'src/main')
     }
   },
   test: {
@@ -1718,6 +1726,7 @@ export const DEFAULT_SETTINGS = {
   volume: 0.8,
   playbackSpeed: 1,
   preservePitch: true,
+  bitPerfectOutput: false,
   shuffle: false,
   repeat: 'off',
   resumeOnLaunch: true,
@@ -2106,6 +2115,8 @@ export interface AppSettings {
   volume: number
   playbackSpeed: number
   preservePitch: boolean
+  /** Android only: ask the phone for bit-perfect output on a USB DAC (Android 14+). */
+  bitPerfectOutput: boolean
   shuffle: boolean
   repeat: RepeatMode
   resumeOnLaunch: boolean
@@ -4272,7 +4283,7 @@ Commit after each. Run `npm run typecheck && npm run lint && npm test` at every 
 ---
 
 ## 15. Tests (vitest, `test/*.test.ts`, node environment)
-Reference count: **111 tests in 17 files**. Write these (names = files):
+Reference count: **221 tests in 30 files** (111 in 17 files for the desktop app alone, the rest for Android). Write these (names = files):
 - `identity.test.ts` and `legacyIds.test.ts`: fixed input -> exact 16-hex ids; artist/album/song id rules; hash unchanged.
 - `database.test.ts`: damaged file is kept aside; recovery from `backups/`; restore validates before swapping.
 - `migrations.test.ts`: fresh database ends at the latest version; migration 9 repairs an old schema; idempotent.
@@ -4289,6 +4300,12 @@ Reference count: **111 tests in 17 files**. Write these (names = files):
   through the real process launcher) and repaired; stale downloaded copy removed; busy exe retried later. Uses a local HTTP server as a stand-in for GitHub.
 - `audioTags.test.ts`: Vorbis comment round trip and merge-only-missing; FLAC written in padding (same size, audio bytes unchanged) and by rewrite (existing tags kept, second run no-op);
   cover embedded in FLAC (both paths) and MP3, never replaces an existing picture; non-FLAC and unsupported extensions ignored.
+
+Android tests (section 20; the four Java ones are skipped when no JDK is installed):
+- `nativeAudio.test.ts`, `playerNative.test.ts`: the audio-element look-alike (events, tokens, outside pause/resume, errors) and the real player store on top of it; wording of the output report.
+- `phoneLibrary.test.ts` (real sql.js database + fake plugin), `phoneEditBackup.test.ts` (tag editing rules, backup/restore round trip, refuses a non-Oli file), `downloadQueue.test.ts`, `downloadQueueYoutube.test.ts`, `androidUpdate.test.ts`, `rowWindow.test.ts`.
+- `youtubeCore.test.ts` (real yt-dlp output in `test/fixtures/yt`), `youtubeService.test.ts` (fake plugin).
+- Java compiled with `javac` and run: `androidTagWriter.test.ts` (FLAC/MP3 tag + cover writers, audio bytes identical, read back by an independent library), `androidDownload.test.ts` (resume, pause, checksum ... against a local server), `androidYtOutput.test.ts` (yt-dlp progress lines and metadata escaping).
 
 ---
 
@@ -4342,8 +4359,9 @@ list of what is not verified.
 - No equalizer UI, no crossfade, no bit-perfect/exclusive output, no cover art for WAV/Ogg/ALAC/AIFF Archive downloads, no tags for those formats.
 - Archive: no in-app preview playback; a restart mid-download keeps the file but loses its md5/tag info.
 - Spotify playlists untested (needs keys); a full 100-item Mix download untested (multi-GB as video).
-- The app update checker (`updater.ts`) reads `https://api.github.com/repos/<owner>/<repo>/releases/latest`; the reference points at `CyttoRak-J/Oli`. It only informs, it never installs. Installers are unsigned (no certificate); macOS builds are ad-hoc signed and were **not** run on a real Mac; there is no Android version.
+- The app update checker (`updater.ts`) reads `https://api.github.com/repos/<owner>/<repo>/releases/latest`; the reference points at `CyttoRak-J/Oli`. It only informs, it never installs. Installers are unsigned (no certificate); macOS builds are ad-hoc signed and were **not** run on a real Mac; Android is a separate release line (section 20) with a public alpha signing key.
 - yt-dlp busy-retry was only unit-tested; offline behaviour of the engine manager was not tried in the real app.
+- **Android (section 20) has never run on a phone.** Not built: a folder picker for music outside the media library, duplicate detection, gapless playback, notification artwork for local songs, ReplayGain/lyrics from MP3/M4A tags, online metadata matching ("fix metadata"), an in-app APK installer, the desktop's video window. Open decisions: the real signing key (`docs/ANDROID_SIGNING.md`) and the native rewrite (section 20.9), which depends on the owner's phone reports.
 - Optional next steps: repeat button on the mini player, bubble controls, more UI tests,
   a "Creative Commons / public domain only" Archive filter (it cannot detect false licence claims), adding the download folder as a library folder automatically.
 
@@ -4361,37 +4379,69 @@ Do this only after asking the user for the repository (`owner/repo`) and confirm
 5. **Verify the release**: `GET /repos/<owner>/<repo>/releases/tags/vX.Y.Z` lists the assets. Download the Windows installer and compare its SHA-256 with `SHA256SUMS.txt`.
 6. **Say plainly what is not verified**: macOS builds were only built and signature-checked (`codesign --verify`), never launched on a real Mac; nothing is notarized.
 
-## 20. Android (alpha built with Capacitor; see 20.1 for what exists)
-The desktop app is Electron, which does not run on Android. Options that were considered (ask the user which one; the reference took option A by default, see `ANDROID_PLAN.md`):
-- **Capacitor app reusing the React UI**: the screens are reused, but everything the Electron main process does (library scan, database, playback source, downloads, tag writing) must be re-implemented
-  for Android (`window.cytto` becomes an adapter over Capacitor plugins). Internet Archive works with plain HTTP. YouTube needs a native plugin around a yt-dlp build for Android.
-- **Full native app (Kotlin, Jetpack Compose, Media3 player, Room database, MediaStore scanning)**: best experience, a complete rewrite.
-Either way: Internet Archive downloads are straightforward; YouTube downloading is possible with `youtubedl-android` (bundles yt-dlp, Python and ffmpeg) or NewPipeExtractor, but Google Play policy
-rejects apps that download YouTube content, so such an app is distributed as an APK on GitHub Releases, not through Play. The APK would be built by a GitHub Actions job (Temurin JDK 17 + Android SDK, `./gradlew assembleRelease`).
+## 20. Android (Capacitor app, phases 0.5 to 5 built; version 0.7.0)
+The desktop app is Electron, which does not run on Android. Options that were considered (ask the user which one; the reference took option A, see `ANDROID_PLAN.md`):
+- **A. Capacitor app reusing the React UI plus native Java plugins** (what the reference is): the screens and the desktop *services* (database, library queries, playlists, ...) run unchanged inside the web view; native Android code is used only where a phone requires it.
+- **B. Full native app (Kotlin, Jetpack Compose, Media3, Room, MediaStore)**: best experience, a complete rewrite. The owner's rule (Section 20.9): switch to B if the phone app lags, crashes or loses background playback.
 
-### 20.1 What the reference Android alpha contains (Capacitor, reuses the React UI)
-- `capacitor.config.ts` (`appId` = the app id, `webDir: out/renderer-android`, `CapacitorHttp` enabled so `fetch()` to archive.org is native and not blocked by browser cross-origin rules),
-  `vite.android.config.ts` (web build of the same renderer into `out/renderer-android`, `base: './'`), scripts `build:android-web`, `android:sync` (web build + `cap sync android`).
-  Packages: `@capacitor/core`, `@capacitor/android`, `@capacitor/filesystem` (+ `@capacitor/cli` as a dev dependency). Capacitor 8 needs **JDK 21** and Node 22.
-- `android/` is the generated Gradle project (`npx cap add android`), committed. Changes made to it: `versionName "0.1.0"`, a `signingConfigs.release` that uses `android/keystore/oli-alpha.jks`
-  (public **alpha** key, password `oli-alpha-public`; testing only), launcher icons generated from the user's `build/icon.png` (legacy, round and adaptive foreground PNGs; background colour `#241A3D`).
-  `android/.gitignore` already ignores the synced web assets and the generated cordova-plugins folder; CI regenerates them with `cap sync`.
-- **The idea:** the screens call `window.cytto.invoke(channel, ...)`. On desktop the Electron preload provides it. `src/renderer/src/main.tsx` calls `installPlatform()` first; if `window.cytto` is missing it
-  loads `platform/webBackend.ts`, which answers every channel inside the web view (unsupported channels answer `null` and log a warning once, so every screen still opens). `lib/platform.ts` tells
-  the UI which shell it runs in (`desktop`, `android`, `web`); for the phone shell the app shows `MobileNav` (bottom navigation) and `MobilePlayerBar` (compact player), hides the title bar and sidebar, uses a
-  one-line-per-song table in `SongTable`, hides the folder picker on the Archive page, and `lib/media.ts` maps a saved file to `Capacitor.convertFileSrc(uri)`.
-- **Shared code:** the pure Internet Archive functions live in `src/shared/archiveCore.ts` (no Node imports) and are used by both `services/archive.ts` (desktop main process) and the web backend.
-- **Phone architecture (phase 1a, verified in a phone-size window):** the phone app runs the SAME services as the desktop app inside the web view. `platform/androidCore.ts` opens the same SQLite schema with sql.js
-  (database bytes kept in IndexedDB through the `DatabasePersistence` plug-in of `services/database.ts`, saved when the app goes to the background) and creates `SettingsStore`, `LibraryQueries` (the read half of the
-  library service, split out of `LibraryService` so desktop behaviour is unchanged), `PlaylistService`, `FavoritesService`, `QueueService`, `HistoryService`, `PlaybackStateStore`, `AnalyticsService`, `SearchService`
-  (it takes a small `SearchProviders` interface) and `LyricsService`. `services/coreHandlers.ts` maps the IPC channels onto them. Desktop-only Node modules become browser stand-ins in `platform/shims/`
-  (events, path, crypto, fs, logger) through aliases and a resolve plug-in in `vite.android.config.ts`; the page policy of the phone build adds `'wasm-unsafe-eval'` (SQLite is WebAssembly; without it the database cannot
-  start, which the phone-size test caught). A `__OLI_WEB__` build flag plus an empty stand-in for `webBackend` in `electron.vite.config.ts` keep all phone code and the wasm file out of the desktop bundle.
-  `platform/webBackend.ts` adds only the phone-specific parts: Internet Archive search/listing/downloads (downloaded files are inserted into the shared `songs` table with desktop-style ids) and "not built yet" answers.
-- **Not there yet:** scanning the phone's music, native audio with a foreground service (the player will get a `NativeAudio` object with the audio-element interface, backed by Media3), YouTube (native plugin around
-  `youtubedl-android`), md5/tags/cover art for downloads, tag editing, backup. The full PC-vs-Android parity checklist with phases is in `ANDROID_PLAN.md`.
-- **Owner's rule:** if the phone app lags, crashes or loses background playback, rewrite it natively (Kotlin, Compose, Media3, Room) under `android-native/`; the measurable triggers are in `ANDROID_PLAN.md`.
-- `android/` is excluded from eslint (`ignores`), and `tsconfig.node.json` includes `vite.android.config.ts` and `capacitor.config.ts`.
+Either way Google Play policy rejects apps that download YouTube content, so the APK is distributed on GitHub Releases, not through Play. The APK is built by GitHub Actions (Temurin JDK 21, `./gradlew assembleRelease`, Android SDK on the runner).
+
+**Reference repository and status.** The exact source of everything below is in the repository at tag `android-v0.7.0`; this section is the specification and the reasons. **Built and CI-compiled, proven in a PC test window, and NOT yet run on a real phone or emulator** (there is no Android SDK on the development PC). Anything native (Java) is verified only by: it compiles and packages in CI, the pure-Java parts are compiled and tested with the PC's JDK, and the JavaScript side is exercised against stand-ins for the plugins (20.7).
+
+### 20.1 Layers
+1. **Screens:** the same React code. `lib/platform.ts` `shellPlatform()` returns `desktop | android | web` (from `window.cytto.platform`); the phone shell shows `MobileNav` + `MobilePlayerBar`, hides the title bar and sidebar, and the song table shows one line per song.
+2. **The phone's "main process" inside the web view** (`platform/androidCore.ts` + `platform/webBackend.ts`, installed by `platform/install.ts` when `window.cytto` is missing): the SAME SQLite schema through sql.js (database bytes in IndexedDB via the `DatabasePersistence` plug-in of `services/database.ts`, flushed when the page goes to the background), the SAME services (`SettingsStore`, `LibraryQueries`, `PlaylistService`, `FavoritesService`, `QueueService`, `HistoryService`, `PlaybackStateStore`, `AnalyticsService`, `SearchService` with a small `SearchProviders` interface, `LyricsService`) wired by `services/coreHandlers.ts`. Desktop-only Node modules are replaced by stand-ins in `platform/shims/` (aliases in `vite.android.config.ts`). The page policy of the phone build adds `'wasm-unsafe-eval'` (SQLite is WebAssembly). A `__OLI_WEB__` flag (true only in the phone build) plus an empty stand-in for `webBackend` in `electron.vite.config.ts` keep all phone code and the wasm out of the desktop bundle; `nativeAudio.ts` guards itself with `typeof __OLI_WEB__ !== 'undefined' && !__OLI_WEB__` so it drops out of the desktop build (verify by grepping `out/renderer` for `nativecommand`).
+3. **Native plugins (Java, `android/app/src/main/java/<app id path>/`)** registered in `MainActivity` before `super.onCreate`: `OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube` (+ Capacitor's `Filesystem`, `Share`, `Browser`). Every plugin has a JavaScript interface type next to the code that uses it, and a getter that returns `null` outside the Android app or when the APK lacks the plugin (`window.Capacitor.PluginHeaders` is checked); the getters cache the proxy because `registerPlugin` may only be called once per name.
+   **Trap:** a Capacitor plugin proxy answers `then`, so it looks like a promise: never `await` it or return it from an async function.
+
+### 20.2 Audio: `OliAudio` (phase 1b)
+- **Java:** `OliAudioService` (Media3 `MediaSessionService`, foreground type `mediaPlayback`, notification/lock screen built by Media3; tapping the notification opens `MainActivity`), `OliAudioEngine` (ExoPlayer + diagnostics + bit-perfect), `OliAudioPlugin` (methods `loadSource {url, headers?, startPositionMs?, autoplay?, bitDepth?, token}`, `play`, `pause`, `stop`, `seekTo {positionMs}`, `setVolume`, `setPlaybackParams {speed, preservePitch}`, `setMetadata`, `setBitPerfect {enabled}`, `getOutputInfo`; events `state`, `time` (every 250 ms while playing), `seeked`, `error`, `command` (`next`/`previous`), `outputChanged`), `SourceProbe` (reads the FLAC/WAV header for the real rate/channels/bit depth, `MediaExtractor` for the rest), Media3 1.8.0 (`androidx.media3:media3-exoplayer/-session/-common`). Manifest: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `POST_NOTIFICATIONS` (asked at start on Android 13+), `WAKE_LOCK`, `MODIFY_AUDIO_SETTINGS`; the service with `android:foregroundServiceType="mediaPlayback"` and the `androidx.media3.session.MediaSessionService` intent filter.
+- **Threading:** every ExoPlayer call happens on the main thread. Plugin methods run on Capacitor's plugin thread, so `OliAudioService.withEngine` posts to the main handler and starts the service if needed (a queue of pending tasks runs when the service has created its engine).
+- **Hi-res policy:** the audio sink is a `ForwardingAudioSink` around `DefaultAudioSink` (float output enabled) whose `getFormatSupport` refuses float PCM when `allowFloat` is false. `MediaCodecAudioRenderer` asks the decoder for float output only if the sink accepts it, so: `allowFloat = !lossy && (bitDepth == 0 || bitDepth > 16)` (decided per file from `SourceProbe`). 24-bit FLAC is decoded to 32-bit float; 16-bit and lossy files stay 16-bit.
+- **Honest report (`outputInfo`):** source (container, mime, rate, channels, bit depth), decoder name (from `AnalyticsListener.onAudioDecoderInitialized`), the AudioTrack's real encoding/rate/channels (`onAudioTrackInitialized`), Android's mixer rate (`AudioManager.getProperty(PROPERTY_OUTPUT_SAMPLE_RATE)`), the output device (Android 13+: `getAudioDevicesForAttributes`, exact; older: a guess by priority USB > wired > Bluetooth > HDMI > speaker, flagged `exact:false`), Bluetooth (compressed) flag, and `bitPerfect {supported (API 34), requested, active, note}`. `active` is true only if Android holds a `MIXER_BEHAVIOR_BIT_PERFECT` preferred mixer attribute for the current device whose rate and encoding equal the AudioTrack's. `verdict` is plain text ("Android's mixer converts 96 kHz to 48 kHz ...").
+- **Bit-perfect (Android 14+):** `setBitPerfect(true)` looks for a supported mixer attribute of the device with behavior bit-perfect, the file's sample rate and the encoding the player will output (float for hi-res, 16-bit otherwise), and calls `setPreferredMixerAttributes`; otherwise the note says what the device offers. Cleared when turned off/released.
+- **Notification buttons:** the session player is a `ForwardingPlayer` that always advertises next/previous and turns `seekToNext/Previous(MediaItem)` into a `command` event (the queue lives in JavaScript). Audio focus and "headphones unplugged" are ExoPlayer's (`setAudioAttributes(..., true)`, `setHandleAudioBecomingNoisy(true)`); wake mode local for files, network for streams.
+- **JavaScript:** `platform/nativeAudio.ts` `NativeAudio extends EventTarget implements AudioLike` (the subset of `HTMLAudioElement` the player store uses; `store/player.ts` types its audio as `AudioLike`). Rules that made the shared player engine work unchanged: setting `src` starts a load (autoplay false, `paused` becomes true, no `pause` event, like a media element), `play()` sets `paused=false`, fires `play` then `waiting` and resolves when the native call was accepted; `pause()`; `currentTime` set = native seek; `duration` NaN until ready; `readyState` 0/1/4; every plugin call is chained so they reach native in order; **every event carries a token** (a new one per `src` set or `removeAttribute('src')`) and events of an older token are dropped; a pause/resume that came from outside (notification, headset, audio focus) is mirrored as `pause`/`play` unless it is the echo of our own last request (`awaiting` with a 1.5 s expiry); `isPlaying` while `paused` is ignored; `ended` is delivered as `pause` then `ended` (like a media element); `error.code` uses the media-error numbers the store reads (2 network, 3 decode, 4 not supported/file missing). `store/player.ts` picks it in `getAudio()` when the Android plugin exists (`new Audio()` otherwise), sends notification labels (`setMetadata`) from `load(track)`, and handles the `nativecommand` event with `next()`/`previous()`. Stream request headers (YouTube) are registered per address with `setStreamHeaders(url, headers)` and used by `loadNew`.
+- **UI:** `lib/useNativeOutput.ts` + `lib/outputText.ts` (`describeOutput`, `outputRows`) feed the second line of `MobilePlayerBar` (`FLAC 24-BIT / 96 KHZ` and `→ 48 kHz out`) and Settings > Audio output (the rows plus the bit-perfect switch; setting `bitPerfectOutput`, default false).
+- **Tests:** `test/nativeAudio.test.ts` (adapter + wording), `test/playerNative.test.ts` (the REAL player store on the adapter with a fake plugin: play, ended -> next, notification commands, outside pause/resume, errors, seek, bit-perfect setting).
+
+### 20.3 The phone's own music: `OliMedia` (phase 1c)
+- **Java:** `OliMediaPlugin` (`getPermission`, `requestPermission` (`READ_MEDIA_AUDIO` on Android 13+, `READ_EXTERNAL_STORAGE` with `maxSdkVersion=32` before; Capacitor permission aliases), `queryAudio {offset, limit}` (MediaStore.Audio, `IS_MUSIC != 0`, sorted by `_ID`, pages of 500 with `QUERY_ARG_LIMIT/OFFSET`, columns chosen by API level: `RELATIVE_PATH` from 29, `ALBUM_ARTIST/GENRE/BITRATE` from 30), `probeFiles {uris}` (rate/channels/bit depth via `SourceProbe`; for FLAC also `FlacTags`: ReplayGain, ISRC, lyrics, album artist, composer, genre, disc), `getArtwork {uri, key, size}` (embedded picture via `MediaMetadataRetriever`, else `ContentResolver.loadThumbnail` (API 29+, also finds folder covers); cached as `cacheDir/art/<key>.jpg`, `.none` marker when there is no cover), `clearArtworkCache`; event `mediaChanged` from a `ContentObserver` debounced 3 s).
+- **JavaScript:** `platform/phoneLibrary.ts` (`PhoneLibrary`: permission, paging, diff against the database by file mtime, songs that vanished are marked `missing` and return when the file returns, details read in the background in batches of 20, lossy files marked as read without a probe, per-album cover lookup with in-flight sharing, `describeFile` for a fresh download), `platform/phoneStore.ts` (all SQL: location row `phone:mediastore`/"Phone music", bulk upsert in one transaction with a path-conflict rule for moved files, mark missing, patch details, `codecsOf`, `songLocation`), wiring in `webBackend.ts` (`addLibraryFolder` = "Scan phone music", `rescanLibrary`, `cancelScan`, `getScanState`, `getEmbeddedArtwork` (returns `Capacitor.convertFileSrc('file://'+path)`), ask once on the very first start, scan on launch when `scanOnLaunch`, rescan on `mediaChanged` at most every 30 s).
+- **Decisions:** song id = `songIdForPath("<RELATIVE_PATH><file name>")` (the desktop cyrb64 scheme; stable when Android renumbers its ids); the row's `path` is the `content://` URI ExoPlayer plays; `modified_at` = file mtime (unchanged files are skipped); `sample_rate` NULL = details never read, 0 = read (or lossy) with nothing to add; a changed file resets rate/bit depth/channels and is re-read; a moved file keeps its old row (missing) and gives up its `path` (`path || '#moved:' || id`) so playlists keep pointing at something. **Not built:** a Storage Access Framework folder picker (MediaStore already lists phone storage and SD cards), duplicate detection, ReplayGain/lyrics from MP3/M4A tags, bit depth of 24-bit ALAC.
+- **Tests:** `test/phoneLibrary.test.ts` runs the scanner against a fake plugin and a REAL sql.js database (it found a real bug: a wrong SQL placeholder count made every scan fail); ids equal the desktop scheme.
+
+### 20.4 Downloads and tags: `OliDownload` (phase 2)
+- **Pure Java (no Android classes; compiled and tested with the PC's JDK):** `DownloadEngine` (2 files at a time; each goes to `name.part` and resumes with an HTTP `Range` request; pause keeps the part file; cancel deletes it; automatic retries for connection problems; a server that ignores `Range` restarts from 0; size and MD5 are checked and a damaged file is deleted and reported; then tags and the cover are written), `FlacTagWriter` (rebuilds the metadata blocks: keeps STREAMINFO/SEEKTABLE/APPLICATION/CUESHEET, merges Vorbis comments (an empty value removes a tag), replaces only the front cover, adds 2 KB of padding; the audio is copied unchanged into a temporary file that then replaces the original; `File.renameTo` with a delete fallback, because `java.nio.file` needs Android 8 and minSdk is 24), `Id3TagWriter` (ID3v2.3 with UTF-16 text for files without a tag; a file that already has ID3v2.4 stays v2.4/UTF-8; frames that are not being changed, including the cover, are kept verbatim; frames with compression/encryption flags are dropped), `TagFields`, `YtDlpOutput`.
+- **Android glue:** `OliDownloadService` (foreground service, type `dataSync`, permission `FOREGROUND_SERVICE_DATA_SYNC`, one progress notification, stops itself when the engine is idle), `OliDownloadPlugin` (`getRoot`, `enqueue {id, url, relPath, size?, md5?, headers?, coverUrl?, tags?}`, `pause`, `resume`, `cancel {id, relPath?}`, `getActive`, `writeTags {path, tags}` (refuses any file outside the app's own folder); events `dlProgress`, `dlState`). Files go to `getExternalFilesDir()/Oli/...` (removed on uninstall). `enqueue` accepts only http(s) and rejects `..`.
+- **JavaScript:** `platform/downloadQueue.ts` `DownloadQueue` keeps the list and the jobs in localStorage (`oli.downloads`, `oli.downloadJobs`; newest 200), maps the plugin's events onto the same `DownloadItem` rows the Downloads screen shows on the PC, dedupes identical URLs that are queued/running/paused, resumes what was interrupted at start (re-sends queued/downloading jobs unless the service still has them; paused stay paused), calls `onCompleted(item, job, file)` to make a song (an error there marks the download failed), and supports `prepare()` (work before the transfer starts, 25 s limit) and YouTube jobs (20.5).
+- **Tag editing:** `platform/songEdits.ts` ports `MetadataOpsService.applySongEdits` (required fields fall back to `Unknown Artist/Album` and the file stem; artist/album ids are recomputed; merged-artist aliases respected) and additionally asks `OliDownload.writeTags` for songs that are files in the app's own folder; songs from the media library keep the edit inside the app.
+- **Backup/restore:** `platform/phoneBackup.ts` (`PhoneBackup`: at most one automatic backup a day, newest 8 kept, in `Oli/backups/`; `restoreBytes` only accepts a healthy Oli database, checked by `Database.replaceFromBytes` before anything is replaced; then `afterRestore` = migrations + settings reload + refresh), export through `@capacitor/share`, restore from the newest automatic backup (a `confirm`) or a file chosen with an `<input type=file>`.
+- **Tests:** `test/androidTagWriter.test.ts` (compiles the Java with `javac`, writes tags and covers into synthetic FLAC/MP3 files and a real library FLAC, reads them back with `music-metadata`/`node-id3`, and checks that the audio bytes are identical), `test/androidDownload.test.ts` (Java engine against a local HTTP server that misbehaves: dropped connection resumed with Range, pause/resume, server without Range, wrong MD5, 404 not retried, short file, cancel, tags + cover), `test/downloadQueue.test.ts`, `test/phoneEditBackup.test.ts` (real database).
+
+### 20.5 YouTube: `OliYouTube` (phase 3)
+- **Engine:** `io.github.junkfood02.youtubedl-android:library` and `:ffmpeg` 0.18.1 run yt-dlp (Python) as a process from the extracted native libraries. `android/app/build.gradle`: `packagingOptions { jniLibs { useLegacyPackaging = true } }` (required), `ndk { abiFilters "arm64-v8a", "armeabi-v7a" }` (no x86; the APK is about 104 MB). The first start unpacks Python (seconds).
+- **Java:** `OliYouTubePlugin`: `status` (starts the engine, reports the version), `updateEngine {channel}` (the library downloads the newest yt-dlp from GitHub), `search {query, count}`, `playlist {url, limit}`, `info {videoId, streams?}` — each returns yt-dlp's own JSON in `{json}` (client chain default -> `web_embedded` -> `android_vr` for streams, as on the PC; at most 3 yt-dlp processes at once; a watchdog kills a process after its time limit); only YouTube addresses and video ids of 11 characters are accepted and only options built in the plugin are used. Downloads (`enqueue {id, videoId, mode: song|video, audio, height, relBase, title, artist, album}`, `pause` = kill the process (yt-dlp continues from its `.part` file), `resume`, `cancel`, `getActive`) emit the same `dlProgress`/`dlState` events as `OliDownload`. A **song** is `-f "ba[ext=m4a]/ba"` with `--embed-metadata --embed-thumbnail --convert-thumbnails jpg` and `--parse-metadata "<value>:%(meta_title|artist|album)s"`; the value is escaped by `YtDlpOutput.metadataLiteral` (`%` doubled, `:` becomes backslash-colon, backslashes are NOT doubled, a trailing backslash is dropped — checked against yt-dlp 2026.08.19). A **video** merges into mp4 up to the chosen height. Progress comes from parsing `[download] 12.3% of ~ 3.45MiB at 1.2MiB/s ETA 00:02` (`YtDlpOutput.parse`).
+- **JavaScript:** `platform/youtubeCore.ts` (pure, tested on real yt-dlp output in `test/fixtures/yt`: `parseSearch`, `parsePlaylist` (limits 200, Mix 100), `parseVideoMeta`, `extractStreams` (MP4/AAC audio first, then other audio, then muxed, manifests skipped, only User-Agent/Accept/Accept-Language/Referer/Origin headers survive — never cookies), `streamExpiry`, `cleanTrackTitle`, `songTagsFor` (YouTube Music tags > "Topic" channel > "Artist - Title" > channel), `videoIdFromUrl`), `platform/youtubeService.ts` (`YouTubeService`: search cache 1 h, playlist cache 10 min, stream addresses cached until 10 minutes before their expiry, identical questions share one yt-dlp run, prefetch one at a time, engine status `checking/ok/broken/failed/installing/update-available`, automatic update when `ytdlpAutoUpdate`), `webBackend.ts` (providers for `SearchService`, all YouTube channels, `enqueueDownload` (a YouTube link becomes a song download whose tags are read first via `prepare`), `enqueuePlaylist`, `enqueueEntries`, `videoDownloadSong`, `videoDownload`; a finished YouTube song becomes a song row, a video does not; the desktop's separate video window does not exist on the phone).
+- **Tests:** `test/youtubeCore.test.ts`, `test/youtubeService.test.ts`, `test/downloadQueueYoutube.test.ts`, `test/androidYtOutput.test.ts` (Java parser).
+- **Not verified:** yt-dlp actually running on a phone (Python unpack, the client chain, bot checks on the phone's network, `--embed-thumbnail` producing a cover in m4a), and how long start-up takes. YouTube may refuse requests ("Sign in to confirm you are not a bot"); the app then reports an empty answer instead of crashing.
+
+### 20.6 Big libraries, updates, signing (phase 5)
+- **Windowed song list:** `lib/useRowWindow.ts` (`computeWindow`, tested) + `SongTable`: rows are exactly `ROW_HEIGHT` = 46 px, only the rows on screen plus a margin exist in the page (padding keeps the full height), blocks of 6 rows are added/dropped, `overflow-anchor: none` on the list (the browser otherwise shifts the scroll position when rows change), "Go to playing track" sends `oli:jump-to-track` when the row is not in the page (long distances are crossed at once). Measured with 3,000 songs at 4x slower CPU: memory 123 MB -> 26 MB, worst frame 1.9 s -> 0.12 s. The same component serves the desktop (checked on a copy of a real 1,137-song library in an isolated profile).
+- **Update check:** `platform/androidUpdate.ts` reads the GitHub releases list, considers tags `android-vX.Y.Z` only, compares numerically with the installed version (`__OLI_ANDROID_VERSION__` = `versionName` in `android/app/build.gradle`, injected by `vite.android.config.ts`), and opens the release page in Custom Tabs (`@capacitor/browser`); nothing is installed automatically.
+- **Signing:** the APK is signed with the public alpha key in `android/keystore/oli-alpha.jks` unless the repository has the secrets `OLI_KEYSTORE_BASE64`, `OLI_KEYSTORE_PASSWORD`, `OLI_KEY_ALIAS`, `OLI_KEY_PASSWORD` (`docs/ANDROID_SIGNING.md`); switching keys means uninstalling once. The workflow publishes Gradle/compiler errors as annotations (`::error::`) so a failed build can be read through the public API without logging in.
+
+### 20.7 Testing without a phone (all of it worked in the reference)
+- **PC test window** (`scripts/android-harness`, see its README): a throwaway Electron window with **no** desktop preload loads the built phone bundle (`OLI_TEST_HOOKS=1 OLI_OUT_DIR=out/renderer-android-test vite build -c vite.android.config.ts`; the hook exposes `window.__oliPlayer`, normal builds do not have it). The preload loads Capacitor's real `native-bridge.js` with `window.androidBridge`, so `Capacitor.getPlatform()` is `android` and plugin calls travel the real call/notify protocol; stand-ins answer `OliAudio` (plays real audio through an `<audio>` element), `OliMedia` (lists songs of the owner's music folder, reads real FLAC headers, `OLI_HARNESS_SONGS=N` makes N made-up songs), `OliDownload` (Node downloader with Range/pause/cancel/MD5), `OliYouTube` (real yt-dlp JSON from `test/fixtures/yt`), `Filesystem`, `Share`, and a fake archive.org item. Chromium blocks port 5060; the static server uses 8765. Suites: `e2e.cjs` (20 checks), `e2e-library.cjs` (19 + 3 for a refused permission), `e2e-downloads.cjs` (23), `e2e-youtube.cjs` (27), `e2e-list.cjs` (8), `perf.cjs` (speed numbers), `run-all.ps1` runs them all. Stop the window by process id, never by window title.
+- **Java without Android:** `javac` from the PC's JDK compiles the pure classes (`scripts/android-tags/*Cli.java` are the test entry points); everything else is compiled by the `android-dev` branch build in CI (push the branch; a tag would publish a release). Read a failed run through `https://api.github.com/repos/<owner>/<repo>/check-runs/<job id>/annotations`.
+- **Results at the end of phase 5:** 221 unit tests in 30 files, 97 checks in the PC window, CI builds and `apksigner verify` for every tag.
+- Gotchas: newer npm skips install scripts, so `npm install <package>` can leave `node_modules/electron/dist` missing (`node node_modules/electron/install.js`); never write repository files with PowerShell `Set-Content -Encoding utf8` (it adds a byte-order mark that broke `build.gradle`); scripts must not match their own command line when they stop test windows.
+
+### 20.8 Files worth reading first (contracts)
+`platform/nativeAudio.ts` (event protocol), `platform/phoneLibrary.ts` + `phoneStore.ts`, `platform/downloadQueue.ts`, `platform/youtubeService.ts` + `youtubeCore.ts`, `platform/webBackend.ts` (below, verbatim), `DownloadEngine.java`, `FlacTagWriter.java`, `Id3TagWriter.java`, `OliAudioEngine.java`, `.github/workflows/android.yml` (below, verbatim).
+
+### 20.9 The owner's native-rewrite rule
+If the phone app lags, crashes or loses background playback, rewrite it natively (Kotlin, Compose, Media3, Room) under `android-native/`, keeping the SQL schema and ids, the Java plugins, the Internet Archive and YouTube parsing, and the metadata rules. Measurable triggers (list scrolling with 2,000+ songs, memory, background playback, start-up time) are in `ANDROID_PLAN.md`; the PC estimates are there too, but only the owner's reports from a real phone can trigger the rewrite.
 
 `.github/workflows/android.yml` (verbatim). A tag `android-vX.Y.Z` builds `Oli-X.Y.Z-android.apk`, checks it with Android's own `apksigner verify`, writes `SHA256SUMS-android.txt`, and publishes a pre-release
 (re-running a tag replaces the release). `npm ci --ignore-scripts` is used because the web build needs neither the Electron binary nor yt-dlp.
@@ -4406,6 +4456,9 @@ on:
   push:
     tags:
       - 'android-v*'
+    # Pushing the branch `android-dev` builds and checks the APK without publishing a release.
+    branches:
+      - 'android-dev'
 
 permissions:
   contents: read
@@ -4438,11 +4491,34 @@ jobs:
       - name: Build the web UI and sync it into the Android project
         run: npm run android:sync
 
+      # Optional: the owner's own signing key. Without the secrets the public alpha key is used (see docs/ANDROID_SIGNING.md).
+      - name: Use my own signing key (only when the secrets exist)
+        env:
+          KEYSTORE_B64: ${{ secrets.OLI_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/oli-release.jks"
+            echo "OLI_KEYSTORE_FILE=$RUNNER_TEMP/oli-release.jks" >> "$GITHUB_ENV"
+            echo "Signing with the owner's own key"
+          else
+            echo "No own key set: signing with the public alpha key"
+          fi
+
       - name: Build the APK
         working-directory: android
+        env:
+          OLI_KEYSTORE_PASSWORD: ${{ secrets.OLI_KEYSTORE_PASSWORD }}
+          OLI_KEY_ALIAS: ${{ secrets.OLI_KEY_ALIAS }}
+          OLI_KEY_PASSWORD: ${{ secrets.OLI_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          # On failure the compiler / Gradle messages are also published as annotations (public, readable without logging in).
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee ../gradle-build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" != "0" ]; then
+            grep -E "error:|What went wrong|Execution failed|Caused by|symbol:|location:|cannot find|incompatible" -A2 ../gradle-build.log | head -60 | while IFS= read -r line; do echo "::error::${line}"; done
+            exit "$status"
+          fi
 
       # Android's own verifier (from the SDK build-tools on the runner): fails the job if the signature is invalid.
       - name: Verify the APK signature
@@ -4505,25 +4581,59 @@ jobs:
 
 An early build of Oli for Android phones. **Install:** download `Oli-<version>-android.apk` to your phone, open it, and allow
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
+Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What works in this alpha
+### What is new in 0.7.0: big libraries, updates, your own key
+- **Long lists stay smooth**: the song list only keeps the rows on screen, so a library of thousands of songs scrolls as easily as a short one (tested with 3,000 and 10,000 songs; memory dropped from 123 MB to 26 MB with 3,000). "Go to playing track" still finds a song far down the list.
+- **Update check**: Settings > About & updates > "Check for updates" looks for a newer Oli Android release on GitHub and opens its page (nothing is installed by itself). The app now shows its real version.
+- **Faster scanning**: MP3/AAC/Opus files are not read again for details Android already gives.
+- **Your own signing key** can be added later without changing the app (see docs/ANDROID_SIGNING.md); until you do, builds keep the public alpha key.
+
+### Already in 0.6.0: YouTube
+- **YouTube search** next to your library (Search page), **paste a YouTube link** (video, playlist or Mix) to see and play it, **play any result in the app** (the audio is streamed by the native player, so it keeps playing with the screen off).
+- **Download as a song** (m4a with title, artist and cover embedded), **as a video** (mp4 up to the height you choose) or a **whole playlist**, all through the same download queue: pause, resume, cancel, background service.
+- **The YouTube engine (yt-dlp) runs on your phone** and updates itself: Settings > YouTube engine shows its version, "Check" and "Update now". A banner tells you when it was updated.
+- Search results and the Downloads screen fit a phone.
+- The desktop's separate video window does not exist on the phone (no "Video" button).
+
+### Already in 0.5.0: downloads, tags, backup
+- **A real download queue**: several files at a time, **pause / resume / retry / cancel**, progress and speed, kept across restarts. Downloads run in a background service (with a progress notification), so they continue with the screen off, and an interrupted download carries on from where it stopped.
+- **Every download is checked** (size and the Internet Archive's MD5) and a damaged file is deleted and reported. The finished **FLAC or MP3 gets its tags and cover art written into the file** (title, artist, album, track, year, genre, cover), so other apps show it properly too.
+- **Edit a song's tags** (title, artist, album, ... in the song list's edit): the library updates at once and artists/albums regroup. For songs Oli downloaded the tags are also written into the file; for songs from your phone's music the change stays in Oli (Android owns those files), like non-MP3 files on the PC.
+- **Backup and restore**: an automatic backup at most once a day (newest 8 kept), **Export** to the Android share sheet (Drive, e-mail, ...), **Restore** from the newest automatic backup or a file you pick. A file that is not a healthy Oli library is refused before anything is replaced.
+- The Downloads screen now fits a phone.
+
+### Already in 0.4.0: the music that is already on your phone
+- **Oli finds the music on your phone** (Android's media library): the first start asks once for permission to read your music, then scans by itself. Songs, albums, artists, genres, stats and search work on them like on the PC. Settings > Library has "Scan phone music", "Rescan phone music" and removal.
+- It **keeps up with the phone**: new files appear, deleted files are marked missing (playlists keep them, like on the PC), changed files are re-read. Favorites, play counts and playlists stay.
+- **Real format details are read from the files** (sample rate, bit depth, channels, codec; for FLAC also ReplayGain, ISRC, lyrics), so the Hi-Res badge and the output report are true for your own music too. This runs in the background and shows progress in Settings.
+- **Cover art**: embedded covers and folder covers are extracted once per album and cached.
+- Song ids follow the same scheme as the PC app.
+
+### Already in 0.3.0: native audio
+- **Playback runs in a native Android player (Media3 / ExoPlayer) inside a foreground service.** Music keeps playing with the screen off and while other apps are in front.
+- Notification and **lock-screen controls** (play/pause, previous, next, seek bar), headset and Bluetooth buttons, audio focus (pauses for calls and other players), and **pause when headphones are unplugged**.
+- **Hi-res files are decoded losslessly at full bit depth** (24-bit and up goes out as 32-bit float, 16-bit and lossy files stay 16-bit).
+- **Honest output report** (Settings > Audio output, and a short note in the player): decoder, the format handed to Android, Android's mixer rate, the output device and whether the path is **bit-perfect**. On a phone speaker or Bluetooth a 96 kHz file is converted by Android, and the app says so (for example `→ 48 kHz out`).
+- **Bit-perfect switch** (Settings > Audio output): on Android 14+ with a USB DAC it asks Android to send the file's own sample rate and bit depth to the DAC, only if the DAC offers exactly that. The report says yes/no.
+
+### Also in this alpha
 - The same screens as the desktop app, with a phone layout (bottom navigation, compact player, compact song list).
 - The **same database and logic as the PC app** run inside the app: settings, playlists (manual and smart), favorites, queue, history, play counts, local search and lyrics lookup.
 - **Internet Archive:** search free lossless music, open an item, pick a format and tracks, download to the phone. Downloaded files become songs in your library.
 
 ### What is not there yet (planned, see ANDROID_PLAN.md)
-- Native background playback with lock-screen controls (playback may stop when the screen turns off) and playing local files through the native player.
-- Scanning music that is already on your phone, cover art.
-- YouTube search, playback and downloads; tag editing and metadata fixing; backup and restore.
-- Checksum verification, tags and cover art for downloaded files (only the file size is checked).
+- A folder picker for music outside Android's media library (music on the phone or SD card is normally in it already); ReplayGain / lyrics from MP3 and M4A tags (FLAC is read).
+- Online metadata matching ("fix metadata") for YouTube songs; tags of downloaded YouTube songs come from the video's title and channel (edit them in the song list if they are off).
 
 ### Please report
 Lag while scrolling, crashes, or music stopping in the background: these decide whether the app is rebuilt fully natively for Android.
+Also useful: how long the first scan took and how many songs it found, and a screenshot of Settings > Audio output while a 24-bit/96 kHz file plays.
 
 ### Notes
 - The APK is signed with a public **alpha** key, so it is for testing. A later, properly signed build will not install over it: uninstall first.
 - Files are saved in the app's own storage (`Android/data/com.cyttos.oli/files/Oli/`), so they are removed when the app is uninstalled.
-- This build was produced by GitHub Actions and has **not** been run on a real phone by the author. Please open an issue with what you see.
+- This build was produced by GitHub Actions and has **not** been run on a real phone by the author. The native player, the phone-music scan (MediaStore), the download service, YouTube (yt-dlp on the phone) and the bit-perfect mode in particular are untested on hardware. This build is about 60 MB larger because it contains Python and ffmpeg for YouTube. Please open an issue with what you see.
 ```
 
 The web backend (verbatim):
@@ -4540,7 +4650,6 @@ The web backend (verbatim):
  *
  * Status and next steps: ANDROID_PLAN.md.
  */
-import { Directory, Filesystem } from '@capacitor/filesystem'
 import {
   ARCHIVE_ITEM_CACHE_MS,
   ARCHIVE_TIMEOUT_MS,
@@ -4548,7 +4657,8 @@ import {
   buildSearchUrl,
   isValidIdentifier,
   parseHits,
-  parseItem
+  parseItem,
+  pickCover
 } from '@shared/archiveCore'
 import { IPC } from '@shared/ipc'
 import type {
@@ -4559,13 +4669,32 @@ import type {
   Track,
   YtEngineStatus
 } from '@shared/types'
-import { initAndroidCore, trackIds, type AndroidCore } from './androidCore'
+import { Directory, Filesystem } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
+import { Browser } from '@capacitor/browser'
+import { deviceFileUrl } from '../lib/platform'
+import { setStreamHeaders } from './nativeAudio'
+import { initAndroidCore, trackIds, type AndroidCore, type AndroidProviders } from './androidCore'
+import { YouTubeService, getYouTubePlugin } from './youtubeService'
+import { songTagsFor, videoIdFromUrl, isYouTubeUrl, type SongTags } from './youtubeCore'
+import { getMediaPlugin, PHONE_LIBRARY_ID, PhoneLibrary } from './phoneLibrary'
+import { checkAndroidUpdate, type AndroidUpdateStatus } from './androidUpdate'
+import { PhoneBackup, base64ToBytes, bytesToBase64, pickFileBytes, type BackupStorage } from './phoneBackup'
+import {
+  DownloadQueue,
+  getDownloadPlugin,
+  type CompletedFile,
+  type DownloadEnqueue,
+  type DownloadJob,
+  type DownloadStore
+} from './downloadQueue'
 
 type Handler = (...args: never[]) => unknown
 type Listener = (...args: unknown[]) => void
 
 const DOWNLOADS_KEY = 'oli.downloads'
-const APP_VERSION = '1.1.0'
+/** The installed Android version (from android/app/build.gradle at build time). */
+const APP_VERSION = typeof __OLI_ANDROID_VERSION__ === 'string' ? __OLI_ANDROID_VERSION__ : '0.0.0'
 
 // ------------------------------------------------------------------ small helpers
 function readJson<T>(key: string, fallback: T): T {
@@ -4583,7 +4712,6 @@ function writeJson(key: string, value: unknown): void {
     // storage full or blocked: keep working in memory
   }
 }
-const uid = (): string => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 /** File and folder names: same rules as the desktop app (no path characters, capped length). */
 const safeName = (s: string): string =>
   s.replace(/[<>:"/\\|?*]/g, '_').replace(/\p{C}/gu, '_').trim().slice(0, 120) || 'download'
@@ -4601,6 +4729,10 @@ function emit(channel: string, ...args: unknown[]): void {
 }
 
 let core: AndroidCore
+/** YouTube (yt-dlp on the phone); null in a plain browser. */
+let yt: YouTubeService | null = null
+/** The phone's own music (null in a plain browser, where there is no native plugin). */
+let phoneLib: PhoneLibrary | null = null
 
 // ------------------------------------------------------------------ songs made from downloaded files
 function makeTrack(file: ArchiveFile, item: ArchiveItem, uri: string, size: number): Track {
@@ -4705,89 +4837,111 @@ async function archiveItem(identifier: string): Promise<ArchiveItem> {
   }
 }
 
-// ------------------------------------------------------------------ downloads (saved into the app's storage on the phone)
-interface Job {
+// ------------------------------------------------------------------ downloads (native queue, see downloadQueue.ts)
+const JOBS_KEY = 'oli.downloadJobs'
+let queue: DownloadQueue | null = null
+
+const downloadStore: DownloadStore = {
+  loadItems: () => readJson<DownloadItem[]>(DOWNLOADS_KEY, []),
+  saveItems: (items) => writeJson(DOWNLOADS_KEY, items),
+  loadJobs: () => readJson<Record<string, DownloadJob>>(JOBS_KEY, {}),
+  saveJobs: (jobs) => writeJson(JOBS_KEY, jobs)
+}
+
+interface ArchiveJobMeta {
   file: ArchiveFile
+  /** The item without its file lists (they are big and not needed to make the song). */
   item: ArchiveItem
-  relPath: string
 }
 
-let downloads: DownloadItem[] = readJson<DownloadItem[]>(DOWNLOADS_KEY, []).map((d) =>
-  // A download that was running when the app closed cannot continue: show it as failed so it can be retried.
-  d.state === 'downloading' || d.state === 'queued' ? { ...d, state: 'failed', error: 'Interrupted', speed: 0 } : d
-)
-const jobs = new Map<string, Job>()
-let pumping = false
-
-function publishDownloads(): void {
-  writeJson(DOWNLOADS_KEY, downloads.slice(0, 200))
-  emit(IPC.onDownloadsChanged, [...downloads])
+interface YouTubeJobMeta {
+  kind: 'youtube'
+  duration: number | null
+  thumbnail: string | null
+}
+interface FileJobMeta {
+  kind: 'file'
+  title: string
 }
 
-function patchDownload(id: string, patch: Partial<DownloadItem>): void {
-  downloads = downloads.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d))
-  publishDownloads()
-}
-
-async function pumpDownloads(): Promise<void> {
-  if (pumping) return
-  pumping = true
-  try {
-    for (;;) {
-      const next = [...downloads].reverse().find((d) => d.state === 'queued' && jobs.has(d.id))
-      if (!next) break
-      await downloadOne(next, jobs.get(next.id) as Job)
-    }
-  } finally {
-    pumping = false
+/** A song row for a file that is not from the Internet Archive (a YouTube download, a direct link). */
+function makeSimpleTrack(tags: SongTags, path: string, size: number, durationSec: number | null): Track {
+  const now = Date.now()
+  const ext = (path.split('.').pop() ?? '').toLowerCase().slice(0, 8)
+  const codec = ext === 'm4a' || ext === 'mp4' || ext === 'aac' ? 'aac' : ext === 'webm' || ext === 'opus' ? 'opus' : ext === 'flac' ? 'flac' : ext === 'mp3' ? 'mp3' : null
+  const artist = tags.artist || 'Unknown Artist'
+  const album = tags.album || 'Unknown Album'
+  return {
+    id: trackIds.songIdForPath(path),
+    title: tags.title || 'Untitled',
+    artist,
+    artistId: trackIds.artistIdFor(artist),
+    albumArtist: artist,
+    album,
+    albumId: trackIds.albumIdFor('', album),
+    genre: null,
+    composer: null,
+    year: null,
+    releaseDate: null,
+    trackNo: null,
+    discNo: null,
+    isrc: null,
+    rating: null,
+    duration: durationSec ?? 0,
+    bitrate: null,
+    sampleRate: null,
+    bitDepth: null,
+    channels: null,
+    codec,
+    format: ext ? ext.toUpperCase() : null,
+    fileSize: size,
+    path,
+    folderId: null,
+    libraryId: null,
+    hash: null,
+    replayGain: null,
+    replayGainAlbum: null,
+    lyrics: null,
+    hasEmbeddedArtwork: false,
+    addedAt: now,
+    modifiedAt: now,
+    lastPlayedAt: null,
+    playCount: 0,
+    favorite: false,
+    missing: false,
+    error: null
   }
 }
 
-async function downloadOne(row: DownloadItem, job: Job): Promise<void> {
-  patchDownload(row.id, { state: 'downloading', error: null })
-  const startedAt = Date.now()
-  const handle = await Filesystem.addListener('progress', (ev) => {
-    if (ev.url !== row.url) return
-    const total = ev.contentLength > 0 ? ev.contentLength : job.file.size
-    const elapsed = Math.max(1, (Date.now() - startedAt) / 1000)
-    const speed = ev.bytes / elapsed
-    patchDownload(row.id, {
-      downloadedBytes: ev.bytes,
-      totalBytes: total || null,
-      progress: total ? Math.min(1, ev.bytes / total) : 0,
-      speed: Math.round(speed),
-      etaSeconds: total && speed > 0 ? Math.round((total - ev.bytes) / speed) : null
-    })
+/** A finished file becomes a song; its real format is read from the file. */
+async function downloadCompleted(_d: DownloadItem, job: DownloadJob, file: CompletedFile): Promise<void> {
+  const meta = job.meta as ArchiveJobMeta | YouTubeJobMeta | FileJobMeta | undefined
+  if (!meta) return
+  let track: Track | null = null
+  if ('file' in meta) {
+    track = makeTrack(meta.file, meta.item, file.path, file.size)
+  } else if (meta.kind === 'youtube' && job.youtube?.mode === 'song') {
+    const y = job.youtube
+    track = makeSimpleTrack({ title: y.title, artist: y.artist, album: y.album }, file.path, file.size, meta.duration)
+  } else if (meta.kind === 'file') {
+    track = makeSimpleTrack({ title: meta.title, artist: '', album: '' }, file.path, file.size, null)
+  }
+  if (!track) return // a downloaded video is a file in the app folder, not a song
+  core.upsertTrack(track)
+  await phoneLib?.describeFile(track.id, file.path)
+}
+
+async function startDownloads(): Promise<void> {
+  const plugin = getDownloadPlugin()
+  if (!plugin) return
+  queue = new DownloadQueue({
+    plugin,
+    youtube: getYouTubePlugin() ?? undefined,
+    store: downloadStore,
+    publish: (items) => emit(IPC.onDownloadsChanged, items),
+    onCompleted: downloadCompleted
   })
-  try {
-    const res = await Filesystem.downloadFile({
-      url: row.url,
-      path: job.relPath,
-      directory: Directory.External,
-      recursive: true,
-      progress: true
-    })
-    const uri = (await Filesystem.getUri({ path: job.relPath, directory: Directory.External })).uri
-    const stat = await Filesystem.stat({ path: job.relPath, directory: Directory.External })
-    if (job.file.size > 0 && stat.size !== job.file.size) {
-      throw new Error(`Incomplete download (${stat.size} of ${job.file.size} bytes)`)
-    }
-    core.upsertTrack(makeTrack(job.file, job.item, uri, stat.size))
-    patchDownload(row.id, {
-      state: 'completed',
-      progress: 1,
-      speed: 0,
-      etaSeconds: null,
-      downloadedBytes: stat.size,
-      totalBytes: stat.size,
-      destPath: res.path ?? uri
-    })
-  } catch (err) {
-    patchDownload(row.id, { state: 'failed', speed: 0, error: (err as Error).message || 'Download failed' })
-  } finally {
-    void handle.remove()
-    jobs.delete(row.id)
-  }
+  await queue.start()
 }
 
 async function archiveEnqueue(identifier: string, fileNames: string[]): Promise<{ found: number; enqueued: number }> {
@@ -4795,40 +4949,260 @@ async function archiveEnqueue(identifier: string, fileNames: string[]): Promise<
   const item = await archiveItem(identifier)
   const wanted = new Set(fileNames.filter((n) => typeof n === 'string').slice(0, 500))
   const chosen = item.files.filter((f) => wanted.has(f.name))
-  let enqueued = 0
-  for (const f of chosen) {
-    const url = buildDownloadUrl(identifier, f.name)
+  if (!queue) return { found: chosen.length, enqueued: 0 }
+  const lite: ArchiveItem = { ...item, files: [], images: [] }
+  const year = item.date ? Number.parseInt(item.date.slice(0, 4), 10) : NaN
+  const entries = chosen.map((f) => {
     const base = f.name.split('/').pop() ?? f.name
     const dot = base.lastIndexOf('.')
     const ext = dot > 0 ? base.slice(dot, dot + 9) : ''
-    const relPath = `Oli/${safeName(item.title || identifier)}/${safeName(dot > 0 ? base.slice(0, dot) : base)}${ext}`
-    if (downloads.some((d) => d.url === url && (d.state === 'queued' || d.state === 'downloading'))) continue
-    const id = uid()
-    const now = Date.now()
-    jobs.set(id, { file: f, item, relPath })
-    downloads = [
-      {
-        id,
-        title: f.title ?? base,
-        url,
-        destPath: relPath,
-        state: 'queued',
-        progress: 0,
-        totalBytes: f.size || null,
-        downloadedBytes: 0,
-        speed: 0,
-        etaSeconds: null,
-        error: null,
-        createdAt: now,
-        updatedAt: now
-      },
-      ...downloads
-    ]
-    enqueued++
+    const cover = pickCover(item.images, f.name)
+    const meta: ArchiveJobMeta = { file: f, item: lite }
+    return {
+      title: f.title ?? base,
+      job: {
+        url: buildDownloadUrl(identifier, f.name),
+        relPath: `Oli/${safeName(item.title || identifier)}/${safeName(dot > 0 ? base.slice(0, dot) : base)}${ext}`,
+        size: f.size,
+        md5: f.md5 ?? '',
+        coverUrl: cover ? buildDownloadUrl(identifier, cover.name) : undefined,
+        tags: {
+          title: f.title ?? undefined,
+          artist: f.artist ?? item.creator ?? undefined,
+          albumArtist: item.creator ?? undefined,
+          album: f.album ?? item.title ?? undefined,
+          genre: f.genre ?? undefined,
+          trackNo: Number.parseInt(f.track ?? '', 10) || undefined,
+          year: Number.isFinite(year) ? year : undefined
+        },
+        meta
+      } satisfies DownloadJob
+    }
+  })
+  return { found: chosen.length, enqueued: queue.add(entries) }
+}
+
+// ------------------------------------------------------------------ YouTube (see youtubeService.ts)
+const YT_ENGINE_LATEST = 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest'
+const watchUrl = (id: string): string => `https://www.youtube.com/watch?v=${id}`
+
+async function latestYtdlp(): Promise<string | null> {
+  try {
+    const res = await fetch(YT_ENGINE_LATEST, { headers: { Accept: 'application/vnd.github+json' } })
+    if (!res.ok) return null
+    const tag = ((await res.json()) as { tag_name?: string }).tag_name
+    return tag ?? null
+  } catch {
+    return null
   }
-  publishDownloads()
-  void pumpDownloads()
-  return { found: chosen.length, enqueued }
+}
+
+async function startYouTube(): Promise<void> {
+  const plugin = getYouTubePlugin()
+  if (!plugin) return
+  const svc = new YouTubeService({
+    plugin,
+    latestVersion: latestYtdlp,
+    setStreamHeaders,
+    emitStatus: (st) => emit(IPC.onYtEngineStatus, st),
+    autoUpdate: () => (core.handlers[IPC.getSettings]() as { ytdlpAutoUpdate?: boolean }).ytdlpAutoUpdate !== false
+  })
+  yt = svc
+  // The first start unpacks Python (seconds); then look for a newer yt-dlp at most once a day.
+  await svc.start()
+  const last = Number(readJson<number>('oli.ytdlpCheckedAt', 0))
+  if (Date.now() - last > 24 * 3600 * 1000) {
+    writeJson('oli.ytdlpCheckedAt', Date.now())
+    void svc.check()
+  }
+}
+
+/** Queue entries for YouTube songs or videos. */
+function youtubeEntries(
+  list: Array<{ videoId: string; title: string; duration?: number; channel?: string | null; track?: { name: string; artists: string[]; album: string | null } }>,
+  mode: 'song' | 'video',
+  audio: string,
+  height: number,
+  withPrepare = false
+): DownloadEnqueue[] {
+  return list.map((e) => {
+    const channel = e.channel ?? yt?.channelOf(e.videoId) ?? null
+    const tags = songTagsFor(e.title, channel, e.track ? { track: e.track.name, artist: e.track.artists.join(', '), album: e.track.album } : null)
+    const relBase =
+      mode === 'video'
+        ? `Oli/Videos/${safeName(e.title)} [${e.videoId}]`
+        : `Oli/YouTube/${safeName(`${tags.artist} - ${tags.title}`)} [${e.videoId}]`
+    const meta: YouTubeJobMeta = { kind: 'youtube', duration: e.duration ?? null, thumbnail: null }
+    return {
+      title: mode === 'video' ? e.title : tags.title,
+      job: {
+        url: watchUrl(e.videoId),
+        relPath: relBase,
+        size: 0,
+        md5: '',
+        youtube: { videoId: e.videoId, mode, audio, height, relBase, title: tags.title, artist: tags.artist, album: tags.album },
+        meta
+      } satisfies DownloadJob,
+      // a single song: read the video's own tags first (YouTube Music uploads have exact ones)
+      prepare:
+        withPrepare && mode === 'song' && yt
+          ? async () => {
+              const m = await yt!.meta(e.videoId)
+              if (!m) return null
+              const t = songTagsFor(m.title, m.channel, m)
+              return { title: t.title, youtube: { title: t.title, artist: t.artist, album: t.album, relBase: `Oli/YouTube/${safeName(`${t.artist} - ${t.title}`)} [${e.videoId}]` }, meta: { kind: 'youtube', duration: m.duration, thumbnail: m.thumbnail } satisfies YouTubeJobMeta }
+            }
+          : undefined
+    }
+  })
+}
+
+function audioChoice(a: unknown): string {
+  return a === 'm4a' || a === 'opus' ? a : 'best'
+}
+
+const youtubeHandlers: Record<string, Handler> = {
+  [IPC.ytEngineInfo]: (() => yt?.getStatus() ?? engineStatus) as Handler,
+  [IPC.ytEngineCheck]: (() => (yt ? yt.check() : engineStatus)) as Handler,
+  [IPC.ytEngineUpdate]: (() => (yt ? yt.install() : engineStatus)) as Handler,
+  [IPC.resolveYouTubeStream]: ((videoId: string, fresh?: boolean) => yt?.resolveStream(videoId, fresh === true) ?? []) as Handler,
+  [IPC.resolveYouTubeStreamBatch]: ((ids: string[]) => yt?.resolveStreamBatch(Array.isArray(ids) ? ids : []) ?? []) as Handler,
+  [IPC.prefetchYouTubeStreams]: ((ids: string[], priority?: boolean) => {
+    if (Array.isArray(ids)) yt?.prefetch(ids.filter((i) => typeof i === 'string').slice(0, 12), priority === true)
+    return null
+  }) as Handler,
+  [IPC.resolveYouTubeUrl]: ((url: string) => yt?.resolveUrl(String(url)) ?? []) as Handler,
+  [IPC.resolvePlaylistEntries]: (async (url: string) => {
+    if (!yt) return { entries: [], error: 'YouTube is not available in this build of the app.' }
+    return yt.playlistEntries(String(url))
+  }) as Handler,
+  // the PC plays the audio of a video that refuses to stream by downloading it first; here the stream is all there is
+  [IPC.downloadYouTubeAudio]: (() => null) as Handler,
+  [IPC.videoFallbackUrl]: (() => null) as Handler,
+  [IPC.openVideoWindow]: (() => false) as Handler,
+  [IPC.videoRetry]: (() => false) as Handler,
+  [IPC.videoDownloadSong]: (async (videoId: string, audio?: string) => {
+    if (!queue || !yt || !videoId) return null
+    const title = 'YouTube song'
+    const entries = youtubeEntries([{ videoId, title }], 'song', audioChoice(audio), 0, true)
+    entries[0].title = title
+    queue.add(entries)
+    return queue.list().find((d) => d.url === watchUrl(videoId))?.id ?? null
+  }) as Handler,
+  [IPC.videoDownload]: (async (videoId: string, height?: number, audio?: string) => {
+    if (!queue || !yt || !videoId) return null
+    const entries = youtubeEntries([{ videoId, title: 'YouTube video' }], 'video', audioChoice(audio), Number(height) || 0)
+    queue.add(entries)
+    const id = queue.list().find((d) => d.url === watchUrl(videoId))?.id ?? null
+    void yt.meta(videoId).then((m) => id && m && queue?.updateTitle(id, m.title))
+    return id
+  }) as Handler,
+  [IPC.enqueuePlaylist]: (async (url: string, audio?: string) => {
+    if (!queue || !yt) return { found: 0, enqueued: 0, error: 'YouTube is not available in this build of the app.' }
+    const r = await yt.playlistEntries(String(url))
+    if (r.entries.length === 0) return { found: 0, enqueued: 0, error: r.error }
+    const n = queue.add(youtubeEntries(r.entries, 'song', audioChoice(audio), 0))
+    return { found: r.entries.length, enqueued: n, capped: r.capped }
+  }) as Handler,
+  [IPC.enqueueEntries]: ((entries: Array<{ videoId: string; title: string; duration?: number; track?: { name: string; artists: string[]; album: string | null } }>, opts?: { mode?: string; audio?: string; height?: number }) => {
+    if (!queue || !yt || !Array.isArray(entries)) return { found: 0, enqueued: 0 }
+    const clean = entries.filter((x) => x && typeof x.videoId === 'string' && typeof x.title === 'string').slice(0, 300)
+    const mode = opts?.mode === 'video' ? 'video' : 'song'
+    return { found: clean.length, enqueued: queue.add(youtubeEntries(clean, mode, audioChoice(opts?.audio), Number(opts?.height) || 0)) }
+  }) as Handler,
+  // a pasted address: a YouTube link becomes a song download, any other http(s) link a plain file download
+  [IPC.enqueueDownload]: (async (url: string, title?: string) => {
+    if (!queue || typeof url !== 'string') return null
+    const u = url.trim()
+    const before = new Set(queue.list().map((d) => d.id))
+    if (isYouTubeUrl(u)) {
+      const id = videoIdFromUrl(u)
+      if (!id || !yt) return null
+      queue.add(youtubeEntries([{ videoId: id, title: (title ?? '').trim() || 'YouTube song' }], 'song', 'best', 0, true))
+    } else if (/^https?:\/\//i.test(u)) {
+      const name = decodeURIComponent(u.split('?')[0].split('/').pop() ?? '') || 'download'
+      const dot = name.lastIndexOf('.')
+      const ext = dot > 0 ? name.slice(dot, dot + 9) : ''
+      const label = (title ?? '').trim() || (dot > 0 ? name.slice(0, dot) : name)
+      queue.add([{ title: label, job: { url: u, relPath: `Oli/Downloads/${safeName(label)}${ext}`, size: 0, md5: '', meta: { kind: 'file', title: label } satisfies FileJobMeta } }])
+    } else {
+      return null
+    }
+    return queue.list().find((d) => !before.has(d.id)) ?? null
+  }) as Handler
+}
+
+// ------------------------------------------------------------------ app updates (see androidUpdate.ts)
+let lastUpdate: AndroidUpdateStatus | null = null
+async function checkForAndroidUpdate(auto: boolean): Promise<AndroidUpdateStatus> {
+  // an automatic check at most every 6 hours, like the PC app; the last answer is reused in between
+  if (auto && lastUpdate && Date.now() - lastUpdate.checkedAt < 6 * 3600 * 1000) return lastUpdate
+  lastUpdate = await checkAndroidUpdate(APP_VERSION)
+  return lastUpdate
+}
+
+// ------------------------------------------------------------------ backup and restore (see phoneBackup.ts)
+const BACKUP_DIR = 'Oli/backups'
+const backupStorage: BackupStorage = {
+  async list() {
+    try {
+      const r = await Filesystem.readdir({ path: BACKUP_DIR, directory: Directory.External })
+      return r.files.map((f) => ({ name: f.name, createdAt: Number(f.mtime ?? f.ctime ?? 0), size: Number(f.size ?? 0) }))
+    } catch {
+      return []
+    }
+  },
+  async write(name, bytes) {
+    await Filesystem.writeFile({ path: `${BACKUP_DIR}/${name}`, data: bytesToBase64(bytes), directory: Directory.External, recursive: true })
+  },
+  async read(name) {
+    const r = await Filesystem.readFile({ path: `${BACKUP_DIR}/${name}`, directory: Directory.External })
+    return base64ToBytes(String(r.data))
+  },
+  async remove(name) {
+    await Filesystem.deleteFile({ path: `${BACKUP_DIR}/${name}`, directory: Directory.External })
+  }
+}
+let phoneBackup: PhoneBackup | null = null
+
+/** Restore: the newest automatic backup if the owner agrees, otherwise a file they pick. */
+async function restoreInteractive(): Promise<boolean> {
+  if (!phoneBackup) return false
+  const list = await phoneBackup.list()
+  if (list.length > 0 && window.confirm(`Restore the automatic backup from ${new Date(list[0].createdAt).toLocaleString()}?
+
+The current library is replaced. Cancel = choose a backup file instead.`)) {
+    return phoneBackup.restoreNamed(list[0].name)
+  }
+  const bytes = await pickFileBytes()
+  return bytes ? phoneBackup.restoreBytes(bytes) : false
+}
+
+async function exportLibraryFile(): Promise<boolean> {
+  if (!phoneBackup) return false
+  try {
+    const name = `Oli-library-backup-${new Date().toISOString().slice(0, 10)}.sqlite`
+    const w = await Filesystem.writeFile({ path: name, data: bytesToBase64(phoneBackup.snapshot()), directory: Directory.Cache })
+    await Share.share({ title: 'Oli library backup', url: w.uri, dialogTitle: 'Save or send your Oli library' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** A backup every day the app is used (the newest 8 are kept), like the PC. */
+async function startBackups(): Promise<void> {
+  phoneBackup = new PhoneBackup(core.db, backupStorage, () => core.afterRestore())
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const list = await phoneBackup!.list()
+        if (list.length === 0 || Date.now() - list[0].createdAt > 24 * 3600 * 1000) await phoneBackup!.create()
+      } catch {
+        // a failed automatic backup is not worth interrupting the owner
+      }
+    })()
+  }, 15000)
 }
 
 // ------------------------------------------------------------------ phone-specific channels and "not built yet" answers
@@ -4846,69 +5220,93 @@ const empty = (): unknown[] => []
 
 /** Answered here (not by the shared services). Anything in the core handlers takes precedence over these. */
 const phoneHandlers: Record<string, Handler> = {
+  ...youtubeHandlers,
   // app and window
   [IPC.getAppInfo]: () => ({ name: 'Oli', version: APP_VERSION, electron: 'n/a (Android)', chrome: navigator.userAgent, node: 'n/a' }),
   [IPC.windowControl]: noop,
   [IPC.getWindowState]: () => ({ maximized: true, fullscreen: false }),
-  [IPC.checkForUpdates]: () => ({
-    checked: true,
-    currentVersion: APP_VERSION,
-    latestVersion: null,
-    updateAvailable: false,
-    updateUrl: null,
-    error: null,
-    checkedAt: Date.now()
-  }),
+  [IPC.checkForUpdates]: ((auto?: boolean) => checkForAndroidUpdate(auto === true)) as Handler,
   [IPC.openReleasePage]: ((url?: string) => {
-    window.open(url ?? 'https://github.com/CyttoRak-J/Oli/releases', '_blank')
+    // only the project's own release pages are opened (in the phone's browser)
+    const target = typeof url === 'string' && url.startsWith('https://github.com/CyttoRak-J/Oli/') ? url : 'https://github.com/CyttoRak-J/Oli/releases'
+    void Browser.open({ url: target }).catch(() => undefined)
     return null
   }) as Handler,
-  // library actions that need the phone scanner (not built yet)
-  [IPC.getScanState]: noop,
-  [IPC.addLibraryFolder]: noop,
-  [IPC.removeLibraryFolder]: noop,
-  [IPC.rescanLibrary]: noop,
-  [IPC.cancelScan]: noop,
+  // the phone's own music (MediaStore through the native OliMedia plugin, see phoneLibrary.ts)
+  [IPC.getScanState]: () => phoneLib?.getState() ?? null,
+  [IPC.addLibraryFolder]: (async () => {
+    if (!phoneLib || !(await phoneLib.addAndScan())) return null
+    return core.handlers[IPC.getLibrary]()
+  }) as Handler,
+  [IPC.removeLibraryFolder]: ((id: string) => {
+    if (id === PHONE_LIBRARY_ID) phoneLib?.remove()
+    return null
+  }) as Handler,
+  [IPC.rescanLibrary]: () => {
+    void phoneLib?.scan()
+    return null
+  },
+  [IPC.cancelScan]: () => {
+    phoneLib?.cancel()
+    return null
+  },
   [IPC.metaNeedsAttention]: empty,
-  [IPC.getEmbeddedArtwork]: noop,
+  [IPC.getEmbeddedArtwork]: ((songId: string) =>
+    phoneLib ? phoneLib.artworkFor(songId, (p) => deviceFileUrl(`file://${p}`)) : null) as Handler,
   [IPC.revealInExplorer]: () => false,
   [IPC.getMediaBase]: () => '',
   [IPC.probeDuration]: noop,
   [IPC.transcodeLocalFile]: noop,
-  // YouTube: not available on Android yet
-  [IPC.ytEngineInfo]: () => engineStatus,
-  [IPC.ytEngineCheck]: () => engineStatus,
-  [IPC.ytEngineUpdate]: () => engineStatus,
-  [IPC.resolveYouTubeStream]: empty,
-  [IPC.resolveYouTubeStreamBatch]: empty,
-  [IPC.resolveYouTubeUrl]: empty,
-  [IPC.resolvePlaylistEntries]: () => ({ entries: [], error: 'YouTube is not available in the Android app yet.' }),
-  // backup
-  [IPC.listBackups]: empty,
+  // backup and restore
+  [IPC.createBackup]: (async () => (await phoneBackup?.create()) ?? null) as Handler,
+  [IPC.listBackups]: (async () => (await phoneBackup?.list()) ?? []) as Handler,
+  [IPC.restoreBackup]: (() => restoreInteractive()) as Handler,
+  [IPC.exportLibrary]: (() => exportLibraryFile()) as Handler,
+  [IPC.importLibrary]: (async () => {
+    const bytes = await pickFileBytes()
+    return bytes && phoneBackup ? phoneBackup.restoreBytes(bytes) : false
+  }) as Handler,
+  // tag editing
+  [IPC.editMetadata]: ((songId: string, edits: Record<string, unknown>) =>
+    core.editSong(songId, edits, async (path, tags) => {
+      const plugin = getDownloadPlugin()
+      return plugin ? (await plugin.writeTags({ path, tags })).written : false
+    })) as Handler,
+  [IPC.refreshMetadata]: (async (songId: string) => {
+    const loc = core.phone.songLocation(songId)
+    if (!loc || !phoneLib) return false
+    await phoneLib.describeFile(songId, loc.path)
+    return true
+  }) as Handler,
   // downloads
-  [IPC.getDownloads]: () => [...downloads],
+  [IPC.getDownloads]: () => queue?.list() ?? [],
   [IPC.cancelDownload]: ((id: string) => {
-    jobs.delete(id)
-    patchDownload(id, { state: 'canceled', speed: 0 })
+    queue?.cancel(id)
     return null
   }) as Handler,
   [IPC.removeDownload]: ((id: string) => {
-    jobs.delete(id)
-    downloads = downloads.filter((d) => d.id !== id)
-    publishDownloads()
+    queue?.remove(id)
     return null
   }) as Handler,
   [IPC.clearCompleted]: () => {
-    downloads = downloads.filter((d) => !['completed', 'failed', 'canceled'].includes(d.state))
-    publishDownloads()
+    queue?.clearCompleted()
     return null
   },
-  [IPC.clearPending]: () => 0,
-  [IPC.pauseAllDownload]: () => 0,
-  [IPC.resumeAllDownload]: () => 0,
-  [IPC.pauseDownload]: noop,
-  [IPC.resumeDownload]: noop,
-  [IPC.retryDownload]: noop,
+  [IPC.clearPending]: () => queue?.clearPending() ?? 0,
+  [IPC.pauseAllDownload]: () => queue?.pauseAll() ?? 0,
+  [IPC.resumeAllDownload]: () => queue?.resumeAll() ?? 0,
+  [IPC.pauseDownload]: ((id: string) => {
+    queue?.pause(id)
+    return null
+  }) as Handler,
+  [IPC.resumeDownload]: ((id: string) => {
+    queue?.resume(id)
+    return null
+  }) as Handler,
+  [IPC.retryDownload]: ((id: string) => {
+    queue?.retry(id)
+    return null
+  }) as Handler,
   [IPC.revealDownload]: () => false,
   [IPC.openDownloadsFolder]: noop,
   [IPC.videoPickFolder]: noop,
@@ -4934,7 +5332,14 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
 
 /** Open the database and install `window.cytto` for platforms that have no Electron preload. */
 export async function installWebBackend(platform: 'android' | 'web'): Promise<void> {
-  core = await initAndroidCore()
+  const providers: AndroidProviders = {
+    isSpotifyConfigured: () => false,
+    isYouTubeConfigured: () => yt !== null,
+    searchSpotify: async () => [],
+    searchYouTube: async (query: string) => (yt ? yt.search(query) : []),
+    status: () => ({ spotifyConfigured: false, youtubeConfigured: yt !== null })
+  } as never
+  core = await initAndroidCore(providers)
   core.onChange((channel, payload) => emit(channel, payload))
   window.cytto = {
     platform,
@@ -4955,14 +5360,35 @@ export async function installWebBackend(platform: 'android' | 'web'): Promise<vo
       return off
     }
   }
+  void startPhoneLibrary()
+  void startYouTube()
+  void startDownloads()
+  void startBackups()
+}
+
+/** Connects the phone's music: scan on launch when allowed, ask once on the very first start, follow changes. */
+async function startPhoneLibrary(): Promise<void> {
+  const plugin = getMediaPlugin()
+  if (!plugin) return
+  phoneLib = new PhoneLibrary({ plugin, store: core.phone, emitProgress: (p) => emit(IPC.onScanProgress, p) })
+  try {
+    await plugin.addListener('mediaChanged', () => phoneLib?.onMediaChanged())
+  } catch {
+    // no change notifications: rescans happen on launch and on request
+  }
+  const settings = (await core.handlers[IPC.getSettings]()) as { scanOnLaunch?: boolean }
+  const hasLocation = (core.handlers[IPC.getLibrary]() as Array<{ id: string }>).some((f) => f.id === PHONE_LIBRARY_ID)
+  const granted = (await plugin.getPermission().catch(() => ({ granted: false }))).granted
+  if (hasLocation && granted) {
+    if (settings.scanOnLaunch !== false) void phoneLib.scan()
+    return
+  }
+  // First start: ask once (Settings > Library has the button for later).
+  if (!hasLocation && localStorage.getItem('oli.phoneMusicAsked') !== '1') {
+    localStorage.setItem('oli.phoneMusicAsked', '1')
+    await phoneLib.addAndScan()
+  }
 }
 ```
-
-Testing without a phone (worked in the reference): the built-in browser pane could not open local pages, and Chromium blocks port 5060 (`ERR_UNSAFE_PORT`; use e.g. 8765). Serve `out/renderer-android`
-(`python -m http.server 8765 --bind 127.0.0.1`), then open it in a throwaway Electron window that has **no** preload (`new BrowserWindow({width:390,height:800})`, `--user-data-dir` a pre-created temp folder,
-`--remote-debugging-port`), and drive it with the Chrome DevTools Protocol. There the shell reports platform `web` and Capacitor's web filesystem (browser storage) stands in for phone storage.
-Verified that way: layout, Archive search, item listing, a download of exactly the archive's size, the song appearing with its tags. **Not verified:** anything on a real phone or emulator (no Android SDK on the dev PC; CI builds the APK).
-
-Gotcha: newer npm versions skip install scripts by default, so `npm install <package>` can silently leave `node_modules/electron/dist` missing; run `node node_modules/electron/install.js` afterwards.
 
 *End of guide.*

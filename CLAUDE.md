@@ -1,24 +1,27 @@
-# Oli: desktop music player (Electron + React + sql.js)
+# Oli: music player for Windows/macOS (Electron + React + sql.js) and Android (Capacitor + Java plugins)
 
-Local library manager and player for Windows, with YouTube search/stream/download. **Read `HANDOFF.md`
+Local library manager and player, with YouTube search/stream/download. **Read `HANDOFF.md`
 first** for what was changed recently, what is verified, and what is still open.
 
 ## Commands
 - `npm run dev` runs the app (uses the user's REAL library in `%APPDATA%\Oli`, see "Data safety").
-- `npm run typecheck`, `npm run lint`, `npm test` (vitest, 151 tests), `npm run build`. Keep all four green.
+- `npm run typecheck`, `npm run lint`, `npm test` (vitest, 221 tests in 30 files), `npm run build`. Keep all four green.
 - Git repo (`core.autocrlf=false`, files are LF). GitHub: https://github.com/CyttoRak-J/Oli (branch `main`; the pre-2026-09-29
   history there is an older, different code lineage that this project was committed on top of). Pushing a `v*` tag runs
   `.github/workflows/build.yml` (Windows installer + macOS dmg/zip, then a GitHub Release with SHA256SUMS). The pre-git code is in
   `A:\oli-dev-tools\original-backup`. Commit before large changes; never commit `bin/` (yt-dlp is fetched by `npm install`).
 
 - `BUILD_FROM_SCRATCH.md` is a full guide for a new agent to rebuild the app (asks the user for name etc. first).
-  Regenerate it after big changes: its verbatim code blocks are copies of the source.
+  Its verbatim code blocks are copies of the source: after big changes run `node scripts/sync-build-spec.mjs --fix` (`node scripts/sync-build-spec.mjs` only checks) and update its section 20 (Android) text.
 
 ## Layout
 - `src/main`: Electron main. `services/` (library, scanner, provider = YouTube/Spotify/yt-dlp, downloads,
   transcode, mediaServer, database...), `ipc.ts`, `windows.ts`, `index.ts`.
 - `src/renderer/src`: React UI. `store/player.ts` is the playback engine (audio element, fallbacks, queue).
 - `src/shared`: IPC channel names, types, default settings.
+- Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
+  four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `ANDROID_PLAN.md` first**; the full specification is
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.7.0), never run on a real phone.
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -56,7 +59,20 @@ first** for what was changed recently, what is verified, and what is still open.
   `A:\oli-dev-tools\scripts` (`cdpkit.cjs`; `e2e_seek.cjs`, `yt_speed.cjs`, `dl_modes.cjs`, `mix_e2e.cjs`).
   Quirk: some awaited evaluations return "Promise was collected": fire the action, then poll a window variable.
   Remove the debug-port launch entry afterwards.
-- Android: `scripts/android-harness` runs the phone build in a throwaway Electron window (see its README); Java is compile-checked by pushing branch `android-dev`.
+- Android: `scripts/android-harness` runs the phone build in a throwaway Electron window with Capacitor's real bridge and stand-ins for the plugins (see its README;
+  `powershell -File scriptsndroid-harnessun-all.ps1` runs all 97 checks). There is no Android SDK on the PC: push branch `android-dev` to compile-check the Java (read the run through
+  the public GitHub API; failures are published as annotations), tag `android-vX.Y.Z` to release. Pure Java classes are compiled and tested with the PC's JDK (`scripts/android-tags`).
+- Never write repository files with PowerShell `Set-Content -Encoding utf8` (byte-order mark broke `build.gradle`); use the Write/Edit tools or scripts that keep LF.
+- Stop test windows by process id (their electron.exe), never by window title "Oli": a desktop Oli may be running.
+
+## Android rules learned the hard way (do not undo)
+- The phone build must keep all phone code out of the desktop bundle (`__OLI_WEB__`, empty `webBackend` stand-in in `electron.vite.config.ts`); check with `grep nativecommand out/renderer/assets/*.js`.
+- Song rows are windowed (`lib/useRowWindow.ts`, rows exactly 46 px): do not add a variable-height row to `SongTable` without changing the maths; keep `overflow-anchor: none` on the list.
+- The player store talks to an `AudioLike`; `NativeAudio` tags every event with a token and drops events of an older source. Do not let the store touch `HTMLMediaElement` APIs other than through that interface.
+- Capacitor plugin proxies are thenables: never `await` or return one from an async function.
+- Media3 hi-res: float output only for hi-res/unknown sources (`ForwardingAudioSink.getFormatSupport`); the output report must never claim bit-perfect unless Android holds the mixer attribute.
+- minSdk is 24: no `java.nio.file` (Android 8); tag writers replace files with `File.renameTo`.
+- yt-dlp `--parse-metadata` values: `%` doubled, `:` escaped, backslashes not doubled (`YtDlpOutput.metadataLiteral`).
 
 ## Data safety
 - Dev mode edits the real library (`%APPDATA%\Oli\library.sqlite`). Back it up before tests that write.
