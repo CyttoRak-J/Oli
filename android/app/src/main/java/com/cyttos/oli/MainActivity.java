@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(OliAudioPlugin.class);
+    registerPlugin(OliMediaPlugin.class);
     super.onCreate(savedInstanceState);
     // Android 13+ needs this permission to show the playback notification (lock-screen controls).
     if (Build.VERSION.SDK_INT >= 33
