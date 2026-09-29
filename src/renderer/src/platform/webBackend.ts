@@ -30,12 +30,14 @@ import type {
 } from '@shared/types'
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
+import { Browser } from '@capacitor/browser'
 import { deviceFileUrl } from '../lib/platform'
 import { setStreamHeaders } from './nativeAudio'
 import { initAndroidCore, trackIds, type AndroidCore, type AndroidProviders } from './androidCore'
 import { YouTubeService, getYouTubePlugin } from './youtubeService'
 import { songTagsFor, videoIdFromUrl, isYouTubeUrl, type SongTags } from './youtubeCore'
 import { getMediaPlugin, PHONE_LIBRARY_ID, PhoneLibrary } from './phoneLibrary'
+import { checkAndroidUpdate, type AndroidUpdateStatus } from './androidUpdate'
 import { PhoneBackup, base64ToBytes, bytesToBase64, pickFileBytes, type BackupStorage } from './phoneBackup'
 import {
   DownloadQueue,
@@ -50,7 +52,8 @@ type Handler = (...args: never[]) => unknown
 type Listener = (...args: unknown[]) => void
 
 const DOWNLOADS_KEY = 'oli.downloads'
-const APP_VERSION = '1.1.0'
+/** The installed Android version (from android/app/build.gradle at build time). */
+const APP_VERSION = typeof __OLI_ANDROID_VERSION__ === 'string' ? __OLI_ANDROID_VERSION__ : '0.0.0'
 
 // ------------------------------------------------------------------ small helpers
 function readJson<T>(key: string, fallback: T): T {
@@ -488,6 +491,15 @@ const youtubeHandlers: Record<string, Handler> = {
   }) as Handler
 }
 
+// ------------------------------------------------------------------ app updates (see androidUpdate.ts)
+let lastUpdate: AndroidUpdateStatus | null = null
+async function checkForAndroidUpdate(auto: boolean): Promise<AndroidUpdateStatus> {
+  // an automatic check at most every 6 hours, like the PC app; the last answer is reused in between
+  if (auto && lastUpdate && Date.now() - lastUpdate.checkedAt < 6 * 3600 * 1000) return lastUpdate
+  lastUpdate = await checkAndroidUpdate(APP_VERSION)
+  return lastUpdate
+}
+
 // ------------------------------------------------------------------ backup and restore (see phoneBackup.ts)
 const BACKUP_DIR = 'Oli/backups'
 const backupStorage: BackupStorage = {
@@ -572,17 +584,11 @@ const phoneHandlers: Record<string, Handler> = {
   [IPC.getAppInfo]: () => ({ name: 'Oli', version: APP_VERSION, electron: 'n/a (Android)', chrome: navigator.userAgent, node: 'n/a' }),
   [IPC.windowControl]: noop,
   [IPC.getWindowState]: () => ({ maximized: true, fullscreen: false }),
-  [IPC.checkForUpdates]: () => ({
-    checked: true,
-    currentVersion: APP_VERSION,
-    latestVersion: null,
-    updateAvailable: false,
-    updateUrl: null,
-    error: null,
-    checkedAt: Date.now()
-  }),
+  [IPC.checkForUpdates]: ((auto?: boolean) => checkForAndroidUpdate(auto === true)) as Handler,
   [IPC.openReleasePage]: ((url?: string) => {
-    window.open(url ?? 'https://github.com/CyttoRak-J/Oli/releases', '_blank')
+    // only the project's own release pages are opened (in the phone's browser)
+    const target = typeof url === 'string' && url.startsWith('https://github.com/CyttoRak-J/Oli/') ? url : 'https://github.com/CyttoRak-J/Oli/releases'
+    void Browser.open({ url: target }).catch(() => undefined)
     return null
   }) as Handler,
   // the phone's own music (MediaStore through the native OliMedia plugin, see phoneLibrary.ts)

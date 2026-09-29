@@ -43,8 +43,25 @@ jobs:
       - name: Build the web UI and sync it into the Android project
         run: npm run android:sync
 
+      # Optional: the owner's own signing key. Without the secrets the public alpha key is used (see docs/ANDROID_SIGNING.md).
+      - name: Use my own signing key (only when the secrets exist)
+        env:
+          KEYSTORE_B64: ${{ secrets.OLI_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/oli-release.jks"
+            echo "OLI_KEYSTORE_FILE=$RUNNER_TEMP/oli-release.jks" >> "$GITHUB_ENV"
+            echo "Signing with the owner's own key"
+          else
+            echo "No own key set: signing with the public alpha key"
+          fi
+
       - name: Build the APK
         working-directory: android
+        env:
+          OLI_KEYSTORE_PASSWORD: ${{ secrets.OLI_KEYSTORE_PASSWORD }}
+          OLI_KEY_ALIAS: ${{ secrets.OLI_KEY_ALIAS }}
+          OLI_KEY_PASSWORD: ${{ secrets.OLI_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
           # On failure the compiler / Gradle messages are also published as annotations (public, readable without logging in).

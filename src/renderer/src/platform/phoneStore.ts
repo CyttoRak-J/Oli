@@ -108,6 +108,16 @@ export function createPhoneStore(db: Database, library: LibraryQueries, flush: (
       library.notifyChanged()
       flush()
     },
+    codecsOf(ids) {
+      const out = new Map<string, string>()
+      for (let i = 0; i < ids.length; i += 400) {
+        const chunk = ids.slice(i, i + 400)
+        for (const r of db.all<{ id: string; codec: string | null }>(`SELECT id, codec FROM songs WHERE id IN (${chunk.map(() => '?').join(',')})`, chunk)) {
+          out.set(r.id, r.codec ?? '')
+        }
+      }
+      return out
+    },
     songLocation(id) {
       const r = db.get<{ path: string; album_id: string | null }>('SELECT path, album_id FROM songs WHERE id = ?', [id])
       return r ? { path: r.path, albumId: r.album_id } : undefined

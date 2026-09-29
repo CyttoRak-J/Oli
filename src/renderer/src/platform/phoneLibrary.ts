@@ -102,6 +102,8 @@ export interface PhoneStore {
   /** Rebuild artists/albums, stamp the scan time, tell the screens, save the database. */
   finish(libraryId: string): void
   songLocation(id: string): { path: string; albumId: string | null } | undefined
+  /** Codec of each song (from the media library's file type). */
+  codecsOf(ids: string[]): Map<string, string>
 }
 
 // ------------------------------------------------------------------ mapping (MediaStore row -> Track)
@@ -404,9 +406,15 @@ export class PhoneLibrary {
       store.finish(PHONE_LIBRARY_ID) // the songs are visible now; details follow in the background
 
       // 4. read the real format / tags of songs whose details were never read
-      const todo = store
-        .songsOf(PHONE_LIBRARY_ID)
-        .filter((r) => !r.missing && r.sampleRate === null)
+      const unread = store.songsOf(PHONE_LIBRARY_ID).filter((r) => !r.missing && r.sampleRate === null)
+      // Lossy files (MP3, AAC, Opus, Vorbis) have nothing a file read would add (Android already lists their length and
+      // bit rate): they are marked as read at once, which keeps a big mixed library fast.
+      const lossy = new Set(['mp3', 'aac', 'opus', 'vorbis', 'wma', 'amr'])
+      const codecs = store.codecsOf(unread.map((r) => r.id))
+      const skip = unread.filter((r) => lossy.has(codecs.get(r.id) ?? ''))
+      if (skip.length > 0) store.patchSongs(skip.map((r) => ({ id: r.id, patch: { sampleRate: 0 } })))
+      const skipped = new Set(skip.map((r) => r.id))
+      const todo = unread.filter((r) => !skipped.has(r.id))
       if (todo.length > 0) {
         this.set({ phase: 'indexing', filesFound: todo.length, filesProcessed: 0, currentFile: null })
         let done = 0

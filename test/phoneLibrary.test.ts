@@ -227,6 +227,19 @@ describe('scanning the phone', () => {
     expect(db.get<{ missing: number }>('SELECT missing FROM songs WHERE id = ?', [songIdForPath('Music/New/song-1.flac')])!.missing).toBe(0)
   })
 
+  it('lossy files are marked as read without asking the phone for their details', async () => {
+    state.rows = [row(1), row(2, { mime: 'audio/mpeg', displayName: 'a.mp3', key: 'Music/a.mp3' }), row(3, { mime: 'audio/opus', displayName: 'b.opus', key: 'Music/b.opus' })]
+    const { lib, calls } = make()
+    await lib.addAndScan()
+    await lib.whenIdle()
+    expect(calls.filter((c) => c.startsWith('probe'))).toEqual(['probe x1']) // only the FLAC
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM songs WHERE sample_rate IS NULL")!.n).toBe(0)
+    // and they are not read on the next scan either
+    calls.length = 0
+    await lib.scan()
+    expect(calls.some((c) => c.startsWith('probe'))).toBe(false)
+  })
+
   it('pages through a big library (600 songs = 2 pages)', async () => {
     state.rows = Array.from({ length: 600 }, (_, i) => row(i + 1))
     const { lib, calls } = make()

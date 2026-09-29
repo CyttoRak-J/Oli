@@ -4,7 +4,13 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.6.0: YouTube
+### What is new in 0.7.0: big libraries, updates, your own key
+- **Long lists stay smooth**: the song list only keeps the rows on screen, so a library of thousands of songs scrolls as easily as a short one (tested with 3,000 and 10,000 songs; memory dropped from 123 MB to 26 MB with 3,000). "Go to playing track" still finds a song far down the list.
+- **Update check**: Settings > About > "Check for updates" looks for a newer Oli Android release on GitHub and opens its page (nothing is installed by itself). The app now shows its real version.
+- **Faster scanning**: MP3/AAC/Opus files are not read again for details Android already gives.
+- **Your own signing key** can be added later without changing the app (see docs/ANDROID_SIGNING.md); until you do, builds keep the public alpha key.
+
+### Already in 0.6.0: YouTube
 - **YouTube search** next to your library (Search page), **paste a YouTube link** (video, playlist or Mix) to see and play it, **play any result in the app** (the audio is streamed by the native player, so it keeps playing with the screen off).
 - **Download as a song** (m4a with title, artist and cover embedded), **as a video** (mp4 up to the height you choose) or a **whole playlist**, all through the same download queue: pause, resume, cancel, background service.
 - **The YouTube engine (yt-dlp) runs on your phone** and updates itself: Settings > YouTube engine shows its version, "Check" and "Update now". A banner tells you when it was updated.

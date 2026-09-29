@@ -116,7 +116,8 @@ async function until(fn, ms = 30000, step = 250) {
   }, 60000)
   check('everything finishes', !!allDone, (await downloads(c)).map((d) => d.state).join(','))
   const songs2 = (await call(c, 'library:songs', {})).tracks
-  check('playlist songs became songs, the video did not', songs2.filter((s) => s.path.includes('/YouTube/')).length === 4 && !songs2.some((s) => s.path.includes('AAAAAAAAAAA')), `${songs2.filter((s) => s.path.includes('/YouTube/')).length} YouTube songs`)
+  // the playlist contains the video downloaded a moment ago: same video id = same file name = one song, not two
+  check('playlist songs became songs (a video downloaded twice is one file), the video did not', songs2.filter((s) => s.path.includes('/YouTube/')).length === 3 && !songs2.some((s) => s.path.includes('AAAAAAAAAAA')), `${songs2.filter((s) => s.path.includes('/YouTube/')).length} YouTube songs`)
 
   // cancel one
   await c.ev(`window.__fakeYt.throttleMs = 120; return 1`)

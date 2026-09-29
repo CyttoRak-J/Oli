@@ -12,6 +12,8 @@ export interface CyttoBridge {
 declare global {
   /** true in the Android/web build, false in the desktop build (set in the Vite configs). */
   const __OLI_WEB__: boolean
+  /** The Android app's own version (versionName in android/app/build.gradle), set in vite.android.config.ts. */
+  const __OLI_ANDROID_VERSION__: string
 
   interface Window {
     cytto: CyttoBridge

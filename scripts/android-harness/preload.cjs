@@ -192,8 +192,42 @@ audio.addEventListener('loadedmetadata', () => {
 // Lists the first songs of A:\Flac as if MediaStore knew them, reads the real FLAC header for probeFiles, and hands out
 // a generated cover for albums whose name starts with "A".
 const media = (window.__fakeMedia = { calls: [], granted: process.env.OLI_HARNESS_DENY !== '1', files: null, listeners: {} })
+// OLI_HARNESS_SONGS=N makes the stand-in list N made-up songs (for speed tests); they have no audio behind them.
+const SYNTH = Number(process.env.OLI_HARNESS_SONGS || 0)
+function synthetic(n) {
+  const rows = []
+  const ARTISTS = 400
+  for (let i = 0; i < n; i++) {
+    const album = Math.floor(i / 12)
+    const artist = album % ARTISTS
+    const name = 'Track ' + String(i % 12 + 1).padStart(2, '0') + ' of album ' + album + '.flac'
+    rows.push({
+      id: 100000 + i,
+      uri: 'content://media/external/audio/media/' + (100000 + i),
+      title: 'Song number ' + i + ' ' + ['Love', 'Night', 'Rain', 'Road', 'Dream', 'Fire', 'Home'][i % 7],
+      artist: 'Artist ' + artist,
+      album: 'Album ' + album,
+      albumArtist: '',
+      composer: '',
+      genre: ['Pop', 'Rock', 'Jazz', 'Soundtrack', 'Classical'][album % 5],
+      year: 1990 + (album % 35),
+      trackNo: (i % 12) + 1,
+      discNo: 0,
+      durationMs: 180000 + (i % 90) * 1000,
+      size: 25000000 + (i % 50) * 100000,
+      modifiedSec: 1700000000 + i,
+      addedSec: 1700000000 + i,
+      displayName: name,
+      mime: 'audio/flac',
+      bitrate: 0,
+      key: 'Music/Artist ' + artist + '/Album ' + album + '/' + name
+    })
+  }
+  return rows
+}
 function listFiles() {
   if (media.files) return media.files
+  if (SYNTH > 0) return (media.files = synthetic(SYNTH))
   const names = fs.readdirSync(FLAC_DIR).filter((n) => n.toLowerCase().endsWith('.flac')).sort().slice(0, 60)
   media.files = names.map((name, i) => {
     const st = fs.statSync(path.join(FLAC_DIR, name))
@@ -260,6 +294,7 @@ function handleMedia(m) {
       return mediaReply(m, {
         results: (o.uris || []).map((uri) => {
           try {
+            if (uri.startsWith('content://')) return { uri, sampleRate: 44100 + (uri.length % 3) * 43900, channels: 2, bitDepth: 16 + (uri.length % 2) * 8, container: 'flac' }
             return { uri, ...flacInfo(decodeURIComponent(uri.replace('file:///', ''))) }
           } catch (e) {
             return { uri, error: String(e) }

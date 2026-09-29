@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -48,10 +49,18 @@ function testHooks(): Plugin {
   }
 }
 
+/** The Android version comes from the one place it is written down, so the app cannot disagree with the APK. */
+function androidVersion(): string {
+  const gradle = readFileSync(resolve('android/app/build.gradle'), 'utf8')
+  const m = /versionName\s+"([^"]+)"/.exec(gradle)
+  if (!m) throw new Error('versionName not found in android/app/build.gradle')
+  return m[1]
+}
+
 export default defineConfig({
   root: 'src/renderer',
   base: './',
-  define: { __OLI_WEB__: 'true' },
+  define: { __OLI_WEB__: 'true', __OLI_ANDROID_VERSION__: JSON.stringify(androidVersion()) },
   resolve: {
     alias: [
       { find: '@renderer', replacement: resolve('src/renderer/src') },

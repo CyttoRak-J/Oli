@@ -54,7 +54,11 @@ export function ListJumpButtons({
   const toCurrent = (): void => {
     if (!selector) return
     const el = scrollParent().querySelector<HTMLElement>(selector)
-    if (!el) return
+    if (!el) {
+      // long lists only keep the rows on screen: ask the list to scroll to the song (it flashes it when it arrives)
+      if (!currentSelector && currentId) window.dispatchEvent(new CustomEvent('oli:jump-to-track', { detail: currentId }))
+      return
+    }
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     el.classList.remove('list-jump-flash')
     void el.offsetWidth

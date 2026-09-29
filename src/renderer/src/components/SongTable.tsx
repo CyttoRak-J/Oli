@@ -29,10 +29,13 @@ import { invalidateFavorites } from '../lib/favorites'
 import { formatDuration } from '../lib/format'
 import { AddToPlaylistDialog } from './AddToPlaylistDialog'
 import { ListJumpButtons } from './ListJumpButtons'
-import { useIncrementalRender } from '../lib/useIncrementalRender'
+import { useRowWindow } from '../lib/useRowWindow'
 
 const MENU_ITEM_CLS =
   'flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-left text-[12.5px] text-ink-1 outline-none hover:bg-surface-3'
+/** Height of one song row in pixels (rows are windowed, so they must all be the same). */
+const ROW_HEIGHT = 46
+
 const MENU_CLS = 'z-50 min-w-[190px] rounded-lg border border-edge bg-surface-2 p-1 shadow-2xl'
 
 export interface SongTableProps {
@@ -74,11 +77,32 @@ export function SongTable({
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const rows = tracks.filter((t) => !t.missing)
-  const { visible, sentinelRef } = useIncrementalRender(rows.length, 200)
+  // Only the rows on screen exist in the page (see useRowWindow): a library of thousands of songs stays smooth.
+  const { first, last, listRef, scrollToIndex } = useRowWindow(rows.length, ROW_HEIGHT)
   const [addTarget, setAddTarget] = useState<Track | null>(null)
   const [editTarget, setEditTarget] = useState<Track | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; track: Track } | null>(null)
   const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // "Go to the playing track" (ListJumpButtons) asks for a row that may not be in the page right now.
+  useEffect(() => {
+    const onJump = (e: Event): void => {
+      const id = (e as CustomEvent<string>).detail
+      const at = rows.findIndex((t) => t.id === id)
+      if (at < 0) return
+      scrollToIndex(at)
+      // flash it once it exists
+      setTimeout(() => {
+        const el = document.querySelector<HTMLElement>(`[data-track-id="${CSS.escape(id)}"]`)
+        if (!el) return
+        el.classList.remove('list-jump-flash')
+        void el.offsetWidth
+        el.classList.add('list-jump-flash')
+      }, 450)
+    }
+    window.addEventListener('oli:jump-to-track', onJump)
+    return () => window.removeEventListener('oli:jump-to-track', onJump)
+  })
 
   // Close the context menu on Escape / outside click / scroll / blur.
   useEffect(() => {
@@ -188,12 +212,12 @@ export function SongTable({
         <span className="text-right">Time</span>
       </div>
 
-      <div className="flex flex-col">
+      <div ref={listRef} className="flex flex-col" style={{ paddingTop: first * ROW_HEIGHT, paddingBottom: (rows.length - last) * ROW_HEIGHT, overflowAnchor: 'none' }}>
         {rows.length === 0 && (
           <div className="px-4 py-10 text-center text-[13px] text-ink-3">No tracks found.</div>
         )}
-        {rows.map((track, index) => {
-          if (index >= visible) return null
+        {rows.slice(first, last).map((track, i) => {
+          const index = first + i
           const active = player.current?.id === track.id && player.status !== 'idle'
           const onToggleFav = (): void => {
             void toggleFavorite('song', track.id).then((fav) => {
@@ -206,24 +230,13 @@ export function SongTable({
               key={track.id}
               data-track-id={track.id}
               className={cn(
-                'group grid items-center gap-2 px-4 py-1.5 transition-colors',
+                'group grid items-center gap-2 px-4 transition-colors',
                 active ? 'bg-surface-2' : 'hover:bg-surface-1'
               )}
               style={{
                 gridTemplateColumns: columns,
-                // ADDED: content-visibility skips layout/style/paint for rows
-                // scrolled off-screen without changing the DOM/scroll
-                // structure — a real, low-risk perf win for large libraries,
-                // since useIncrementalRender's visible window only grows
-                // (never unmounts rows already scrolled past). This is a
-                // browser-native mitigation, not full virtualization; true
-                // windowing would need the scroll container ref threaded
-                // down from App.tsx's <main>, which is a bigger structural
-                // change not made here without being able to verify it
-                // against a running app (sticky headers, ListJumpButtons'
-                // scrollIntoView, etc. all depend on that container).
-                contentVisibility: 'auto',
-                containIntrinsicSize: '0 34px'
+                // every row is exactly this tall: the windowing maths depends on it
+                height: ROW_HEIGHT
               }}
               onDoubleClick={() => {
                 if (navTimerRef.current) {
@@ -336,8 +349,6 @@ export function SongTable({
           )
         })}
       </div>
-
-      {rows.length > visible && <div ref={sentinelRef} className="h-10" />}
 
       {ctxMenu && (
         <div

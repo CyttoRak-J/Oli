@@ -6,7 +6,7 @@ android {
     signingConfigs {
         // ALPHA key, public on purpose (testing only). For a real release use your own keystore from CI secrets.
         release {
-            storeFile file('../keystore/oli-alpha.jks')
+            storeFile file(System.getenv('OLI_KEYSTORE_FILE') ?: '../keystore/oli-alpha.jks')
             storePassword System.getenv('OLI_KEYSTORE_PASSWORD') ?: 'oli-alpha-public'
             keyAlias System.getenv('OLI_KEY_ALIAS') ?: 'oli-alpha'
             keyPassword System.getenv('OLI_KEY_PASSWORD') ?: 'oli-alpha-public'
@@ -16,8 +16,8 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 6
-        versionName "0.6.0"
+        versionCode 7
+        versionName "0.7.0"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a"
