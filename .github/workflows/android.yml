@@ -125,3 +125,12 @@ jobs:
             --prerelease \
             --title "Oli Android ${TAG#android-v} (alpha)" \
             --notes-file .github/android-release-notes.md
+
+      # The same APK also goes on the newest desktop release page (Windows + macOS + Android on one page).
+      - name: Attach the APK to the newest desktop release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: bash scripts/attach-android.sh latest "$TAG"

@@ -1,0 +1,35 @@
+name: attach-android
+
+# Puts an Android APK on a desktop release page (one page, all downloads). Started by pushing a tag named
+#   attach-<desktop tag>-with-<android tag>        e.g.  attach-v1.1.1-with-android-v0.9.1
+# The tag is only a trigger: this workflow deletes it again when it is done.
+on:
+  push:
+    tags:
+      - 'attach-*'
+
+permissions:
+  contents: write
+
+jobs:
+  attach:
+    name: Attach the APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Attach
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          T="${GITHUB_REF_NAME#attach-}"
+          DESK="${T%%-with-*}"
+          AND="${T##*-with-}"
+          case "$DESK" in v[0-9]*) ;; *) echo "not a desktop tag: $DESK"; exit 1 ;; esac
+          case "$AND" in android-v[0-9]*) ;; *) echo "not an android tag: $AND"; exit 1 ;; esac
+          bash scripts/attach-android.sh "$DESK" "$AND"
+
+      - name: Remove the trigger tag
+        if: always()
+        run: git push origin ":refs/tags/${GITHUB_REF_NAME}" || true
