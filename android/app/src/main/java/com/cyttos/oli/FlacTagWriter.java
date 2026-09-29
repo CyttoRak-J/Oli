@@ -6,8 +6,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
@@ -129,12 +127,11 @@ final class FlacTagWriter {
     return true;
   }
 
+  /** Replaces target with tmp. Plain File calls only: java.nio.file needs Android 8, the app supports Android 7. */
   static void replace(File tmp, File target) throws IOException {
-    try {
-      Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-    } catch (IOException e) {
-      Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-    }
+    if (tmp.renameTo(target)) return; // on Android (POSIX) this replaces the target in one step
+    if (target.exists() && !target.delete()) throw new IOException("Could not replace " + target);
+    if (!tmp.renameTo(target)) throw new IOException("Could not move " + tmp + " to " + target);
   }
 
   private static String parseVorbis(byte[] b, List<String> out) {

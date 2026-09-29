@@ -47,7 +47,13 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          # On failure the compiler / Gradle messages are also published as annotations (public, readable without logging in).
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee ../gradle-build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" != "0" ]; then
+            grep -E "error:|What went wrong|Execution failed|Caused by|symbol:|location:|cannot find|incompatible" -A2 ../gradle-build.log | head -60 | while IFS= read -r line; do echo "::error::${line}"; done
+            exit "$status"
+          fi
 
       # Android's own verifier (from the SDK build-tools on the runner): fails the job if the signature is invalid.
       - name: Verify the APK signature
