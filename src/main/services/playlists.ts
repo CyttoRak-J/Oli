@@ -154,6 +154,11 @@ export class PlaylistService {
   }
 
   private totalDuration(playlistId: string): number {
+    const p = this.db.get<{ type: string }>('SELECT type FROM playlists WHERE id = ?', [playlistId])
+    if (p?.type === 'smart') {
+      // Smart playlists have no playlist_tracks rows (always showed 0:00).
+      return this.evaluateSmartPlaylist(playlistId).reduce((sum, e) => sum + (e.track.duration || 0), 0)
+    }
     const row = this.db.get<{ duration: number }>(
       `SELECT COALESCE(SUM(s.duration), 0) AS duration
        FROM playlist_tracks pt JOIN songs s ON s.id = pt.song_id
@@ -202,6 +207,8 @@ export class PlaylistService {
       let added = 0
       for (const songId of songIds) {
         if (existing.has(songId)) continue
+        // Also dedupes within this call (an imported M3U listing a file twice).
+        existing.add(songId)
         this.db.run(
           'INSERT INTO playlist_tracks (playlist_id, song_id, position, added_at) VALUES (?, ?, ?, ?)',
           [playlistId, songId, maxPos + 1 + added, Date.now()]
@@ -397,35 +404,64 @@ export class PlaylistService {
       getLogger().warn('Playlist import read failed', err)
       return null
     }
-    const lines = content.split(/\r?\n/)
+    // Many players write a UTF-8 BOM; it would glue onto the first line.
+    const lines = content.replace(/^\uFEFF/, '').split(/\r?\n/)
     const baseDir = path.dirname(filePath)
     const songIds: string[] = []
     for (const raw of lines) {
       const line = raw.trim()
       if (!line || line.startsWith('#')) continue
-      const resolved = path.isAbsolute(line) ? line : path.resolve(baseDir, line)
+      const resolved = path.isAbsolute(line) ? path.resolve(line) : path.resolve(baseDir, line)
+      // Exact path, then case-insensitive (Windows), then by file name when
+      // the files moved. Resolved per line: the name fallback used to run
+      // only when NOT A SINGLE line matched exactly, so partially relocated
+      // playlists silently lost tracks. The name must follow a separator
+      // ('%song.mp3' also matched 'other-song.mp3').
+      const base = path.basename(line.replace(/\\/g, '/'))
       const match =
         this.db.get<{ id: string }>('SELECT id FROM songs WHERE path = ?', [resolved]) ??
         this.db.get<{ id: string }>('SELECT id FROM songs WHERE LOWER(path) = LOWER(?)', [
           resolved
-        ])
+        ]) ??
+        (base
+          ? this.db.get<{ id: string }>(
+              'SELECT id FROM songs WHERE missing = 0 AND (LOWER(path) LIKE LOWER(?) OR LOWER(path) LIKE LOWER(?)) LIMIT 1',
+              [`%\\${base}`, `%/${base}`]
+            )
+          : undefined)
       if (match) songIds.push(match.id)
-    }
-    if (songIds.length === 0 && lines.length > 0) {
-      // Fallback: resolve by file basename within the library
-      for (const raw of lines) {
-        const line = raw.trim()
-        if (!line || line.startsWith('#')) continue
-        const base = path.basename(line)
-        const match = this.db.get<{ id: string }>(
-          'SELECT id FROM songs WHERE missing = 0 AND (path LIKE ? OR path LIKE ?) LIMIT 1',
-          [`%${base}`, `%/${base}`]
-        )
-        if (match) songIds.push(match.id)
-      }
     }
     const playlist = this.create({ name, type: 'manual' })
     if (playlist && songIds.length > 0) this.addTracks(playlist.id, songIds)
     return playlist
+  }
+
+  /**
+   * ADDED: exportPlaylist was never implemented — only importPlaylist existed
+   * (wired end-to-end through IPC and the Playlists page "Import" button),
+   * even though the section comment above promised both and there's no
+   * corresponding "Export" button anywhere. Writes a standard extended M3U8
+   * (#EXTM3U / #EXTINF duration,artist - title / absolute path per track),
+   * which is what every other player expects for interop.
+   */
+  exportPlaylist(playlistId: string, destPath: string): boolean {
+    const playlist = this.get(playlistId)
+    if (!playlist) return false
+    const entries = this.entries(playlistId)
+    const lines = ['#EXTM3U']
+    for (const entry of entries) {
+      const t = entry.track
+      // Online (stream-only) tracks have no file to point to.
+      if (!t.path) continue
+      lines.push(`#EXTINF:${Math.round(t.duration)},${t.artist} - ${t.title}`)
+      lines.push(t.path)
+    }
+    try {
+      fs.writeFileSync(destPath, lines.join('\n') + '\n', 'utf-8')
+      return true
+    } catch (err) {
+      getLogger().warn('Playlist export failed', err)
+      return false
+    }
   }
 }

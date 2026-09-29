@@ -34,6 +34,8 @@ export function Playlists(): React.JSX.Element {
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name))
 
   const remove = async (id: string): Promise<void> => {
+    const name = playlists.data?.find((p) => p.id === id)?.name ?? 'this playlist'
+    if (!window.confirm(`Delete "${name}"? Your songs are not deleted.`)) return
     await deletePlaylist(id)
     qc.invalidateQueries({ queryKey: ['playlists'] })
   }
@@ -151,12 +153,15 @@ function CreateDialog({
   const save = async (): Promise<void> => {
     if (!name.trim()) return
     setBusy(true)
-    await createPlaylist({ name: name.trim(), description: desc.trim() })
-    setBusy(false)
-    setName('')
-    setDesc('')
-    qc.invalidateQueries({ queryKey: ['playlists'] })
-    onOpenChange(false)
+    try {
+      await createPlaylist({ name: name.trim(), description: desc.trim() })
+      setName('')
+      setDesc('')
+      onOpenChange(false)
+    } finally {
+      setBusy(false)
+      void qc.invalidateQueries({ queryKey: ['playlists'] })
+    }
   }
 
   return (

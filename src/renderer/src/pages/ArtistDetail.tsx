@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { getArtistById, getArtistSongs, getArtistAlbums } from '../lib/ipc'
 import { SongTable } from '../components/SongTable'
 import { ArtworkFallback } from '../components/Artwork'
 import { formatCount } from '../lib/format'
+import { EmptyState } from '../components/EmptyState'
 
 export function ArtistDetail(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -25,6 +26,13 @@ export function ArtistDetail(): React.JSX.Element {
     enabled: Boolean(id)
   })
 
+  if (!artist.isLoading && !artist.data) {
+    return (
+      <div className="p-6">
+        <EmptyState title="Artist not found" description="It may have been merged or removed from your library." />
+      </div>
+    )
+  }
   if (artist.isLoading || !artist.data) {
     return (
       <div className="p-6">
@@ -66,7 +74,12 @@ export function ArtistDetail(): React.JSX.Element {
           <h2 className="mb-2 text-[14px] font-bold text-ink-0">Albums</h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
             {albums.data.map((album) => (
-              <ArtistAlbumCard key={album.id} name={album.title} subtitle={album.year ? String(album.year) : ''} />
+              <ArtistAlbumCard
+                key={album.id}
+                id={album.id}
+                name={album.title}
+                subtitle={album.year ? String(album.year) : ''}
+              />
             ))}
           </div>
         </div>
@@ -83,14 +96,17 @@ export function ArtistDetail(): React.JSX.Element {
   )
 }
 
-function ArtistAlbumCard({ name, subtitle }: { name: string; subtitle: string }): React.JSX.Element {
+function ArtistAlbumCard({ id, name, subtitle }: { id: string; name: string; subtitle: string }): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-edge bg-surface-1 p-3 transition-colors hover:border-surface-4">
+    <Link
+      to={`/albums/${id}`}
+      className="flex flex-col gap-2 rounded-xl border border-edge bg-surface-1 p-3 transition-colors hover:border-surface-4"
+    >
       <ArtworkFallback label={name} fluid />
       <div className="min-w-0">
         <div className="truncate text-[12.5px] font-semibold text-ink-0">{name}</div>
         {subtitle && <div className="text-[10.5px] text-ink-3">{subtitle}</div>}
       </div>
-    </div>
+    </Link>
   )
 }

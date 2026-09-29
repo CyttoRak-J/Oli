@@ -22,3 +22,4 @@ export function ComposerDetail(): React.JSX.Element {
     </div>
   )
 }
+

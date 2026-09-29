@@ -321,6 +321,8 @@ export interface AppSettings {
   youtubeApiKey: string
   /** Free AcoustID API key (acoustid.org) enabling audio-fingerprint metadata matching. */
   acoustidApiKey: string
+  /** Install a missing or newer yt-dlp (YouTube engine) automatically. */
+  ytdlpAutoUpdate: boolean
   /** How many queued songs get their metadata prepared ahead of download time (1-5). */
   songsAhead: number
   /** How many YouTube downloads may run at once (1-3; >1 risks YouTube bot checks). */
@@ -390,4 +392,84 @@ export interface NotificationPayload {
 export interface LegacySettingsRecord {
   key: string
   value: string
+}
+
+// ---------------------------------------------------------------- Internet Archive
+export interface ArchiveHit {
+  identifier: string
+  title: string
+  creator: string | null
+  year: number | null
+  downloads: number
+  licenseUrl: string | null
+}
+
+export interface ArchiveSearchResult {
+  hits: ArchiveHit[]
+  total: number
+  page: number
+  error?: string
+}
+
+/** One audio file inside an archive.org item. */
+export interface ArchiveFile {
+  name: string
+  /** archive.org format label, e.g. "Flac", "24bit Flac", "VBR MP3". */
+  format: string
+  /** Short quality label for the UI, e.g. "FLAC", "24-bit FLAC", "MP3". */
+  label: string
+  lossless: boolean
+  size: number
+  durationSec: number | null
+  track: string | null
+  title: string | null
+  artist: string | null
+  album: string | null
+  genre: string | null
+  md5: string | null
+}
+
+/** A picture file inside an archive.org item (cover art candidates). */
+export interface ArchiveImage {
+  name: string
+  size: number
+}
+
+export interface ArchiveItem {
+  identifier: string
+  title: string
+  creator: string | null
+  date: string | null
+  licenseUrl: string | null
+  files: ArchiveFile[]
+  /** JPEG/PNG files of the item (not thumbnails or spectrograms). */
+  images: ArchiveImage[]
+  error?: string
+}
+
+// ---------------------------------------------------------------- YouTube engine (yt-dlp)
+export type YtEngineSource = 'user' | 'bundled' | 'system'
+
+export type YtEngineState =
+  | 'checking'
+  | 'ok'
+  | 'missing'
+  | 'broken'
+  | 'update-available'
+  | 'installing'
+  | 'failed'
+
+export interface YtEngineStatus {
+  state: YtEngineState
+  /** Installed version, e.g. "2026.08.19" (null when missing or not runnable). */
+  version: string | null
+  /** Newest released version, when it could be looked up. */
+  latest: string | null
+  /** Which copy is in use: downloaded (user), shipped with the app, or found on the PC. */
+  source: YtEngineSource | null
+  path: string | null
+  /** Result or error text to show (for example after an update). */
+  message: string | null
+  /** The "update automatically" setting. */
+  auto: boolean
 }

@@ -159,8 +159,19 @@ export class LibraryService extends EventEmitter {
   // Scanning
   // ------------------------------------------------------------------
 
+  /** Scan requested while another one ran ('*' = full library). */
+  private pendingScans = new Set<string>()
+  private pendingForce = false
+
   async scanLibrary(libraryId?: string, force = false): Promise<void> {
-    if (this.activeScan) return this.activeScan as Promise<void>
+    if (this.activeScan) {
+      // Don't drop the request: adding two folders at once used to scan only
+      // the first one (the second call just returned the running scan).
+      this.pendingScans.add(libraryId ?? '*')
+      this.pendingForce ||= force
+      await this.activeScan.catch(() => undefined)
+      return this.runPendingScans()
+    }
     const promise = (async () => {
       const counters = await this.scanner.scanLibrary({ libraryId, force })
       getLogger().info('Scan finished', counters)
@@ -181,9 +192,24 @@ export class LibraryService extends EventEmitter {
     } finally {
       this.activeScan = null
     }
+    await this.runPendingScans()
+  }
+
+  private async runPendingScans(): Promise<void> {
+    if (this.activeScan || this.pendingScans.size === 0) return
+    const ids = [...this.pendingScans]
+    const force = this.pendingForce
+    this.pendingScans.clear()
+    this.pendingForce = false
+    if (ids.includes('*')) {
+      await this.scanLibrary(undefined, force)
+      return
+    }
+    for (const id of ids) await this.scanLibrary(id, force)
   }
 
   cancelScan(): void {
+    this.pendingScans.clear()
     this.scanner.cancel()
   }
 
@@ -254,7 +280,7 @@ export class LibraryService extends EventEmitter {
     if (q.format) push('LOWER(s.format) = ?', q.format.toLowerCase())
     if (q.folderId) push('s.folder_id = ?', q.folderId)
     if (q.favoritesOnly) where.push('s.favorite = 1')
-    if (q.neverPlayed) push('s.play_count = 0', 0)
+    if (q.neverPlayed) where.push('COALESCE(s.play_count, 0) = 0')
     if (q.recentlyAdded) push('s.added_at >= ?', Date.now() - 30 * 86400_000)
     if (q.recentlyPlayed)
       push('s.last_played_at IS NOT NULL AND s.last_played_at >= ?', Date.now() - 30 * 86400_000)
@@ -262,7 +288,7 @@ export class LibraryService extends EventEmitter {
       if (q.letter === '#') {
         where.push(`(s.title COLLATE NOCASE < 'a' OR s.title GLOB '[^a-zA-Z]*')`)
       } else {
-        where.push(`s.title COLLATE NOCASE LIKE ?`, `${q.letter}%`)
+        push(`s.title COLLATE NOCASE LIKE ?`, `${q.letter}%`)
       }
     }
     if (q.duplicatesOnly) {
@@ -400,6 +426,45 @@ export class LibraryService extends EventEmitter {
         [genre.toLowerCase()]
       )
       .map(toTrack)
+  }
+
+  /**
+   * ADDED: "radio mode" / autoplay-similar. Deliberately simple — no ML,
+   * no external recommendation service, just: same artist first, then same
+   * genre, excluding whatever's already in the queue/history, sorted by a
+   * cheap "quality" proxy (favorite, then play count, then random) so it
+   * doesn't always surface the exact same handful of tracks. Good enough to
+   * keep music playing without repeats; not meant to be a real recommender.
+   */
+  getSimilarTracks(songId: string, excludeIds: string[], limit = 10): Track[] {
+    const seed = this.db.get<Record<string, unknown>>('SELECT * FROM songs WHERE id = ?', [songId])
+    if (!seed) return []
+    const exclude = new Set([songId, ...excludeIds])
+    const placeholders = exclude.size > 0 ? [...exclude].map(() => '?').join(',') : "''"
+
+    const byArtist = seed.artist_id
+      ? this.db.all<Record<string, unknown>>(
+          `SELECT * FROM songs
+           WHERE artist_id = ? AND missing = 0 AND id NOT IN (${placeholders})
+           ORDER BY favorite DESC, play_count DESC, RANDOM() LIMIT ?`,
+          [seed.artist_id, ...exclude, limit]
+        )
+      : []
+
+    const remaining = limit - byArtist.length
+    const byGenre =
+      remaining > 0 && seed.genre
+        ? this.db.all<Record<string, unknown>>(
+            `SELECT * FROM songs
+             WHERE LOWER(genre) = LOWER(?) AND missing = 0
+               AND id NOT IN (${placeholders})
+               AND id NOT IN (${byArtist.map(() => '?').join(',') || "''"})
+             ORDER BY favorite DESC, play_count DESC, RANDOM() LIMIT ?`,
+            [seed.genre, ...exclude, ...byArtist.map((r) => String(r.id)), remaining]
+          )
+        : []
+
+    return [...byArtist, ...byGenre].map(toTrack)
   }
 
   getComposers(): ComposerInfo[] {

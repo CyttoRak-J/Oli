@@ -12,9 +12,12 @@ import {
   transcodeLocalFile,
   probeDuration,
   resolveYouTubeStream,
-  resolveDownloadYouTubeAudio
+  resolveDownloadYouTubeAudio,
+  getSimilarTracks,
+  prefetchYouTubeStreams
 } from '../lib/ipc'
 import { clamp } from '../lib/format'
+import { initMedia, localMediaUrl } from '../lib/media'
 
 export type PlayerStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'ended'
 export type RepeatMode = 'off' | 'queue' | 'one'
@@ -54,6 +57,9 @@ let streamFallbackIdx = 0
 /** Track id we already tried to transcode (prevents infinite retry loops). */
 let transcodedTrackId: string | null = null
 
+/** Online tracks whose streams were already retried once after a refusal. */
+const streamRetried = new Set<string>()
+
 /** Track ids for which we already tried the local download fallback. */
 const ytDownloadAttempted = new Set<string>()
 
@@ -83,6 +89,73 @@ let resumedAt = 0
  *  double attachment (React StrictMode double-mounts effects in dev). */
 let listenersAttached = false
 
+/**
+ * True once the current source actually produced audio ('playing' fired).
+ * A source that played fine and then errors (connection dropped during a
+ * long pause, a USB/network drive that spun down) is retried in place at the
+ * same position before any transcode / fallback / skip is attempted.
+ */
+let playedOk = false
+/** In-place reload attempts for the current source (bounded to avoid loops). */
+let srcRetries = 0
+const MAX_SRC_RETRIES = 2
+
+/** Playback position when the last 'waiting' began (stall progress check). */
+let waitingAtPos = 0
+
+/** Local file whose eager transcode must be swapped in once ready because the original failed. */
+let awaitingTranscodeId: string | null = null
+
+/** Consecutive tracks that failed to play; stops a queue of dead tracks from cycling forever. */
+let failureStreak = 0
+
+/** Track ids already played in the current shuffle cycle (no repeats until all have played). */
+const shufflePlayed = new Set<string>()
+
+/** Playback settings from Preferences (applied to every loaded source). */
+const audioPrefs = {
+  speed: 1,
+  preservePitch: true,
+  replayGain: 'off' as 'off' | 'track' | 'album'
+}
+
+/**
+ * Element volume for the user's volume and the track's ReplayGain. Only
+ * attenuation is possible with the media element (volume is capped at 1),
+ * which covers the usual case of loud masters.
+ */
+function effectiveVolume(volume: number, track: Track | null): number {
+  let db: number | null = null
+  if (track && audioPrefs.replayGain === 'track') db = track.replayGain ?? track.replayGainAlbum
+  else if (track && audioPrefs.replayGain === 'album') db = track.replayGainAlbum ?? track.replayGain
+  const factor = db != null && Number.isFinite(db) ? Math.min(1, Math.pow(10, db / 20)) : 1
+  return clamp(volume * factor, 0, 1)
+}
+
+function applyRate(el: HTMLAudioElement): void {
+  // defaultPlaybackRate survives new sources; playbackRate resets on load.
+  el.defaultPlaybackRate = audioPrefs.speed
+  el.playbackRate = audioPrefs.speed
+  el.preservesPitch = audioPrefs.preservePitch
+}
+
+/**
+ * Remember the current position so a reload of the SAME track (transcode,
+ * fallback stream, download) continues where it was instead of restarting.
+ */
+function rememberPosition(el: HTMLAudioElement): void {
+  const t = el.currentTime
+  if (pendingSeekPos === 0 && Number.isFinite(t) && t > 0.5) pendingSeekPos = t
+}
+
+/** Point the element at a new source (resets per-source retry bookkeeping). */
+function switchSrc(el: HTMLAudioElement, url: string): void {
+  playedOk = false
+  srcRetries = 0
+  el.src = url
+  applyRate(el)
+}
+
 export interface PlaySource {
   source: 'library' | 'playlist' | 'album' | 'artist' | 'queue' | 'search' | 'favorites' | 'downloads'
   sourceId: string | null
@@ -102,6 +175,10 @@ interface PlayerState {
   source: PlaySource
   /** Queue indices in the order they were actually played (top = current). */
   history: number[]
+  /** ADDED: when true, an empty-queue "ended" state auto-extends the queue
+   *  with similar tracks (same artist, then same genre) instead of stopping. */
+  radioMode: boolean
+  toggleRadioMode: () => void
 
   hydrate: () => Promise<void>
   playTracks: (tracks: Track[], startIndex: number, source: PlaySource) => void
@@ -140,6 +217,16 @@ function makeSnapshot(s: PlayerState): Partial<PlaybackState> {
     artist: s.current?.artist ?? null,
     artworkUrl: s.current?.artworkUrl ?? null
   }
+}
+
+/** Drop repeated track ids, keeping the first occurrence (queue is keyed by id). */
+function dedupeTracks(tracks: Track[]): Track[] {
+  const seen = new Set<string>()
+  return tracks.filter((t) => {
+    if (seen.has(t.id)) return false
+    seen.add(t.id)
+    return true
+  })
 }
 
 function persistQueue(queue: Track[]): void {
@@ -189,18 +276,31 @@ export const usePlayer = create<PlayerState>((set, get) => {
     const el = getAudio()
     clearStall()
     transcodedTrackId = null
+    awaitingTranscodeId = null
     streamFallbacks = []
     streamFallbackIdx = 0
+    shufflePlayed.add(track.id)
+    streamRetried.delete(track.id)
     set({ current: track, status: 'loading', currentTime: 0, duration: 0 })
-    // YouTube tracks are never played from stored URLs (they expire and
-    // stall unpredictably): a FRESH stream is resolved at play time, every
-    // time, in any quality/format, with the local download as fallback.
+    // Resolve the next YouTube songs in the queue while this one plays, so
+    // the transition needs no wait.
+    {
+      const st = get()
+      const upcoming: string[] = []
+      for (let k = 1; k <= 2; k++) {
+        const nt = st.queue[st.index + k]
+        if (nt && !nt.path && nt.id.startsWith('youtube:')) upcoming.push(nt.id.slice('youtube:'.length))
+      }
+      if (upcoming.length > 0) prefetchYouTubeStreams(upcoming, true)
+    }
+    el.volume = effectiveVolume(get().volume, track)
+    // Online tracks resolve their stream at play time (see freshResolveOnline).
     if (track.id.startsWith('youtube:') && !track.path) {
       freshResolveOnline(track)
       return
     }
     // Local file (or an online track already downloaded earlier in session).
-    el.src = `cyttos-local://file/${encodeURIComponent(track.path)}`
+    switchSrc(el, localMediaUrl(track.path))
     // Chromium cannot decode some formats (e.g. opus); when the DB has no
     // duration, ask main to probe it with ffprobe so the UI never shows 0:00.
     if (track.duration <= 0) {
@@ -218,13 +318,20 @@ export const usePlayer = create<PlayerState>((set, get) => {
         if (transcodeInFlight === track.id) transcodeInFlight = null
         const s = get()
         if (s.current?.id !== track.id) return
-        if (mp3 && s.status === 'loading') {
+        // The original failed while this transcode was running (the error
+        // handler parked the track here): swap in the MP3, or give up.
+        const originalFailed = awaitingTranscodeId === track.id || el.error != null
+        awaitingTranscodeId = null
+        if (mp3 && (s.status === 'loading' || originalFailed || !playedOk)) {
           clearStall()
-          el.src = `cyttos-local://file/${encodeURIComponent(mp3)}`
+          transcodedTrackId = track.id
+          rememberPosition(el)
+          switchSrc(el, localMediaUrl(mp3))
           el.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+        } else if (!mp3 && originalFailed) {
+          skipCurrent()
         }
-        // When null, the original file plays if possible; otherwise the
-        // stall timer / error handler triggers tryTranscode as a retry.
+        // Otherwise the original file is already playing fine.
       })
     }
     // If Chromium cannot decode the file it may stall instead of erroring;
@@ -278,11 +385,13 @@ export const usePlayer = create<PlayerState>((set, get) => {
     // and can fail on transient bot checks). Fresh re-resolution only
     // happens as a fallback when these URLs fail.
     if (track.streamUrls && track.streamUrls.length > 0) {
-      streamFallbacks = track.streamUrls.slice(1)
+      // streamFallbacks holds the FULL list; streamFallbackIdx is the URL
+      // currently playing, so the error handler tries idx + 1 next.
+      streamFallbacks = [...track.streamUrls]
       streamFallbackIdx = 0
       const el = getAudio()
-      el.src = track.streamUrls[0]
-      dbg(`play-pre-resolved url#0 of ${track.streamUrls.length}; fb=${streamFallbacks.length}`)
+      switchSrc(el, track.streamUrls[0])
+      dbg(`play-pre-resolved url#0 of ${track.streamUrls.length}`)
       el.play().catch((e: Error) => dbg(`play() rejected (pre-resolved): ${e.message}`))
       return
     }
@@ -296,14 +405,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
         for (let attempt = 0; attempt < 2 && urls.length === 0; attempt++) {
           if (attempt > 0) await new Promise((r) => setTimeout(r, 1200))
           if (!stillCurrent()) return
-          urls = await resolveYouTubeStream(videoId).catch(() => [] as string[])
+          urls = await resolveYouTubeStream(videoId, attempt > 0).catch(() => [] as string[])
         }
         if (!stillCurrent()) return
         if (urls.length > 0) {
-          streamFallbacks = urls.slice(1)
+          streamFallbacks = [...urls]
           streamFallbackIdx = 0
           const el = getAudio()
-          el.src = urls[0]
+          switchSrc(el, urls[0])
           dbg(`play-fresh-resolve url#0 of ${urls.length}`)
           el.play().catch((e: Error) => dbg(`play() rejected (fresh): ${e.message}`))
           return
@@ -340,6 +449,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     const videoId = videoIdOf(track)
     if (!videoId) return false
     clearStall()
+    rememberPosition(getAudio())
     set({ status: 'loading' })
     void resolveDownloadYouTubeAudio(videoId)
       .then(async (file) => {
@@ -351,7 +461,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         }
         // Download fell through (transient bot checks etc.): one final fresh
         // stream resolution can still save the song.
-        const urls = await resolveYouTubeStream(videoId).catch(() => [] as string[])
+        const urls = await resolveYouTubeStream(videoId, true).catch(() => [] as string[])
         if (get().current?.id !== track.id) return 'moved'
         if (urls.length > 0) {
           load({ ...track, streamUrl: urls[0], streamUrls: urls })
@@ -376,11 +486,18 @@ export const usePlayer = create<PlayerState>((set, get) => {
     const s = get()
     const cur = s.current
     if (!cur || cur.streamUrl || !cur.path) return false
-    if (transcodeInFlight === cur.id) return true
+    if (transcodeInFlight === cur.id) {
+      // A transcode (e.g. the eager one started by load()) is still running:
+      // park the track so its completion swaps the MP3 in (or skips).
+      awaitingTranscodeId = cur.id
+      set({ status: 'loading' })
+      return true
+    }
     if (transcodedTrackId === cur.id) return false
     transcodedTrackId = cur.id
     transcodeInFlight = cur.id
     clearStall()
+    rememberPosition(getAudio())
     set({ status: 'loading' })
     void transcodeLocalFile(cur.path).then((mp3) => {
       if (transcodeInFlight === cur.id) transcodeInFlight = null
@@ -388,7 +505,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // The user may have moved on while transcoding; never hijack playback.
       if (get().current?.id !== cur.id) return
       if (mp3) {
-        el.src = `cyttos-local://file/${encodeURIComponent(mp3)}`
+        switchSrc(el, localMediaUrl(mp3))
         el.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
       } else {
         skipCurrent()
@@ -397,16 +514,43 @@ export const usePlayer = create<PlayerState>((set, get) => {
     return true
   }
 
-  /** Skip the current track (or stop when the queue is empty). */
+  /**
+   * Skip a track that cannot be played. Always moves on (even with
+   * repeat-one, which would otherwise reload the same dead track forever),
+   * and stops once every track in the queue has failed in a row.
+   */
   const skipCurrent = (): void => {
+    clearStall()
     const s = get()
-    if (s.queue.length > 0) {
+    failureStreak += 1
+    if (s.queue.length > 0 && failureStreak < s.queue.length) {
       set({ status: 'ended' })
-      get().next(true)
+      advance(true, true)
     } else {
+      failureStreak = 0
+      const el = getAudio()
+      el.pause()
       set({ status: 'idle' })
       syncMainNow()
     }
+  }
+
+  /** Reopen the current source at the current position (see playedOk). */
+  const reloadInPlace = (): void => {
+    const el = getAudio()
+    const src = el.currentSrc || el.src
+    if (!src) return
+    srcRetries += 1
+    rememberPosition(el)
+    dbg(`reload-in-place #${srcRetries} at ${pendingSeekPos.toFixed(1)}s`)
+    clearStall()
+    set({ status: 'loading' })
+    // playedOk goes false so a reload that errors right away falls through
+    // to the normal fallback chain instead of retrying again.
+    playedOk = false
+    el.src = src
+    el.play().catch((e: Error) => dbg(`play() rejected (reload): ${e.message}`))
+    stallTimer = setTimeout(stallWatchdog, 15000)
   }
 
   /**
@@ -423,9 +567,25 @@ export const usePlayer = create<PlayerState>((set, get) => {
     if (elNow.paused) return
     const cur = s.current
     if (!cur) return
+    // Playback moved on (or has enough data) since the 'waiting' started:
+    // it recovered by itself and only the 'playing' event was missed.
+    if (elNow.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA || elNow.currentTime > waitingAtPos + 0.5) {
+      set({ status: 'playing' })
+      syncMainNow()
+      return
+    }
+    // Never throw away the listened part when falling back below.
+    rememberPosition(elNow)
     const sinceSeek = Date.now() - lastSeekAt
     const sinceResume = Date.now() - resumedAt
     const userDriven = sinceSeek < 60000 || sinceResume < 60000
+    // A source that already played fine usually just lost its connection
+    // (long pause, sleeping drive): reopening it in place is the cheapest
+    // fix and keeps the position, before anything heavier is tried.
+    if (playedOk && srcRetries < MAX_SRC_RETRIES) {
+      reloadInPlace()
+      return
+    }
     if (userDriven) {
       if (sinceSeek < 30000 || sinceResume < 30000) {
         // Inside the grace window: keep waiting, never hijack.
@@ -445,13 +605,15 @@ export const usePlayer = create<PlayerState>((set, get) => {
         const videoId = videoIdOf(cur)
         if (videoId && freshResolvingId !== cur.id) {
           freshResolvingId = cur.id
-          void resolveYouTubeStream(videoId)
+          void resolveYouTubeStream(videoId, true)
             .then((urls) => {
               if (freshResolvingId === cur.id) freshResolvingId = null
               if (urls.length === 0) return
               if (get().current?.id !== cur.id) return
               const el = getAudio()
-              el.src = urls[0]
+              streamFallbacks = [...urls]
+              streamFallbackIdx = 0
+              switchSrc(el, urls[0])
               el.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
             })
             .catch(() => {
@@ -469,6 +631,113 @@ export const usePlayer = create<PlayerState>((set, get) => {
     }
   }
 
+  /** Start playing queue slot `idx` as the next track. */
+  const startAt = (idx: number): void => {
+    const track = get().queue[idx]
+    if (!track) return
+    set({ index: idx, current: track })
+    pushHistory(idx)
+    pendingSeekPos = 0
+    lastSeekAt = 0
+    load(track)
+    getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+    sendPlaybackState(makeSnapshot(get()))
+  }
+
+  /** Nothing left to play: stop at the end of the queue. */
+  const endQueue = (): void => {
+    set({ status: 'ended' })
+    sendPlaybackState(makeSnapshot(get()))
+  }
+
+  /**
+   * Radio mode: extend the queue with similar tracks instead of stopping.
+   * Fire-and-forget, since next() is called synchronously from media keys,
+   * tray, thumbar and IPC commands.
+   */
+  const extendWithRadio = (seed: Track): void => {
+    set({ status: 'loading' })
+    const excludeIds = get().queue.map((t) => t.id)
+    void getSimilarTracks(seed.id, excludeIds, 10)
+      .then((similar) => {
+        // The user started something else while this was loading.
+        if (get().current?.id !== seed.id) return
+        const fresh = similar.filter((t) => !get().queue.some((q) => q.id === t.id))
+        if (fresh.length === 0) {
+          // Nothing similar found (e.g. missing genre/artist tags): stop
+          // instead of being stuck "loading" forever.
+          endQueue()
+          return
+        }
+        const start = get().queue.length
+        const queue = [...get().queue, ...fresh]
+        set({ queue })
+        persistQueue(queue)
+        startAt(start)
+      })
+      .catch((err) => {
+        dbg(`radio mode fetch failed: ${(err as Error).message}`)
+        if (get().current?.id === seed.id) endQueue()
+      })
+  }
+
+  /**
+   * Move to the next track. `auto` is true when the current track ended (or
+   * failed) on its own, false for an explicit Next press. `ignoreRepeatOne`
+   * is used when skipping an unplayable track so repeat-one cannot reload
+   * the same dead track forever.
+   */
+  const advance = (auto: boolean, ignoreRepeatOne: boolean): void => {
+    const s = get()
+    if (s.queue.length === 0) return
+    if (s.repeat === 'one' && auto && !ignoreRepeatOne && s.current) {
+      // Replay in place: no reload / stream re-resolve needed.
+      const el = getAudio()
+      pendingSeekPos = 0
+      lastSeekAt = 0
+      try {
+        el.currentTime = 0
+      } catch {
+        // ignore
+      }
+      set({ currentTime: 0 })
+      el.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+      return
+    }
+    if (s.shuffle && s.queue.length > 1) {
+      // Shuffle without repeats: pick among the tracks not yet played in
+      // this cycle; a new cycle starts once every track has played.
+      let pool = s.queue
+        .map((t, i) => ({ t, i }))
+        .filter(({ t, i }) => i !== s.index && !shufflePlayed.has(t.id))
+      if (pool.length === 0) {
+        if (auto && s.repeat === 'off') {
+          if (s.radioMode && s.current) extendWithRadio(s.current)
+          else endQueue()
+          return
+        }
+        shufflePlayed.clear()
+        if (s.current) shufflePlayed.add(s.current.id)
+        pool = s.queue.map((t, i) => ({ t, i })).filter(({ i }) => i !== s.index)
+      }
+      startAt(pool[Math.floor(Math.random() * pool.length)].i)
+      return
+    }
+    let nextIdx = s.index + 1
+    if (nextIdx >= s.queue.length) {
+      if (s.repeat === 'queue' || !auto) {
+        nextIdx = 0
+      } else if (s.radioMode && s.current) {
+        extendWithRadio(s.current)
+        return
+      } else {
+        endQueue()
+        return
+      }
+    }
+    startAt(nextIdx)
+  }
+
   return {
     queue: [],
     index: -1,
@@ -482,20 +751,27 @@ export const usePlayer = create<PlayerState>((set, get) => {
     repeat: 'off',
     source: { source: 'library', sourceId: null },
     history: [],
+    radioMode: false,
 
     async hydrate(): Promise<void> {
       const el = getAudio()
+      await initMedia()
       const queue = await getQueue().catch(() => [])
-      if (queue.length > 0) {
-        const tracks = queue.map((e) => e.track).filter(Boolean)
-        set({ queue: tracks, index: 0, history: [0] })
+      // Nothing is loaded yet, so no queue slot is "current": index -1 makes
+      // play/next start at the first restored track (index 0 made next()
+      // jump straight to the second one). Skipped when a track is already
+      // playing (a second hydrate from a StrictMode remount).
+      if (queue.length > 0 && !get().current) {
+        const tracks = queue.map((e) => e.track).filter((t): t is Track => Boolean(t))
+        set({ queue: dedupeTracks(tracks), index: -1, history: [] })
       }
 
       // Restore volume, shuffle and repeat from saved settings.
       const settings = await getSettings().catch(() => null)
       if (settings) {
+        applyAudioSettings(settings)
         const volume = clamp(Number(settings.volume ?? 0.8), 0, 1)
-        el.volume = volume
+        el.volume = effectiveVolume(volume, get().current)
         set({ volume })
         if (typeof settings.shuffle === 'boolean') set({ shuffle: settings.shuffle })
         if (settings.repeat === 'off' || settings.repeat === 'queue' || settings.repeat === 'one') {
@@ -521,9 +797,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
         set({ duration: real || get().duration })
         // The track object (queue rows, player bar) may carry no duration
         // yet (YouTube search results); backfill it with the real value.
-        if (real > 0) get().patchTrack(get().current?.id ?? '', { duration: real })
-        // Restore the position the user clicked: fallback streams after a
-        // failed seek start from where the user wanted instead of 0.
+        const curId = get().current?.id
+        if (real > 0 && curId) get().patchTrack(curId, { duration: real })
+        // Restore the position the user clicked / paused at: reloads and
+        // fallback streams continue from there instead of restarting at 0.
         if (pendingSeekPos > 0 && el.duration && pendingSeekPos < el.duration) {
           try {
             el.currentTime = pendingSeekPos
@@ -534,42 +811,59 @@ export const usePlayer = create<PlayerState>((set, get) => {
       })
       el.addEventListener('play', () => {
         if (!get().current?.path) dbg(`play-event fired (${srcHost(el)})`)
+        if (!get().current) return
         set({ status: 'playing' })
         syncMainNow()
       })
       el.addEventListener('pause', () => {
         clearStall()
+        // stop() / clearQueue() / a dead queue already moved to 'idle'; the
+        // (asynchronous) pause event must not turn that back into 'paused'.
+        if (get().status === 'idle') return
         // Remember where the user stopped: if playback must be reloaded after
-        // resume (transcode / download fallback), it continues from here
-        // instead of restarting from 0.
+        // resume (connection dropped, transcode / download fallback), it
+        // continues from here instead of restarting from 0.
         const cur = get().current
         const t = el.currentTime
         if (cur && t > 0 && (!el.duration || t < el.duration) && pendingSeekPos === 0) {
           pendingSeekPos = t
         }
-        set({ status: 'paused' })
+        set({ status: 'paused', currentTime: t || get().currentTime })
         syncMainNow()
       })
       el.addEventListener('waiting', () => {
         if (!get().current?.path) dbg(`waiting (${srcHost(el)})`)
+        if (!get().current) return
         set({ status: 'loading' })
         clearStall()
+        waitingAtPos = el.currentTime
         // A seek or a resume-from-pause starts a fresh re-buffer; the
         // watchdog gives those a long grace window (it would otherwise
         // restart or skip the song on slow media).
-        const userDriven = Date.now() - lastSeekAt < 3000 || Date.now() - resumedAt < 3000
+        const userDriven = Date.now() - lastSeekAt < 10000 || Date.now() - resumedAt < 10000
         stallTimer = setTimeout(stallWatchdog, userDriven ? 20000 : 10000)
         syncMainNow()
       })
       el.addEventListener('playing', () => {
         if (!get().current?.path) dbg(`playing-event fired (${srcHost(el)})`)
         clearStall()
+        playedOk = true
+        failureStreak = 0
         pendingSeekPos = 0
         lastSeekAt = 0
         set({ status: 'playing' })
         syncMainNow()
       })
-      el.addEventListener('ended', () => get().next(true))
+      el.addEventListener('seeked', () => {
+        // The seek landed: the element's own position is authoritative now.
+        // A stale target would otherwise be restored by a later reload and
+        // jump the song back to where the user once clicked.
+        if (!el.paused) pendingSeekPos = 0
+      })
+      el.addEventListener('ended', () => {
+        if (!get().current) return
+        get().next(true)
+      })
       el.addEventListener('error', () => {
         clearStall()
         const failed = get().current
@@ -577,19 +871,55 @@ export const usePlayer = create<PlayerState>((set, get) => {
         // MEDIA_ERR_SRC_NOT_SUPPORTED error event with no current track; with
         // a null current the fallback chain must not start or skip anything.
         if (!failed) return
-        if (!failed.path) {
-          dbg(`audio-error code=${el.error?.code} idx=${streamFallbackIdx} fbs=${streamFallbacks.length} host=${srcHost(el)}`)
+        // Chromium's message names the real cause (e.g. DEMUXER_ERROR_*,
+        // PIPELINE_ERROR_DECODE, or a failed protocol request).
+        const srcName = (() => {
+          try {
+            return decodeURIComponent(el.src).split(/[\\/]/).pop()?.slice(0, 80) ?? ''
+          } catch {
+            return ''
+          }
+        })()
+        dbg(
+          `audio-error code=${el.error?.code} msg="${el.error?.message ?? ''}" played=${playedOk} ` +
+            `idx=${streamFallbackIdx} fbs=${streamFallbacks.length} src=${failed.path ? srcName : srcHost(el)}`
+        )
+        // The source was playing fine and then failed (network connection
+        // dropped during a pause, a drive went to sleep): reopen it at the
+        // same position before treating the track as broken.
+        if (playedOk && srcRetries < MAX_SRC_RETRIES) {
+          reloadInPlace()
+          return
         }
         if (streamFallbackIdx + 1 < streamFallbacks.length) {
           streamFallbackIdx += 1
           const next = streamFallbacks[streamFallbackIdx]
+          rememberPosition(el)
           set({ status: 'loading' })
           // A short delay lets Chromium finish aborting the failed source;
           // switching instantly can surface spurious format errors.
           setTimeout(() => {
+            if (get().current?.id !== failed.id) return
+            playedOk = false
+            srcRetries = 0
             el.src = next
             el.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
           }, 300)
+          return
+        }
+        // YouTube briefly refuses brand-new stream URLs; a short wait and one
+        // more pass over the same URLs beats the slow download fallback.
+        if (!failed.path && streamFallbacks.length > 0 && !streamRetried.has(failed.id)) {
+          streamRetried.add(failed.id)
+          set({ status: 'loading' })
+          setTimeout(() => {
+            if (get().current?.id !== failed.id || streamFallbacks.length === 0) return
+            streamFallbackIdx = 0
+            playedOk = false
+            srcRetries = 0
+            el.src = streamFallbacks[0]
+            el.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+          }, 1500)
           return
         }
         streamFallbacks = []
@@ -605,22 +935,27 @@ export const usePlayer = create<PlayerState>((set, get) => {
           const videoId = videoIdOf(failed)
           if (videoId && freshResolvingId !== failed.id) {
             freshResolvingId = failed.id
+            rememberPosition(el)
             set({ status: 'loading' })
-            void resolveYouTubeStream(videoId)
+            void resolveYouTubeStream(videoId, true)
               .then((urls) => {
                 if (freshResolvingId === failed.id) freshResolvingId = null
+                // The user may have moved on meanwhile: never skip or
+                // hijack a different track.
+                if (get().current?.id !== failed.id) return
                 if (urls.length === 0) {
                   skipCurrent()
                   return
                 }
-                if (get().current?.id !== failed.id) return
                 const elNow = getAudio()
-                elNow.src = urls[0]
+                streamFallbacks = [...urls]
+                streamFallbackIdx = 0
+                switchSrc(elNow, urls[0])
                 elNow.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
               })
               .catch(() => {
                 if (freshResolvingId === failed.id) freshResolvingId = null
-                skipCurrent()
+                if (get().current?.id === failed.id) skipCurrent()
               })
             return
           }
@@ -631,15 +966,22 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     playTracks(tracks, startIndex, source): void {
       if (tracks.length === 0) return
-      const idx = clamp(startIndex, 0, tracks.length - 1)
-      const track = tracks[idx]
+      // The queue is keyed by track id everywhere (playTrack, removeFromQueue,
+      // list keys, persisted queue rows): collapse duplicates, keeping the
+      // clicked track as the start.
+      const clicked = tracks[clamp(startIndex, 0, tracks.length - 1)]
+      const queue = dedupeTracks(tracks)
+      const idx = Math.max(0, queue.findIndex((t) => t.id === clicked.id))
+      const track = queue[idx]
       pendingSeekPos = 0
       lastSeekAt = 0
-      set({ queue: tracks, index: idx, current: track, source })
+      failureStreak = 0
+      shufflePlayed.clear()
+      set({ queue, index: idx, current: track, source })
       resetHistory(idx)
       load(track)
       getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
-      persistQueue(tracks)
+      persistQueue(queue)
       sendPlaybackState(makeSnapshot(get()))
     },
 
@@ -651,6 +993,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         pushHistory(idx)
         pendingSeekPos = 0
         lastSeekAt = 0
+        failureStreak = 0
         load(track)
         getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
         sendPlaybackState(makeSnapshot(get()))
@@ -674,19 +1017,31 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (s.queue.some((t) => t.id === track.id)) return
       const at = s.current && s.index >= 0 ? s.index + 1 : s.queue.length
       const queue = [...s.queue.slice(0, at), track, ...s.queue.slice(at)]
-      set({ queue })
+      // Indices at/after the insertion point shift up by one; keep the play
+      // history pointing at the same tracks (previous() walks it).
+      const history = s.history.map((i) => (i >= at ? i + 1 : i))
+      // Let it play next even when shuffle already played it this cycle.
+      shufflePlayed.delete(track.id)
+      set({ queue, history })
       persistQueue(queue)
       sendPlaybackState(makeSnapshot(get()))
     },
 
     toggle(): void {
       const s = get()
-      if (s.status === 'playing') {
-        getAudio().pause()
-      } else if (s.current) {
-        if (s.status === 'paused') resumedAt = Date.now()
-        getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+      const el = getAudio()
+      if (!s.current) {
+        // Nothing loaded yet (fresh launch with a restored queue): start it.
+        if (s.queue.length > 0) get().next()
+        return
       }
+      // Decide on the element itself, not the status: while buffering the
+      // status is 'loading' but the audio is running, and a press must pause.
+      if (!el.paused && (s.status === 'playing' || s.status === 'loading')) {
+        el.pause()
+        return
+      }
+      get().play()
     },
 
     pause(): void {
@@ -695,51 +1050,29 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     play(): void {
       const s = get()
-      if (s.current) {
-        if (s.status === 'paused') resumedAt = Date.now()
-        getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
+      if (!s.current) {
+        if (s.queue.length > 0) get().next()
+        return
       }
+      const el = getAudio()
+      if (!el.paused) return
+      if (s.status === 'paused' || s.status === 'loading') resumedAt = Date.now()
+      if (s.status === 'ended' || s.status === 'idle') {
+        // Finished / stopped track: play it again from the start.
+        pendingSeekPos = 0
+        load(s.current)
+      }
+      el.play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
     },
 
     next(auto = false): void {
-      const s = get()
-      if (s.queue.length === 0) return
-      if (s.repeat === 'one' && auto && s.current) {
-        pendingSeekPos = 0
-        lastSeekAt = 0
-        load(s.current)
-        getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
-        return
-      }
-      let nextIdx = s.index + 1
-      if (s.shuffle && s.queue.length > 1) {
-        nextIdx = s.index
-        while (nextIdx === s.index) {
-          nextIdx = Math.floor(Math.random() * s.queue.length)
-        }
-      } else if (nextIdx >= s.queue.length) {
-        if (s.repeat === 'queue' || !auto) {
-          nextIdx = 0
-        } else {
-          set({ status: 'ended' })
-          sendPlaybackState(makeSnapshot(get()))
-          return
-        }
-      }
-      const track = s.queue[nextIdx]
-      set({ index: nextIdx, current: track })
-      pushHistory(nextIdx)
-      pendingSeekPos = 0
-      lastSeekAt = 0
-      load(track)
-      getAudio().play().catch((e: Error) => dbg(`play() rejected: ${e.message}`))
-      sendPlaybackState(makeSnapshot(get()))
+      advance(auto, false)
     },
 
     previous(): void {
       const s = get()
       if (s.queue.length === 0) return
-      if (s.currentTime > 3) {
+      if (s.currentTime > 3 && s.current && s.status !== 'ended') {
         getAudio().currentTime = 0
         pendingSeekPos = 0
         lastSeekAt = Date.now()
@@ -757,6 +1090,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
         set({ history: h.slice(0, -1) })
         const prevIdx = h[h.length - 2]
         const track = s.queue[prevIdx]
+        if (!track) {
+          set({ history: [] })
+          return
+        }
         set({ index: prevIdx, current: track })
         pendingSeekPos = 0
         lastSeekAt = 0
@@ -768,10 +1105,16 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // No distinct previous song in this listen session: restart the
       // current one instead of guessing a queue neighbor (which, with
       // shuffle on, would be an unrelated song).
-      getAudio().currentTime = 0
+      if (!s.current) {
+        get().next()
+        return
+      }
+      const el = getAudio()
+      el.currentTime = 0
       pendingSeekPos = 0
       lastSeekAt = Date.now()
       set({ currentTime: 0 })
+      if (s.status === 'ended') get().play()
       syncMain()
     },
 
@@ -783,17 +1126,28 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // duration is not known yet so a transcode/fallback reload can restore
       // the position once metadata loads.
       const cur = get().current
-      if (cur && seconds > 0) pendingSeekPos = seconds
+      if (!cur || !Number.isFinite(seconds)) return
+      const target = Math.max(0, seconds)
+      pendingSeekPos = target > 0 ? target : 0
       lastSeekAt = Date.now()
-      el.currentTime = clamp(seconds, 0, el.duration || 0)
-      set({ currentTime: el.currentTime })
-      syncMain()
+      // Before metadata the element reports NaN duration; clamping to 0 then
+      // would silently rewind to the start. Use the known track duration,
+      // and let loadedmetadata apply pendingSeekPos if it is still unknown.
+      const max = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : get().duration
+      const pos = max > 0 ? Math.min(target, max) : target
+      try {
+        if (el.readyState > 0) el.currentTime = pos
+      } catch {
+        // ignore: applied on loadedmetadata via pendingSeekPos
+      }
+      set({ currentTime: pos })
+      syncMainNow()
     },
 
     setVolume(volume): void {
       const v = clamp(volume, 0, 1)
       const el = getAudio()
-      el.volume = v
+      el.volume = effectiveVolume(v, get().current)
       // Adjusting the volume while muted is a request to hear again (and the
       // mini player slider would otherwise snap back to 0 / stay silent).
       if (v > 0 && el.muted) {
@@ -817,7 +1171,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const next = !get().shuffle
       set({ shuffle: next })
       void setSettings({ shuffle: next })
-      syncMain()
+      // Mini player shows the state from main: don't let the throttle hide the change.
+      syncMainNow()
+    },
+
+    toggleRadioMode(): void {
+      set({ radioMode: !get().radioMode })
     },
 
     cycleRepeat(): void {
@@ -825,7 +1184,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const next = order[(order.indexOf(get().repeat) + 1) % order.length]
       set({ repeat: next })
       void setSettings({ repeat: next })
-      syncMain()
+      syncMainNow()
     },
 
     removeFromQueue(id): void {
@@ -836,9 +1195,15 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const removingCurrent = s.current?.id === id
       const index = removingCurrent ? -1 : s.index > idx ? s.index - 1 : s.index
       if (removingCurrent) {
+        clearStall()
+        streamFallbacks = []
+        streamFallbackIdx = 0
+        pendingSeekPos = 0
+        set({ status: 'idle', currentTime: 0, duration: 0 })
         getAudio().pause()
         getAudio().removeAttribute('src')
       }
+      shufflePlayed.delete(id)
       const current = queue[index] ?? null
       set((st) => {
         // Keep history consistent with the trimmed queue: indices after the
@@ -859,9 +1224,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     clearQueue(): void {
       if (get().queue.length === 0) return
+      clearStall()
+      streamFallbacks = []
+      streamFallbackIdx = 0
+      pendingSeekPos = 0
+      shufflePlayed.clear()
+      set({ queue: [], index: -1, current: null, status: 'idle', currentTime: 0, duration: 0, history: [] })
       getAudio().pause()
       getAudio().removeAttribute('src')
-      set({ queue: [], index: -1, current: null, status: 'idle', currentTime: 0, duration: 0, history: [] })
       void clearQueueIPC()
       sendPlaybackState(makeSnapshot(get()))
     },
@@ -875,17 +1245,36 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     stop(): void {
       const el = getAudio()
-      el.pause()
-      el.removeAttribute('src')
       clearStall()
       streamFallbacks = []
       streamFallbackIdx = 0
+      pendingSeekPos = 0
+      shufflePlayed.clear()
       set({ status: 'idle', current: null, currentTime: 0, duration: 0, index: -1, queue: [], history: [] })
+      el.pause()
+      el.removeAttribute('src')
       void clearQueueIPC()
       sendPlaybackState(makeSnapshot(get()))
     }
   }
 })
+
+/** Apply the Preferences audio settings (speed, pitch, ReplayGain) live. */
+export function applyAudioSettings(s: {
+  playbackSpeed?: number
+  preservePitch?: boolean
+  replayGainMode?: string
+}): void {
+  const speed = Number(s.playbackSpeed)
+  audioPrefs.speed = Number.isFinite(speed) && speed >= 0.25 && speed <= 4 ? speed : 1
+  audioPrefs.preservePitch = s.preservePitch !== false
+  audioPrefs.replayGain =
+    s.replayGainMode === 'track' || s.replayGainMode === 'album' ? s.replayGainMode : 'off'
+  const el = getAudio()
+  applyRate(el)
+  const st = usePlayer.getState()
+  el.volume = effectiveVolume(st.volume, st.current)
+}
 
 /** Resume a previously playing song when the app restarts (settings-gated). */
 export async function resumePlayback(): Promise<void> {

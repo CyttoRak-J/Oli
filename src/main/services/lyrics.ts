@@ -3,7 +3,7 @@ import type { Database } from './database'
 import type { LyricsData, Track } from '@shared/types'
 
 const LRCLIB_ENDPOINT = 'https://lrclib.net/api/get'
-const USER_AGENT = 'CyttoPlay/1.0.0 (https://github.com/CyttosPlay/CyttosPlay)'
+const USER_AGENT = 'Oli/1.1 (https://github.com/CyttoRak-J/Oli)'
 
 export interface LyricsProvider {
   name: string

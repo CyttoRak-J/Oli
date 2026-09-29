@@ -74,27 +74,56 @@ export class Database extends EventEmitter {
         log.warn('DB file unreadable, starting fresh', err)
       }
     }
+    let healthy = true
     if (bytes && bytes.length > 0) {
       try {
         this.raw = new SQL.Database(bytes)
+        this.configure()
+        healthy = this.checkIntegrity()
       } catch (err) {
         log.error('DB failed to open, attempting recovery', err)
-        this.raw = new SQL.Database()
+        healthy = false
       }
     } else {
       this.raw = new SQL.Database()
+      this.configure()
     }
-    this.configure()
-    if (!this.checkIntegrity()) {
+    if (!healthy) {
+      // Keep the damaged file: the next flush would otherwise overwrite the
+      // only copy of the library with whatever we end up starting with.
+      this.preserveDamagedFile()
       log.warn('Integrity check failed - attempting recovery from latest backup')
       const restored = await this.tryRestoreFromBackup()
-      if (!restored) {
+      if (restored) {
+        this.markDirty()
+      } else {
         log.error('Recovery failed - reinitializing empty database')
-        this.raw.close()
+        this.closeRaw()
         this.raw = new SQL.Database()
         this.configure()
       }
     }
+  }
+
+  /** Copy an unreadable/corrupt database file aside before it can be overwritten. */
+  private preserveDamagedFile(): void {
+    try {
+      if (!fs.existsSync(this.file)) return
+      const aside = `${this.file}.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      fs.copyFileSync(this.file, aside)
+      getLogger().warn(`Damaged database preserved as ${aside}`)
+    } catch (err) {
+      getLogger().error('Could not preserve damaged database file', err)
+    }
+  }
+
+  private closeRaw(): void {
+    try {
+      this.raw?.close()
+    } catch {
+      // already closed
+    }
+    this.raw = null
   }
 
   private configure(): void {
@@ -106,34 +135,45 @@ export class Database extends EventEmitter {
     try {
       const res = this.get<Record<string, string>>('PRAGMA quick_check')
       return Object.values(res ?? {})[0] === 'ok'
-    } catch {
+    } catch (err) {
+      getLogger().warn('Database integrity check failed', err)
       return false
     }
   }
 
   private async tryRestoreFromBackup(): Promise<boolean> {
-    const dir = path.dirname(this.file)
-    let backups: string[]
-    try {
-      backups = fs
-        .readdirSync(dir)
-        .filter((f) => /^backup-.*\.sqlite$/.test(f))
-        .sort()
-    } catch {
-      return false
+    // BackupService writes to <userData>/backups; older builds wrote next to
+    // the database. Look in both (this used to check only the latter, so
+    // automatic recovery never found a single backup).
+    const base = path.dirname(this.file)
+    const backups: string[] = []
+    for (const dir of [path.join(base, 'backups'), base]) {
+      try {
+        for (const f of fs.readdirSync(dir)) {
+          if (/^backup-.*\.sqlite$/.test(f)) backups.push(path.join(dir, f))
+        }
+      } catch {
+        // directory missing
+      }
     }
+    // Names embed an ISO timestamp: sorting by file name sorts by age.
+    backups.sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
     for (let i = backups.length - 1; i >= 0; i--) {
       try {
-        const bytes = fs.readFileSync(path.join(dir, backups[i]))
+        const bytes = fs.readFileSync(backups[i])
         const SQL = await loadSqlJs()
-        const raw = new SQL.Database(bytes)
-        if (this.raw) this.raw.close()
-        this.raw = raw
+        const candidate = new SQL.Database(bytes)
+        if (!isHealthy(candidate)) {
+          candidate.close()
+          continue
+        }
+        this.closeRaw()
+        this.raw = candidate
         this.configure()
-        if (this.checkIntegrity()) return true
-        this.raw.close()
-      } catch {
-        // keep looking
+        getLogger().info(`Database recovered from backup ${backups[i]}`)
+        return true
+      } catch (err) {
+        getLogger().warn(`Backup ${backups[i]} failed to restore, trying an older one`, err)
       }
     }
     return false
@@ -314,13 +354,40 @@ export class Database extends EventEmitter {
     const SQL = await loadSqlJs()
     try {
       const next = new SQL.Database(bytes)
-      if (this.raw) this.raw.close()
+      // Validate BEFORE swapping: a corrupt or unrelated .sqlite file used to
+      // replace the live library first and fail the check afterwards, and
+      // the next flush then overwrote the user's library with it.
+      if (!isHealthy(next) || !hasTable(next, 'songs')) {
+        next.close()
+        getLogger().warn('Refusing to restore: file is not a valid Oli library')
+        return false
+      }
+      this.closeRaw()
       this.raw = next
       this.configure()
-      return this.checkIntegrity()
+      this.markDirty()
+      return true
     } catch (err) {
       getLogger().error('replaceFromBytes failed', err)
       return false
     }
+  }
+}
+
+function isHealthy(db: SqlJsDatabase): boolean {
+  try {
+    const res = db.exec('PRAGMA quick_check')
+    return res[0]?.values?.[0]?.[0] === 'ok'
+  } catch {
+    return false
+  }
+}
+
+function hasTable(db: SqlJsDatabase, name: string): boolean {
+  try {
+    const res = db.exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${name}'`)
+    return (res[0]?.values?.length ?? 0) > 0
+  } catch {
+    return false
   }
 }

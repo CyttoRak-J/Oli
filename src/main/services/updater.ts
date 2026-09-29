@@ -12,7 +12,7 @@ export interface UpdateStatus {
   checkedAt: number
 }
 
-const REPO_API = 'https://api.github.com/repos/CyttosPlay/CyttosPlay/releases/latest'
+const REPO_API = 'https://api.github.com/repos/CyttoRak-J/Oli/releases/latest'
 const AUTO_INTERVAL_MS = 6 * 3600_000
 
 /**
@@ -71,7 +71,7 @@ export class UpdaterService {
   }
 
   openReleasePage(url: string | null): void {
-    const target = url ?? 'https://github.com/CyttosPlay/CyttosPlay/releases'
+    const target = url ?? 'https://github.com/CyttoRak-J/Oli/releases'
     void shell.openExternal(target)
   }
 }

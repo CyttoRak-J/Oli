@@ -197,9 +197,17 @@ export class SearchService {
     const trimmed = query.trim().slice(0, 200)
     if (!trimmed) return
     try {
+      // One row per query: searching it again moves it to the top (and keeps
+      // its pin) instead of adding a duplicate row every time.
+      const existing = this.db.get<{ pinned: number }>(
+        'SELECT MAX(pinned) AS pinned FROM search_history WHERE LOWER(query) = LOWER(?)',
+        [trimmed]
+      )
+      const pinned = Number(existing?.pinned ?? 0) ? 1 : 0
+      this.db.run('DELETE FROM search_history WHERE LOWER(query) = LOWER(?)', [trimmed])
       this.db.run(
-        'INSERT OR IGNORE INTO search_history (id, query, pinned, created_at) VALUES (?, ?, 0, ?)',
-        [randomId(), trimmed, Date.now()]
+        'INSERT INTO search_history (id, query, pinned, created_at) VALUES (?, ?, ?, ?)',
+        [randomId(), trimmed, pinned, Date.now()]
       )
       // keep history bounded
       const excess = this.db.all<{ id: string }>(

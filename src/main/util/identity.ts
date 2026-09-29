@@ -1,12 +1,19 @@
 import * as path from 'node:path'
 
 /**
- * Stable 64-bit identity hashing for library entities (songs, artists,
- * albums). Ids are pure functions of names/paths so the same entity always
- * resolves to the same id, regardless of which code path created it. All
- * producers (scanner, metadata ops, playlists) MUST use these helpers.
+ * Stable identity hashing for library entities (songs, artists, albums).
+ * Ids are pure functions of names/paths so the same entity always resolves
+ * to the same id, regardless of which code path created it. All producers
+ * (scanner, metadata ops, playlists) MUST use these helpers.
+ *
+ * DO NOT CHANGE THE HASH. Every id already stored in users' libraries (and
+ * referenced by playlists, favorites, history, the queue, cached artwork and
+ * lyrics) was produced by this exact function (cyrb64, 16 hex chars). A
+ * later change to SHA-256 made the scanner compute different ids than the
+ * database holds: cached covers were stored under ids nothing ever asked
+ * for (most covers vanished), tag updates matched no rows, and artists /
+ * albums would have split in two.
  */
-
 export function hash64(input: string): string {
   let h1 = 0xdeadbeef
   let h2 = 0x41c6ce57
@@ -15,8 +22,10 @@ export function hash64(input: string): string {
     h1 = Math.imul(h1 ^ ch, 2654435761)
     h2 = Math.imul(h2 ^ ch, 1597334677)
   }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507)
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507)
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909)
   return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')
 }
 

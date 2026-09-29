@@ -172,11 +172,13 @@ export class LibraryScanner extends EventEmitter {
     const parseQueue = [...unique]
     const existing = new Map(
       this.db
-        .all<{ path: string; modified_at: number; file_size: number; has_embedded_artwork: number }>(
-          'SELECT path, modified_at, file_size, has_embedded_artwork FROM songs'
+        .all<{ id: string; path: string; modified_at: number; file_size: number; has_embedded_artwork: number; missing: number }>(
+          'SELECT id, path, modified_at, file_size, has_embedded_artwork, missing FROM songs'
         )
         .map((r) => [path.resolve(r.path), r])
     )
+    /** Unchanged files previously flagged missing (drive was unplugged): found again. */
+    const reappeared: string[] = []
 
     this.emitProgress({ phase: 'reading', filesFound: counters.found })
 
@@ -234,6 +236,9 @@ export class LibraryScanner extends EventEmitter {
           const resolved = path.resolve(file)
           seen.add(resolved)
           const existingRow = existing.get(resolved)
+          // Keep the id the row already has (everything references it); only new
+          // files get a derived id.
+          const songId = existingRow?.id ?? fileToSongId(file)
           let stat: fs.Stats
           try {
             stat = fs.statSync(file)
@@ -246,11 +251,14 @@ export class LibraryScanner extends EventEmitter {
             existingRow.file_size === stat.size &&
             existingRow.modified_at === Math.floor(stat.mtimeMs) &&
             !this.artwork.needsExtract(
-              fileToSongId(file),
+              songId,
               existingRow.has_embedded_artwork === 1,
               stat.mtimeMs
             )
           ) {
+            // Unchanged; but if it was flagged missing (drive unplugged at the
+            // last scan) it is back and must reappear in the library.
+            if (existingRow.missing === 1) reappeared.push(existingRow.id)
             continue // unchanged
           }
           // Read only the first 256KB for the fingerprint (not the whole file);
@@ -285,13 +293,13 @@ export class LibraryScanner extends EventEmitter {
           const isNew = !existingRow
           if (isNew) {
             counters.added++
-            insertedNow.set(fp, { hash: fullHash ?? fp, id: fileToSongId(file) })
+            insertedNow.set(fp, { hash: fullHash ?? fp, id: songId })
           } else {
             counters.updated++
           }
 
           if (parsed.artwork) {
-            const key = fileToSongId(file)
+            const key = songId
             if (this.artwork.needsExtract(key, true, stat.mtimeMs)) {
               this.artwork.store(key, parsed.artwork.data)
             }
@@ -301,7 +309,7 @@ export class LibraryScanner extends EventEmitter {
             type: isNew ? 'insert' : 'update',
             values: isNew
               ? [
-                  fileToSongId(file),
+                  songId,
                   libId,
                   folderId,
                   title,
@@ -371,7 +379,7 @@ export class LibraryScanner extends EventEmitter {
                   parsed.artwork ? 1 : 0,
                   Math.floor(stat.mtimeMs)
                 ],
-                where: [fileToSongId(file)]
+                where: [songId]
           })
         } catch (err) {
           counters.errors++
@@ -397,6 +405,16 @@ export class LibraryScanner extends EventEmitter {
     for (let i = 0; i < PARSE_CONCURRENCY; i++) workers.push(work())
     await Promise.all(workers)
     flushBatch()
+    if (reappeared.length > 0) {
+      const tx = this.db.transaction()
+      try {
+        for (const id of reappeared) this.db.run('UPDATE songs SET missing = 0 WHERE id = ?', [id])
+        tx.commit()
+      } catch (err) {
+        tx.rollback()
+        log.error(`Restoring reappeared songs failed: ${errorOf(err)}`)
+      }
+    }
 
     if (!this.canceled) {
       // Mark files no longer present as missing (preserves playlists & history).
@@ -406,6 +424,10 @@ export class LibraryScanner extends EventEmitter {
       )
       for (const row of rows) {
         if (scopeDir && !isPathInside(row.path, scopeDir)) continue
+        // Only songs under the libraries this scan walked: scanning one
+        // folder (a newly added one, a watcher event) must not flag every
+        // song of the other folders as missing.
+        if (!libraries.some((l) => isPathInside(row.path, l.path))) continue
         if (seen.has(path.resolve(row.path))) continue
         this.db.run('UPDATE songs SET missing = 1 WHERE id = ?', [row.id])
         counters.removed++

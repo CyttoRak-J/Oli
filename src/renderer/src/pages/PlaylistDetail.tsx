@@ -9,7 +9,8 @@ import {
   removeFromPlaylist,
   reorderPlaylist,
   togglePlaylistPin,
-  deletePlaylist
+  deletePlaylist,
+  exportPlaylist
 } from '../lib/ipc'
 import { usePlayer } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -42,8 +43,10 @@ export function PlaylistDetail(): React.JSX.Element {
   const removeTrack = async (entry: PlaylistEntry): Promise<void> => {
     if (!id) return
     await removeFromPlaylist(id, [entry.songId])
-    qc.invalidateQueries({ queryKey: ['playlist-entries', id] })
-    qc.invalidateQueries({ queryKey: ['playlists'] })
+    void qc.invalidateQueries({ queryKey: ['playlist-entries', id] })
+    // Header track count / duration come from the playlist query.
+    void qc.invalidateQueries({ queryKey: ['playlist', id] })
+    void qc.invalidateQueries({ queryKey: ['playlists'] })
   }
 
   const onDrop = async (target: number): Promise<void> => {
@@ -58,11 +61,21 @@ export function PlaylistDetail(): React.JSX.Element {
     qc.invalidateQueries({ queryKey: ['playlist-entries', id] })
   }
 
-  if (playlist.isLoading || !playlist.data) {
+  if (playlist.isLoading) {
     return <div className="p-6 text-[13px] text-ink-3">Loading…</div>
+  }
+  if (!playlist.data) {
+    return (
+      <div className="p-6">
+        <EmptyState title="Playlist not found" description="It may have been deleted." />
+      </div>
+    )
   }
 
   const p = playlist.data
+  // Smart playlists are computed from rules: tracks can't be removed or
+  // reordered by hand (the server ignores it), so those controls are hidden.
+  const editable = p.type !== 'smart'
 
   return (
     <div className="p-6">
@@ -97,17 +110,29 @@ export function PlaylistDetail(): React.JSX.Element {
             <button
               className="rounded-lg border border-surface-4 bg-surface-2 px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-accent"
               onClick={() =>
-                void togglePlaylistPin(p.id).then(() =>
-                  qc.invalidateQueries({ queryKey: ['playlist', id] })
-                )
+                void togglePlaylistPin(p.id).then(() => {
+                  void qc.invalidateQueries({ queryKey: ['playlist', id] })
+                  void qc.invalidateQueries({ queryKey: ['playlists'] })
+                })
               }
             >
               {p.pinned ? 'Unpin' : 'Pin'}
             </button>
             <button
+              className="rounded-lg border border-surface-4 bg-surface-2 px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-accent"
+              disabled={tracks.length === 0}
+              onClick={() => void exportPlaylist(p.id)}
+            >
+              Export
+            </button>
+            <button
               className="rounded-lg border border-surface-4 bg-surface-2 px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-red-400"
               onClick={async () => {
+                if (!window.confirm(`Delete the playlist "${p.name}"? Your songs are not deleted.`)) return
                 await deletePlaylist(p.id)
+                // The list is cached: without this the deleted playlist
+                // stayed visible on the Playlists page.
+                await qc.invalidateQueries({ queryKey: ['playlists'] })
                 navigate('/playlists')
               }}
             >
@@ -130,7 +155,7 @@ export function PlaylistDetail(): React.JSX.Element {
                   'group flex items-center gap-3 border-b border-edge/60 px-3 py-2 transition-colors',
                   active ? 'bg-surface-2' : 'hover:bg-surface-1'
                 )}
-draggable
+                draggable={editable}
                 onDragStart={() => {
                   dragIndex.current = index
                 }}
@@ -140,7 +165,7 @@ draggable
                   player.playTracks(tracks, index, { source: 'playlist', sourceId: p.id })
                 }
               >
-                <GripVertical size={14} className="shrink-0 cursor-grab text-ink-3" />
+                {editable && <GripVertical size={14} className="shrink-0 cursor-grab text-ink-3" />}
                 <span className="w-5 text-center text-[12px] tabular-nums text-ink-3">
                   {index + 1}
                 </span>
@@ -154,13 +179,15 @@ draggable
                 <span className="text-[12px] tabular-nums text-ink-3">
                   {formatDuration(entry.track.duration)}
                 </span>
-                <button
-                  className="text-ink-3 hover:text-red-400"
-                  onClick={() => void removeTrack(entry)}
-                  aria-label="Remove from playlist"
-                >
-                  <Trash2 size={14} />
-                </button>
+                {editable && (
+                  <button
+                    className="text-ink-3 hover:text-red-400"
+                    onClick={() => void removeTrack(entry)}
+                    aria-label="Remove from playlist"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             )
           })}

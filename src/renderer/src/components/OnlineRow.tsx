@@ -5,6 +5,7 @@ import {
   openVideoWindow,
   pickVideoFolder,
   resolveYouTubeStream,
+  prefetchYouTubeStreams,
   videoDownload,
   videoDownloadSong
 } from '../lib/ipc'
@@ -38,15 +39,14 @@ export function OnlineRow({
     return resolveYouTubeStream(result.videoId)
   }
 
+  // When pre-resolving fails, the track is still handed to the player: it
+  // resolves the stream itself and falls back to downloading the audio.
+  // (It used to open YouTube in the browser, or silently do nothing.)
   const playOnline = (): void => {
     setResolving(true)
     void resolve().then((urls) => {
       setResolving(false)
-      if (urls.length > 0) {
-        usePlayer.getState().playTrack(onlineToTrack(result, urls), { source: 'search', sourceId: null })
-      } else {
-        window.open(result.url, '_blank')
-      }
+      usePlayer.getState().playTrack(onlineToTrack(result, urls), { source: 'search', sourceId: null })
     })
   }
 
@@ -61,9 +61,7 @@ export function OnlineRow({
     setResolving(true)
     void resolve().then((urls) => {
       setResolving(false)
-      if (urls.length > 0) {
-        usePlayer.getState().playTrack(onlineToTrack(result, urls), { source: 'search', sourceId: null })
-      }
+      usePlayer.getState().playTrack(onlineToTrack(result, urls), { source: 'search', sourceId: null })
     })
   }
 
@@ -71,9 +69,7 @@ export function OnlineRow({
     setQueuing(true)
     void resolve().then((urls) => {
       setQueuing(false)
-      if (urls.length > 0) {
-        usePlayer.getState().addToQueue(onlineToTrack(result, urls))
-      }
+      usePlayer.getState().addToQueue(onlineToTrack(result, urls))
     })
   }
 
@@ -81,9 +77,7 @@ export function OnlineRow({
     setQueuing(true)
     void resolve().then((urls) => {
       setQueuing(false)
-      if (urls.length > 0) {
-        usePlayer.getState().playNext(onlineToTrack(result, urls))
-      }
+      usePlayer.getState().playNext(onlineToTrack(result, urls))
     })
   }
 
@@ -116,7 +110,13 @@ export function OnlineRow({
   const isHome = variant === 'home'
 
   return (
-    <div className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-surface-1">
+    <div
+      className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-surface-1"
+      // Pointing at a result is a strong hint it will be played: start resolving now.
+      onMouseEnter={() => {
+        if (result.videoId && !result.localMatch) prefetchYouTubeStreams([result.videoId], true)
+      }}
+    >
       {result.artworkUrl ? (
         <img src={result.artworkUrl} alt="" className="h-9 w-10 shrink-0 rounded bg-surface-2 object-cover" />
       ) : (
@@ -370,6 +370,8 @@ function PreviewButton({ url }: { url: string }): React.JSX.Element {
       }
       el.onended = stop
       el.onerror = stop
+      // One audio at a time: the preview used to play over the main player.
+      usePlayer.getState().pause()
       // A blocked/failed stream (CORS, geo, expired URL) rejects play() or
       // errors asynchronously; stop must run so the button never sticks.
       el.play().catch(stop)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react'
 import type { Track } from '@shared/types'
@@ -12,16 +12,18 @@ import {
   unpinSearch,
   resolveYouTubeUrl
 } from '../lib/ipc'
-import { useLiveOnlineSearch } from '../lib/useLiveOnlineSearch'
+import { useLiveOnlineSearch, usePrefetchOnlineStreams, searchKeepingOnline } from '../lib/useLiveOnlineSearch'
 import { usePlayer } from '../store/player'
 import { LocalRow } from '../components/LocalRow'
 import { OnlineRow } from '../components/OnlineRow'
 import { HistoryPanel } from '../components/HistoryPanel'
 import { EmptyState } from '../components/EmptyState'
 import { detectYtInput } from '../lib/linkDetect'
+import { LinkDownloadForm } from '../components/LinkDownloadForm'
 
 export function Search(): React.JSX.Element {
   const playTracks = usePlayer((s) => s.playTracks)
+  const queryClient = useQueryClient()
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState(() => params.get('q') ?? '')
   const [debounced, setDebounced] = useState(() => params.get('q') ?? '')
@@ -40,7 +42,7 @@ export function Search(): React.JSX.Element {
 
   const results = useQuery({
     queryKey: ['search', debounced],
-    queryFn: () => runSearch(debounced),
+    queryFn: () => searchKeepingOnline(queryClient, debounced),
     enabled: debounced.length > 2 && !link
   })
 
@@ -61,6 +63,7 @@ export function Search(): React.JSX.Element {
   const online = results.data?.online ?? []
   const urlItems = urlResults.data ?? []
   useLiveOnlineSearch(debounced)
+  usePrefetchOnlineStreams(online)
 
   return (
     <div className="p-6">
@@ -105,6 +108,13 @@ export function Search(): React.JSX.Element {
 
       {debounced.length > 0 && (
         <div className="space-y-8">
+          {/* Playlist / Mix links: list it, then play or download all of it */}
+          {link && link.kind !== 'video' && (
+            <section>
+              <LinkDownloadForm key={debounced} link={link} />
+            </section>
+          )}
+
           {/* YouTube URL resolved to playable results */}
           {link && urlResults.isLoading && (
             <div className="flex items-center gap-2 py-4 text-[12.5px] text-ink-3">

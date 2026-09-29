@@ -10,16 +10,19 @@ type CacheValue = LyricsData | { error: true }
 export function Lyrics(): React.JSX.Element {
   const song = usePlayer((s) => s.current)
   const [cache, setCache] = useState<Record<string, CacheValue>>({})
-  const [forcedRefresh, setForcedRefresh] = useState(0)
+  // Refresh applies to the song it was pressed on. A global counter made
+  // every later song bypass the lyrics cache and hit the network.
+  const [refresh, setRefresh] = useState<{ id: string; n: number }>({ id: '', n: 0 })
+  const forced = song && refresh.id === song.id ? refresh.n : 0
 
-  const key = song ? `${song.id}:${forcedRefresh}` : ''
+  const key = song ? `${song.id}:${forced}` : ''
   const entry = key ? cache[key] : undefined
   const loading = Boolean(song && entry === undefined)
 
   useEffect(() => {
     if (!song || cache[key]) return
     let cancelled = false
-    void getLyrics(song.id, forcedRefresh > 0)
+    void getLyrics(song.id, forced > 0)
       .then((res) => {
         if (!cancelled) setCache((m) => ({ ...m, [key]: res ?? { error: true } }))
       })
@@ -29,7 +32,7 @@ export function Lyrics(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [key, song, cache, forcedRefresh])
+  }, [key, song, cache, forced])
 
   if (!song) {
     return (
@@ -51,7 +54,7 @@ export function Lyrics(): React.JSX.Element {
         </div>
         <button
           className="flex items-center gap-1.5 rounded-lg border border-surface-4 bg-surface-2 px-3 py-1.5 text-[12px] text-ink-2 hover:border-accent"
-          onClick={() => setForcedRefresh((n) => n + 1)}
+          onClick={() => setRefresh((r) => ({ id: song.id, n: r.id === song.id ? r.n + 1 : 1 }))}
           disabled={loading}
         >
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}

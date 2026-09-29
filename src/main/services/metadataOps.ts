@@ -117,9 +117,16 @@ export class MetadataOpsService {
   ): boolean {
     if (path.extname(filePath).toLowerCase() !== '.mp3') return false
     try {
-      const ok = NodeID3.write(edits, filePath)
-      if (!ok) getLogger().warn(`ID3 write returned false: ${filePath}`)
-      return Boolean(ok)
+      // update() merges into the existing tag. write() REPLACES the whole
+      // ID3 tag, so editing one field used to wipe the cover art and every
+      // other tag from the user's file.
+      const ok = NodeID3.update(edits, filePath)
+      // Failure comes back as an Error object (truthy), not false.
+      if (ok !== true) {
+        getLogger().warn(`ID3 update failed: ${filePath}`, ok)
+        return false
+      }
+      return true
     } catch (err) {
       getLogger().warn(`ID3 write failed: ${filePath}`, err)
       return false
@@ -127,17 +134,29 @@ export class MetadataOpsService {
   }
 
   applySongEdits(songId: string, edits: TrackEdit): boolean {
-    const current = this.db.get<{ path: string }>('SELECT path FROM songs WHERE id = ?', [songId])
+    const current = this.db.get<{ path: string; artist: string; album_artist: string | null; album: string }>(
+      'SELECT path, artist, album_artist, album FROM songs WHERE id = ?',
+      [songId]
+    )
     if (!current) return false
 
     const tagPayload: Record<string, string | number | { language: string; text: string }> = {}
     const dbSet: string[] = []
     const dbParams: unknown[] = []
 
+    // title / artist / album are NOT NULL columns: clearing them falls back
+    // to the same placeholders the scanner uses (a NULL failed the whole
+    // edit with a constraint error).
+    const REQUIRED: Record<string, string> = {
+      title: path.basename(current.path, path.extname(current.path)),
+      artist: 'Unknown Artist',
+      album: 'Unknown Album'
+    }
     const applyString = (key: keyof TrackEdit, column: string, tagKey?: string): void => {
       const value = edits[key]
       if (value === undefined) return
-      const out = value === null || String(value).trim() === '' ? null : String(value).trim()
+      let out = value === null || String(value).trim() === '' ? null : String(value).trim()
+      if (out === null && REQUIRED[column]) out = REQUIRED[column]
       dbSet.push(`${column} = ?`)
       dbParams.push(out)
       if (tagKey && out !== null) tagPayload[tagKey] = out
@@ -166,6 +185,21 @@ export class MetadataOpsService {
     applyNumber('rating', 'rating', undefined)
 
     if (dbSet.length === 0) return true
+    // Artist / album grouping is by id: recompute them from the edited names
+    // (the song otherwise stayed listed under its old artist / album).
+    if (edits.artist !== undefined || edits.albumArtist !== undefined || edits.album !== undefined) {
+      const val = (column: string, fallback: string): string => {
+        const i = dbSet.indexOf(`${column} = ?`)
+        return i >= 0 ? String(dbParams[i] ?? '') : fallback
+      }
+      const artist = val('artist', current.artist)
+      // Same inputs as the scanner (an empty album artist stays empty).
+      const albumArtist = val('album_artist', current.album_artist ?? '')
+      const album = val('album', current.album)
+      const derived = this.derivedIds({ artist, albumArtist, album })
+      dbSet.push('artist_id = ?', 'album_id = ?')
+      dbParams.push(derived.artistId, derived.albumId)
+    }
     dbParams.push(songId)
     this.db.run(`UPDATE songs SET ${dbSet.join(', ')} WHERE id = ?`, dbParams)
 
@@ -183,6 +217,7 @@ export class MetadataOpsService {
 
     if (wroteFile) getLogger().info(`Tags written to ${current.path}`)
     this.library.rebuildAggregates()
+    this.library.notifyChanged()
     return true
   }
 }

@@ -30,7 +30,8 @@
       <div class="card">
         <h3>Where does Oli store my data?</h3>
         <p>
-          In one SQLite database file: <code>%APPDATA%\Oli\library.sqlite</code>. Your library
+          In one SQLite database file: <code>%APPDATA%\Oli\library.sqlite</code> on Windows, or
+          <code>~/Library/Application Support/Oli/library.sqlite</code> on macOS. Your library
           scan data, settings, queue, history, favorites, and playlists all live there. Download
           artwork is cached in the same folder.
         </p>
@@ -48,9 +49,11 @@
       <div class="card">
         <h3>Does Oli need yt-dlp or ffmpeg installed?</h3>
         <p>
-          <code>yt-dlp</code> is bundled with Oli — nothing to install. <code>ffmpeg</code> is only
-          needed for video downloads and is picked up from your system if present
-          (<code>winget install ffmpeg</code> if not).
+          <code>yt-dlp</code> is bundled with Oli, and Oli installs a missing one and keeps it up to date by
+          itself (Preferences, YouTube engine; you can switch that off). <code>ffmpeg</code> is only
+          needed to merge YouTube video and audio and to convert some formats (Opus, WavPack, APE) for
+          playback; it is picked up from your system if present (<code>winget install ffmpeg</code> on
+          Windows, <code>brew install ffmpeg</code> on macOS).
         </p>
       </div>
 
@@ -65,8 +68,8 @@
       <div class="card">
         <h3>Which audio formats are supported?</h3>
         <p>
-          MP3, FLAC, AAC/M4A, WAV, OGG/Opus, and more — anything your Windows media pipeline can
-          decode. Metadata is read automatically, including embedded artwork.
+          MP3, FLAC, AAC/M4A, WAV, OGG/Opus, and more — anything the built-in media
+          engine can decode. Metadata is read automatically, including embedded artwork.
         </p>
       </div>
 
@@ -103,7 +106,7 @@
 
     <footer>
       <p>
-        Oli — a desktop music player for Windows · <a href="https://github.com/cyttorak-j/Oli">Source code</a> ·
+        Oli — a desktop music player for Windows and macOS · <a href="https://github.com/cyttorak-j/Oli">Source code</a> ·
         <a href="troubleshooting.html">Troubleshooting</a> · <a href="support.html">Support</a>
       </p>
     </footer>

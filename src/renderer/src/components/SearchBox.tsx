@@ -33,6 +33,7 @@ export function SearchBox({
         className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3"
       />
       <input
+        data-search-input
         className="w-56 rounded-full border border-surface-4 bg-surface-2 py-1.5 pl-8 pr-8 text-[12.5px] text-ink-0 outline-none focus:border-accent"
         placeholder={placeholder}
         value={value}

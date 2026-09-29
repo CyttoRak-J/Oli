@@ -17,6 +17,7 @@ import { SongTable } from '../components/SongTable'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { LibraryStatsTabs } from '../components/LibraryStatsTabs'
 import { AlphabetFilter, letterKey } from '../components/AlphabetFilter'
+import { shuffled } from '../lib/shuffle'
 import { SearchBox } from '../components/SearchBox'
 import { cn } from '../components/cn'
 import { usePlayer } from '../store/player'
@@ -161,16 +162,13 @@ export function Songs(): React.JSX.Element {
 
   const playTracks = usePlayer((s) => s.playTracks)
 
-  /** Queue every visible track in random order and start from a random one. */
+  /**
+   * Queue every visible track in random order and play from the FIRST one. (Starting at a random
+   * position of an already shuffled list made playback skip everything before it whenever
+   * shuffle mode was off: only the rest of the queue was ever played.)
+   */
   const shuffleAll = (): void => {
-    const pool = filtered
-    const shuffled = [...pool]
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-    }
-    const start = Math.floor(Math.random() * shuffled.length)
-    playTracks(shuffled, start, { source: 'library', sourceId: null })
+    playTracks(shuffled(filtered), 0, { source: 'library', sourceId: null })
   }
 
   return (
@@ -356,3 +354,4 @@ export function Songs(): React.JSX.Element {
     </div>
   )
 }
+

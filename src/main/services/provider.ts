@@ -4,8 +4,10 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { getLogger } from './logger'
+import { playlistTarget, PLAYLIST_LIMIT, MIX_LIMIT } from '../util/playlistUrl'
 import { ytVideoIdFromUrl } from './downloads'
 import type { Database } from './database'
+import type { YtdlpEngine } from './ytdlpEngine'
 import type { OnlineSearchResult, TrackTagInput } from '@shared/types'
 
 /** Download options for YouTube videos (merged audio). */
@@ -22,7 +24,7 @@ export interface YouTubeDownloadOptions {
 
 const MB_ENDPOINT = 'https://musicbrainz.org/ws/2'
 const ARTWORK_ENDPOINT = 'https://coverartarchive.org'
-const USER_AGENT = 'CyttoPlay/1.0.0 (https://github.com/CyttosPlay/CyttosPlay)'
+const USER_AGENT = 'Oli/1.1 (https://github.com/CyttoRak-J/Oli)'
 
 /**
  * YouTube client flags for yt-dlp: force IPv4 (IPv6 ranges are routinely
@@ -31,10 +33,15 @@ const USER_AGENT = 'CyttoPlay/1.0.0 (https://github.com/CyttosPlay/CyttosPlay)'
  * the default client happens automatically in runYtdlp (covers videos with
  * embedding disabled).
  */
+/**
+ * Common yt-dlp flags. The default YouTube client is used: forcing the
+ * "web_embedded" client (as this once did for every call) now fails with
+ * "This video is unavailable" for nearly every video, which broke downloads
+ * and the playback fallback. The embedded client stays available as a
+ * retry (YT_EMBED_ARGS) for the rare video the default client rejects.
+ */
 const YT_CLIENT_ARGS = [
   '-4',
-  '--extractor-args',
-  'youtube:player_client=web_embedded',
   '--retries',
   '10',
   '--file-access-retries',
@@ -42,6 +49,28 @@ const YT_CLIENT_ARGS = [
   '--extractor-retries',
   '5'
 ]
+/** Cache key prefix for resolved stream URLs (bump when the resolving engine changes). */
+const YT_STREAM_KEY = 'ytstream2:'
+/**
+ * Stop a child process AND everything it started. Since yt-dlp is shipped as
+ * a one-file .exe, it launches the real downloader as a helper process:
+ * child.kill() only ended the outer wrapper and the download carried on in
+ * the background (a removed 45-minute video kept downloading).
+ */
+function killProcessTree(child: ChildProcess): void {
+  try {
+    if (process.platform === 'win32' && child.pid) {
+      const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true })
+      killer.on('error', () => child.kill())
+      return
+    }
+    child.kill()
+  } catch {
+    // already gone
+  }
+}
+
+const YT_EMBED_ARGS = ['--extractor-args', 'youtube:player_client=web_embedded']
 
 export interface ProviderConfig {
   spotifyClientId: string
@@ -77,6 +106,7 @@ export interface ResolvedPlaylistEntry {
   videoId: string
   title: string
   duration?: number
+  channel?: string | null
   thumbnail?: string | null
   track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
 }
@@ -525,7 +555,20 @@ export class ProviderService {
   private spotifyToken: string | null = null
   private spotifyExpiresAt = 0
 
-  constructor(private db: Database) {}
+  constructor(private db: Database) {
+    try {
+      // Streams cached by earlier versions (key "ytstream:") came from an engine
+      // whose URLs Chromium cannot play past the first megabyte: drop them, and
+      // drop expired current ones.
+      this.db.run("DELETE FROM provider_cache WHERE key LIKE 'ytstream:%'")
+      this.db.run(
+        `DELETE FROM provider_cache WHERE key LIKE '${YT_STREAM_KEY}%' AND fetched_at + ttl < ?`,
+        [Date.now()]
+      )
+    } catch {
+      // table not ready yet: nothing to purge
+    }
+  }
 
   private async pace(): Promise<void> {
     const now = Date.now()
@@ -841,7 +884,13 @@ export class ProviderService {
   async resolvePlaylistEntries(
     url: string,
     config: ProviderConfig
-  ): Promise<{ entries: ResolvedPlaylistEntry[]; error?: string; capped?: boolean }> {
+  ): Promise<{
+    entries: ResolvedPlaylistEntry[]
+    error?: string
+    capped?: boolean
+    title?: string
+    mix?: boolean
+  }> {
     try {
       const u = new URL(url)
       if (/^(www\.|m\.|music\.)?youtube\.com$/i.test(u.hostname) || u.hostname === 'youtu.be') {
@@ -859,28 +908,108 @@ export class ProviderService {
     return { entries: [] }
   }
 
-  /** YouTube playlist (or single video URL) -> flat video id + title list. */
-  private async resolveYouTubePlaylist(
-    url: string
-  ): Promise<{ entries: ResolvedPlaylistEntry[]; capped?: boolean }> {
-    const stdout = await this.runYtdlp(['--no-warnings', '--flat-playlist', '-J', url], 120_000)
-    if (!stdout) return { entries: [] }
+  private playlistCache = new Map<
+    string,
+    { at: number; value: { entries: ResolvedPlaylistEntry[]; capped: boolean; title?: string; mix: boolean } }
+  >()
+
+  /**
+   * YouTube playlist (or Mix) -> flat video id + title list. Resolved lists
+   * are remembered for a few minutes: the link preview, "Play" and
+   * "Download" all need the same list and yt-dlp takes several seconds.
+   */
+  private async resolveYouTubePlaylist(url: string): Promise<{
+    entries: ResolvedPlaylistEntry[]
+    error?: string
+    capped?: boolean
+    title?: string
+    mix?: boolean
+  }> {
+    const target = playlistTarget(url)
+    if (target?.isMix && !target.videoId) {
+      return {
+        entries: [],
+        mix: true,
+        error:
+          'A YouTube Mix can only be opened from one of its videos. Paste the video link that contains "&list=RD…" (the address bar while the Mix plays).'
+      }
+    }
+    const listUrl = target?.url ?? url
+    const mix = target?.isMix ?? false
+    const limit = mix ? MIX_LIMIT : PLAYLIST_LIMIT
+    const cached = this.playlistCache.get(listUrl)
+    if (cached && Date.now() - cached.at < 10 * 60_000) return cached.value
+    // The link preview and the result rows ask for the same list at once:
+    // share one yt-dlp run.
+    const running = this.playlistInflight.get(listUrl)
+    if (running) return running
+    const job = this.listYouTubePlaylist(listUrl, mix, limit).finally(() =>
+      this.playlistInflight.delete(listUrl)
+    )
+    this.playlistInflight.set(listUrl, job)
+    return job
+  }
+
+  private playlistInflight = new Map<
+    string,
+    Promise<{ entries: ResolvedPlaylistEntry[]; error?: string; capped?: boolean; title?: string; mix?: boolean }>
+  >()
+
+  private async listYouTubePlaylist(
+    listUrl: string,
+    mix: boolean,
+    limit: number
+  ): Promise<{ entries: ResolvedPlaylistEntry[]; error?: string; capped?: boolean; title?: string; mix?: boolean }> {
+    // Ask for one more than the limit so "there is more" can be reported,
+    // without walking a Mix's hundreds of continuation pages (26 s).
+    const args = [
+      ...YT_CLIENT_ARGS,
+      '--no-warnings',
+      '--no-progress',
+      '--flat-playlist',
+      '--playlist-end',
+      String(limit + 1),
+      '-J',
+      listUrl
+    ]
+    let stdout = await this.runYtdlpOnce(args, 120_000)
+    if (!stdout) stdout = await this.runYtdlpOnce(args, 120_000)
+    if (!stdout) {
+      return { entries: [], mix, error: 'Could not read this playlist. It may be private or unavailable.' }
+    }
     try {
       const info = JSON.parse(stdout) as {
-        entries?: Array<{ id?: string; title?: string; duration?: number; thumbnails?: Array<{ url?: string }> }>
+        title?: string
+        entries?: Array<{
+          id?: string
+          title?: string
+          duration?: number
+          channel?: string
+          uploader?: string
+          thumbnails?: Array<{ url?: string }>
+        }>
       }
-      const all = (info.entries ?? []).filter(
-        (e) => e.id && /^[\w-]{11}$/.test(e.id) && e.title
-      )
-      const entries = all.slice(0, 200).map((e) => ({
+      const all = (info.entries ?? []).filter((e) => e.id && /^[\w-]{11}$/.test(e.id) && e.title)
+      const entries: ResolvedPlaylistEntry[] = all.slice(0, limit).map((e) => ({
         videoId: e.id as string,
         title: e.title as string,
         duration: typeof e.duration === 'number' ? e.duration : undefined,
-        thumbnail: e.thumbnails?.find((t) => t.url)?.url ?? null
+        channel: e.channel ?? e.uploader ?? null,
+        thumbnail: e.thumbnails?.find((t) => t.url)?.url ?? `https://i.ytimg.com/vi/${e.id}/mqdefault.jpg`
       }))
-      return { entries, capped: all.length > 200 }
+      const value = {
+        entries,
+        // A Mix is endless: it is always "cut short".
+        capped: mix ? entries.length >= limit : all.length > limit,
+        title: info.title,
+        mix
+      }
+      if (entries.length > 0) this.playlistCache.set(listUrl, { at: Date.now(), value })
+      return entries.length > 0
+        ? value
+        : { entries: [], mix, error: 'No playable videos were found in this playlist.' }
     } catch {
-      return { entries: [] }
+      return { entries: [], mix, error: 'Could not read this playlist.' }
     }
   }
 
@@ -1908,47 +2037,244 @@ export class ProviderService {
    * qualities/formats are returned (best first) so the player can fall back
    * when a given stream cannot be played.
    */
-  async resolveYouTubeStream(videoId: string): Promise<string[]> {
+  async resolveYouTubeStream(videoId: string, fresh = false): Promise<string[]> {
+    return this.resolveStream(videoId, fresh, false)
+  }
+
+  /** Streams being resolved because the user asked (click / player), not prefetch. */
+  private interactiveResolves = 0
+
+  private async resolveStream(videoId: string, fresh: boolean, background: boolean): Promise<string[]> {
     if (!videoId) return []
-    const cached = this.streamCache.get(videoId)
-    if (cached && cached.expires > Date.now()) return cached.urls
-    try {
-      const urls = await this.sdlpYtStreams(videoId)
-      if (urls.length === 0) {
-        getLogger().info(`No audio stream available for ${videoId}`)
+    // `fresh`: the player is asking because the cached URLs just failed;
+    // handing the same dead URLs back would only fail again.
+    if (fresh) {
+      this.streamCache.delete(videoId)
+      try {
+        this.db.run('DELETE FROM provider_cache WHERE key = ?', [`${YT_STREAM_KEY}${videoId}`])
+      } catch {
+        // ignore
+      }
+    } else {
+      const cached = this.cachedStream(videoId)
+      if (cached) return cached
+    }
+    // Several callers (a click, hover / search prefetch, the queue) often ask
+    // for the same video at once: share one yt-dlp run.
+    const running = this.streamInflight.get(videoId)
+    if (running) return running
+    // Something the user is waiting for: background prefetching steps aside
+    // (parallel yt-dlp runs slow each other down by 2x or more).
+    if (!background) this.interactiveResolves++
+    const job = (async (): Promise<string[]> => {
+      try {
+        const urls = await this.sdlpYtStreams(videoId)
+        if (urls.length === 0) {
+          getLogger().info(`No audio stream available for ${videoId}`)
+          return []
+        }
+        // Brand-new URLs are sometimes refused by YouTube for a few seconds
+        // after resolving (Chromium then reports ERR_BLOCKED_BY_ORB and the
+        // player burns through every URL). Only hand them out once the
+        // first one really serves audio.
+        await this.waitUntilPlayable(urls[0], videoId)
+        const expires = this.streamExpiry(urls)
+        this.streamCache.set(videoId, { urls, expires })
+        try {
+          this.cacheSet(`${YT_STREAM_KEY}${videoId}`, urls, Math.max(60_000, expires - Date.now()))
+        } catch {
+          // memory cache still works
+        }
+        return urls
+      } catch (err) {
+        getLogger().debug(`YouTube stream resolution failed for ${videoId}`, err)
         return []
       }
-      getLogger().info(
-        `YouTube streams resolved for ${videoId}: ${urls.length} urls (${urls[0].slice(0, 70)}…)`
+    })().finally(() => {
+      this.streamInflight.delete(videoId)
+      if (!background) {
+        this.interactiveResolves--
+        this.pumpPrefetch()
+      }
+    })
+    this.streamInflight.set(videoId, job)
+    return job
+  }
+
+  /** Resolved streams that are still valid: memory first, then the on-disk cache. */
+  private cachedStream(videoId: string): string[] | null {
+    const mem = this.streamCache.get(videoId)
+    if (mem && mem.expires > Date.now()) return mem.urls
+    const stored = this.cacheGet(`${YT_STREAM_KEY}${videoId}`)
+    if (Array.isArray(stored) && stored.length > 0 && stored.every((u) => typeof u === 'string')) {
+      const urls = stored as string[]
+      const expires = this.streamExpiry(urls)
+      if (expires > Date.now() + 30_000) {
+        this.streamCache.set(videoId, { urls, expires })
+        return urls
+      }
+    }
+    return null
+  }
+
+  /**
+   * How long resolved URLs stay usable: YouTube signs them with an `expire`
+   * timestamp (about 6 hours). Cache until shortly before that instead of
+   * the old blanket 15 minutes, so replays and restarts are instant.
+   */
+  private streamExpiry(urls: string[]): number {
+    const now = Date.now()
+    const m = /[?&/]expire[=/](\d+)/.exec(urls[0] ?? '')
+    if (!m) return now + 15 * 60_000
+    const at = Number(m[1]) * 1000 - 10 * 60_000
+    return at > now + 60_000 ? Math.min(at, now + 5.5 * 3600_000) : now + 60_000
+  }
+
+  private streamInflight = new Map<string, Promise<string[]>>()
+
+  /**
+   * Run yt-dlp and return every playable audio URL, best quality first. The
+   * default client yields streams Chromium can play with ordinary range
+   * requests; android_vr is only a fallback for videos the default client
+   * rejects (its stream URLs are refused for big range requests).
+   */
+  private async sdlpYtStreams(videoId: string): Promise<string[]> {
+    const url = `https://www.youtube.com/watch?v=${videoId}`
+    const common = ['--no-playlist', '--no-warnings', '--no-progress', '--skip-download', '-j', url]
+    const vr = ['--extractor-args', 'youtube:player_client=android_vr']
+    for (const client of ['default', 'vr'] as const) {
+      const started = Date.now()
+      const stdout = await this.runYtdlpOnce(
+        [...YT_CLIENT_ARGS, ...(client === 'vr' ? vr : []), ...common],
+        40_000
       )
-      // YouTube stream URLs are only valid for a short while; a 15 minute
-      // cache keeps repeat plays instant while staying inside that window.
-      this.streamCache.set(videoId, { urls, expires: Date.now() + 15 * 60_000 })
-      return urls
-    } catch (err) {
-      getLogger().debug(`YouTube stream resolution failed for ${videoId}`, err)
-      return []
+      const urls = stdout ? extractStreamUrls(stdout) : []
+      getLogger().info(
+        `yt-dlp ${client} client: ${videoId} -> ${urls.length} urls in ${Date.now() - started}ms`
+      )
+      if (urls.length > 0) return urls
+    }
+    return []
+  }
+
+  /**
+   * Poll a stream URL with a tiny ranged request until YouTube serves it
+   * (200/206). Gives up after ~5 s: the player still has its own fallbacks.
+   */
+  private async waitUntilPlayable(url: string, videoId: string): Promise<void> {
+    const chrome = process.versions.chrome ?? '144.0.0.0'
+    const headers = {
+      'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`,
+      Range: 'bytes=0-1'
+    }
+    const started = Date.now()
+    const delays = [0, 400, 700, 1000, 1400, 1800]
+    for (let i = 0; i < delays.length; i++) {
+      if (delays[i] > 0) await sleep(delays[i])
+      try {
+        const res = await fetch(url, { headers, signal: AbortSignal.timeout(6000) })
+        void res.body?.cancel().catch(() => undefined)
+        if (res.status === 200 || res.status === 206) {
+          if (i > 0) {
+            getLogger().info(`stream for ${videoId} became playable after ${Date.now() - started}ms`)
+          }
+          return
+        }
+      } catch {
+        // network hiccup: try again
+      }
+    }
+    getLogger().info(`stream for ${videoId} still refused after ${Date.now() - started}ms`)
+  }
+
+  /** Version and origin of the yt-dlp Oli uses (for the Settings page). */
+  /** The YouTube engine manager (finds / installs / updates yt-dlp). */
+  private engine: YtdlpEngine | null = null
+
+  setEngine(engine: YtdlpEngine): void {
+    this.engine = engine
+  }
+
+  /** A new yt-dlp was installed: URLs the old engine resolved may be refused, so start clean. */
+  resetStreamCache(): void {
+    this.streamCache.clear()
+    try {
+      this.db.run(`DELETE FROM provider_cache WHERE key LIKE '${YT_STREAM_KEY}%'`)
+    } catch {
+      // ignore
     }
   }
 
-  /** Run yt-dlp and return every playable audio URL, best quality first. */
-  private async sdlpYtStreams(videoId: string): Promise<string[]> {
-    const stdout = await this.runYtdlp([
-      '--no-playlist',
-      '--no-warnings',
-      '--no-progress',
-      '--skip-download',
-      '-j',
-      `https://www.youtube.com/watch?v=${videoId}`
-    ])
-    if (!stdout) return []
-    return extractStreamUrls(stdout)
+  /** Whether any yt-dlp download child is alive (its exe cannot be replaced meanwhile). */
+  hasYtChildren(): boolean {
+    for (const c of this.ytChildren.values()) if (c.exitCode === null) return true
+    return false
+  }
+
+  private prefetchQueue: string[] = []
+  private prefetchActive = 0
+
+  /**
+   * Resolve streams in the background so they are cached by the time the
+   * user presses play, one at a time (each is a yt-dlp process). `priority`
+   * puts the ids at the front (hover / next in queue); otherwise the list
+   * replaces what was waiting (a new search makes the old one irrelevant).
+   */
+  prefetchYouTubeStreams(ids: string[], priority = false): void {
+    const wanted = ids.filter(
+      (id) =>
+        /^[\w-]{11}$/.test(id) && !this.cachedStream(id) && !this.streamInflight.has(id)
+    )
+    if (wanted.length === 0) return
+    const unique = [...new Set(wanted)]
+    this.prefetchQueue = priority
+      ? [...unique, ...this.prefetchQueue.filter((q) => !unique.includes(q))]
+      : unique
+    this.prefetchQueue = this.prefetchQueue.slice(0, 12)
+    this.pumpPrefetch()
+  }
+
+  private pumpPrefetch(): void {
+    // One at a time, and never while a click-initiated resolve is running.
+    while (this.interactiveResolves === 0 && this.prefetchActive < 1 && this.prefetchQueue.length > 0) {
+      const id = this.prefetchQueue.shift()!
+      this.prefetchActive++
+      void this.resolveStream(id, false, true)
+        .catch(() => undefined)
+        .finally(() => {
+          this.prefetchActive--
+          this.pumpPrefetch()
+        })
+    }
+  }
+
+  /** One yt-dlp run (no retries); stdout, or null on failure. */
+  private runYtdlpOnce(args: string[], timeoutMs: number): Promise<string | null> {
+    const exe = this.ytdlpBin()
+    if (!exe) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      execFile(
+        exe,
+        args,
+        { timeout: timeoutMs, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+        (err, out, stderr) => {
+          if (err) {
+            getLogger().info(`yt-dlp failed: ${err.message.split('\n')[0].slice(0, 120)}`, {
+              stderr: String(stderr ?? '').slice(-300)
+            })
+            resolve(null)
+            return
+          }
+          resolve(String(out ?? '') || null)
+        }
+      )
+    })
   }
 
   /**
    * Last-resort playback: download the track's audio with yt-dlp to a local
    * temp file and return its path. Works for EVERY audio format YouTube
-   * offers (opus webm, m4a, …) no matter what the streamed URLs support, so
+   * offers (opus webm, m4a, ...) no matter what the streamed URLs support, so
    * any kind/version of audio can always be played. Downloaded files are
    * cached in memory for the session and served through the local protocol
    * (the same pipeline that plays library files).
@@ -1969,7 +2295,7 @@ export class ProviderService {
     const child = this.ytChildren.get(videoId)
     if (child) {
       try {
-        child.kill()
+        killProcessTree(child)
       } catch {
         // ignore
       }
@@ -2012,14 +2338,14 @@ export class ProviderService {
     }
     const pattern = `${videoId}.`
     const output = path.join(dir, `${videoId}.%(ext)s`)
-    // Transient network/YouTube hiccups (bot checks, rate limits, …) are
+    // Transient network/YouTube hiccups (bot checks, rate limits, ...) are
     // common mid-session; retry a few times before giving up.
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) {
         getLogger().debug(`retrying YouTube audio download for ${videoId} (attempt ${attempt + 1})`)
         await new Promise((r) => setTimeout(r, 1500 * attempt))
       }
-      const file = await this.execYtAudioDownload(exe, videoId, dir, pattern, output)
+      const file = await this.execYtAudioDownload(exe, videoId, dir, pattern, output, attempt === 2)
       if (file) return file
     }
     return null
@@ -2030,7 +2356,8 @@ export class ProviderService {
     videoId: string,
     dir: string,
     pattern: string,
-    output: string
+    output: string,
+    embedClient = false
   ): Promise<string | null> {
     // Stale partial files left by interrupted attempts would short-circuit
     // the readdir check below; clear them before every attempt.
@@ -2048,6 +2375,7 @@ export class ProviderService {
         exe,
         [
           ...YT_CLIENT_ARGS,
+          ...(embedClient ? YT_EMBED_ARGS : []),
           '--no-playlist',
           '--no-warnings',
           '--no-progress',
@@ -2177,14 +2505,14 @@ export class ProviderService {
       const abortIv = setInterval(() => {
         if (opts.isAborted?.()) {
           try {
-            child.kill()
+            killProcessTree(child)
           } catch {
             // ignore
           }
         } else if (Date.now() - lastBytesAt > 90_000) {
           getLogger().warn(`yt-dlp video download stalled for ${videoId}; killing`)
           try {
-            child.kill()
+            killProcessTree(child)
           } catch {
             // ignore
           }
@@ -2305,14 +2633,14 @@ export class ProviderService {
       const abortIv = setInterval(() => {
         if (opts.isAborted?.()) {
           try {
-            child.kill()
+            killProcessTree(child)
           } catch {
             // ignore
           }
         } else if (Date.now() - lastBytesAt > 90_000) {
           getLogger().warn(`yt-dlp audio download stalled for ${videoId}; killing`)
           try {
-            child.kill()
+            killProcessTree(child)
           } catch {
             // ignore
           }
@@ -2480,9 +2808,10 @@ export class ProviderService {
       return null
     }
     try {
-      // The original file is ours (yt-dlp exited before we got here), so a
-      // plain move is safe on Windows.
-      if (fs.existsSync(filePath)) fs.rmSync(filePath, { force: true })
+      // rename() replaces the target atomically (MoveFileEx with
+      // REPLACE_EXISTING on Windows). Never delete the original first: when
+      // the move then fails (file open in the player, AV scanner), the
+      // catch below removed the tagged copy too and the song was gone.
       fs.renameSync(tmpPath, filePath)
       return filePath
     } catch (err) {
@@ -2645,7 +2974,7 @@ export class ProviderService {
       )
       const chunks: Buffer[] = []
       const timer = setTimeout(() => {
-        proc.kill()
+        killProcessTree(proc)
         resolve(null)
       }, 180_000)
       proc.stdout.on('data', (c: Buffer) => chunks.push(c))
@@ -2732,40 +3061,32 @@ export class ProviderService {
     try {
       const u = new URL(url)
       const host = u.hostname.replace(/^(www\.|m\.|music\.)/i, '')
-      // Playlist URL
-      if (
-        (host === 'youtube.com' && u.pathname === '/playlist' && u.searchParams.get('list')) ||
-        (host === 'youtube.com' && u.searchParams.get('list') && u.searchParams.get('v'))
-      ) {
-        const listId = u.searchParams.get('list')
-        if (listId) {
-          const stdout = await this.runYtdlp(['--no-warnings', '--flat-playlist', '-J', `https://www.youtube.com/playlist?list=${listId}`], 60_000)
-          if (stdout) {
-            try {
-              const info = JSON.parse(stdout) as {
-                title?: string
-                entries?: Array<{ id?: string; title?: string; duration?: number; channel?: string; thumbnails?: Array<{ url?: string }> }>
-              }
-              const entries = (info.entries ?? []).filter((e) => e.id && /^[\w-]{11}$/.test(e.id))
-              return entries.slice(0, 50).map((e) => ({
-                provider: 'youtube',
-                id: `youtube:${e.id}`,
-                title: e.title ?? 'Untitled',
-                artist: e.channel ?? info.title ?? 'YouTube Playlist',
-                album: info.title ?? null,
-                duration: typeof e.duration === 'number' && e.duration > 0 ? e.duration : null,
-                year: null,
-                artworkUrl: e.thumbnails?.find((t) => t.url)?.url ?? null,
-                url: `https://www.youtube.com/watch?v=${e.id}`,
-                previewUrl: null,
-                videoId: e.id
-              }))
-            } catch {
-              return []
-            }
-          }
+      // Playlist / Mix URL
+      if (host === 'youtube.com' && u.searchParams.get('list')) {
+        // A watch link that carries a list is treated as its playlist only
+        // when it is clearly one (radio/Mix, or start_radio); otherwise the
+        // single video is what was pasted. Playlist pages always list.
+        const asPlaylist =
+          u.pathname === '/playlist' ||
+          u.searchParams.get('start_radio') != null ||
+          /^RD/.test(u.searchParams.get('list') ?? '') ||
+          !ytVideoIdFromUrl(url)
+        if (asPlaylist) {
+          const r = await this.resolveYouTubePlaylist(url)
+          return r.entries.slice(0, 50).map((e) => ({
+            provider: 'youtube',
+            id: `youtube:${e.videoId}`,
+            title: e.title,
+            artist: e.channel ?? r.title ?? 'YouTube Playlist',
+            album: r.title ?? null,
+            duration: e.duration && e.duration > 0 ? e.duration : null,
+            year: null,
+            artworkUrl: e.thumbnail ?? null,
+            url: `https://www.youtube.com/watch?v=${e.videoId}`,
+            previewUrl: null,
+            videoId: e.videoId
+          }))
         }
-        return []
       }
       // Single video URL
       const videoId = ytVideoIdFromUrl(url)
@@ -2805,7 +3126,7 @@ export class ProviderService {
     if (!exe) return null
     const attempts: string[][] = [
       [...YT_CLIENT_ARGS, ...args],
-      args
+      [...YT_CLIENT_ARGS, ...YT_EMBED_ARGS, ...args]
     ]
     for (let attempt = 0; attempt < attempts.length; attempt++) {
       const stdout = await new Promise<string>((resolve) => {
@@ -2965,10 +3286,23 @@ export class ProviderService {
   }
 
   /** Locate the yt-dlp binary (project bin/ first, then app resources). */
-  private ytdlpBin(): string | null {
+  /** Absolute path of the bundled yt-dlp binary (null when not installed). */
+  ytdlpPaths(): string[] {
+    return this.engine ? this.engine.paths() : [this.bundledYtdlpPath()].filter((p): p is string => Boolean(p))
+  }
+
+  /** PID of the live yt-dlp child downloading a video, if any. */
+  ytChildPid(videoId: string): number | null {
+    const c = this.ytChildren.get(videoId)
+    return c && c.exitCode === null && c.pid ? c.pid : null
+  }
+
+  /** yt-dlp shipped with the app (bin/ next to the project, or resources/bin when packaged). */
+  bundledYtdlpPath(): string | null {
     const name = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
     const candidates = [
       path.join(process.cwd(), 'bin', name),
+      path.join(__dirname, '../../bin', name),
       path.join(__dirname, '../../../bin', name),
       path.join(process.resourcesPath ?? '', 'bin', name)
     ]
@@ -2976,6 +3310,27 @@ export class ProviderService {
       if (candidate && fs.existsSync(candidate)) return candidate
     }
     return null
+  }
+
+  /** A yt-dlp installed on this PC (for example through WinGet), found on PATH. */
+  systemYtdlpPath(): string | null {
+    const name = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+    for (const dir of (process.env['PATH'] ?? '').split(path.delimiter)) {
+      if (!dir) continue
+      const candidate = path.join(dir, name)
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate
+      } catch {
+        // not in this directory
+      }
+    }
+    return null
+  }
+
+  /** The yt-dlp to run: the engine's choice (downloaded, shipped, then system copy). */
+  private ytdlpBin(): string | null {
+    if (this.engine) return this.engine.resolve()?.path ?? null
+    return this.bundledYtdlpPath() ?? this.systemYtdlpPath()
   }
 
   isSpotifyConfigured(config: ProviderConfig): boolean {

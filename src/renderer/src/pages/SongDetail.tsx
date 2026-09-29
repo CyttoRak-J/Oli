@@ -30,6 +30,7 @@ import { Artwork } from '../components/Artwork'
 import { EmptyState } from '../components/EmptyState'
 import { formatDuration, formatFileSize, relativeTime } from '../lib/format'
 import { cn } from '../components/cn'
+import { invalidateFavorites } from '../lib/favorites'
 
 function Row({ label, value }: { label: string; value: React.ReactNode }): React.JSX.Element {
   return (
@@ -123,6 +124,7 @@ export function SongDetail(): React.JSX.Element {
     void toggleFavorite('song', track.id).then((fav) => {
       player.patchTrack(track.id, { favorite: fav })
       void qc.invalidateQueries({ queryKey: ['song', id] })
+      invalidateFavorites(qc)
     })
   }
 
@@ -234,8 +236,8 @@ export function SongDetail(): React.JSX.Element {
             {track.composer && <Row label="Composer" value={track.composer} />}
             {track.year && <Row label="Year" value={track.year} />}
             {track.releaseDate && <Row label="Release" value={track.releaseDate} />}
-            {track.trackNo && <Row label="Track #" value={track.trackNo} />}
-            {track.discNo && <Row label="Disc #" value={track.discNo} />}
+            {track.trackNo != null && track.trackNo > 0 && <Row label="Track #" value={track.trackNo} />}
+            {track.discNo != null && track.discNo > 0 && <Row label="Disc #" value={track.discNo} />}
             {track.isrc && <Row label="ISRC" value={track.isrc} />}
             {track.rating != null && <Row label="Rating" value={`${track.rating} / 5`} />}
           </Section>
@@ -344,3 +346,4 @@ function Chip({
     </span>
   )
 }
+

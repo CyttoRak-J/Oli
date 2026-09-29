@@ -1,5 +1,4 @@
 /** IPC channel names shared between main, preload and renderer. */
-
 export const IPC = {
   // General
   getAppInfo: 'app:get-info',
@@ -31,6 +30,7 @@ export const IPC = {
   mergeArtists: 'library:merge-artists',
   getGenres: 'library:genres',
   getGenreSongs: 'library:genre-songs',
+  getSimilarTracks: 'library:similar-tracks',
   getComposers: 'library:composers',
   getComposerSongs: 'library:composer-songs',
   addLibraryFolder: 'library:add-folder',
@@ -39,8 +39,6 @@ export const IPC = {
   cancelScan: 'library:cancel-scan',
   getScanState: 'library:scan-state',
   getStats: 'library:stats',
-
-  // Scanner progress events
   onScanProgress: 'library:scan-progress',
   onLibraryChanged: 'library:changed',
 
@@ -52,6 +50,7 @@ export const IPC = {
   revealInExplorer: 'library:reveal',
   transcodeLocalFile: 'local:transcode',
   probeDuration: 'local:probe-duration',
+  getMediaBase: 'media:get-base',
 
   // Lyrics
   getLyrics: 'lyrics:get',
@@ -68,6 +67,11 @@ export const IPC = {
   isProviderConfigured: 'provider:configured',
   resolveYouTubeStream: 'youtube:resolve-stream',
   resolveYouTubeStreamBatch: 'youtube:resolve-stream-batch',
+  prefetchYouTubeStreams: 'youtube:prefetch-streams',
+  ytEngineInfo: 'youtube:engine-info',
+  ytEngineUpdate: 'youtube:engine-update',
+  ytEngineCheck: 'youtube:engine-check',
+  onYtEngineStatus: 'youtube:engine-status',
   resolveYouTubeUrl: 'youtube:resolve-url',
   resolvePlaylistEntries: 'youtube:resolve-playlist-entries',
   downloadYouTubeAudio: 'youtube:download-audio',
@@ -75,9 +79,15 @@ export const IPC = {
   videoDownload: 'video:download',
   videoDownloadSong: 'video:download-song',
   enqueuePlaylist: 'downloads:enqueue-playlist',
+  enqueueEntries: 'downloads:enqueue-entries',
   videoPickFolder: 'video:pick-folder',
   videoFallbackUrl: 'video:fallback-url',
   videoRetry: 'video:retry',
+
+  // Internet Archive
+  archiveSearch: 'archive:search',
+  archiveItem: 'archive:item',
+  archiveEnqueue: 'archive:enqueue',
 
   // Playlists
   getPlaylists: 'playlists:get',
@@ -92,6 +102,7 @@ export const IPC = {
   reorderPlaylist: 'playlists:reorder',
   movePlaylistToFolder: 'playlists:move-to-folder',
   importPlaylist: 'playlists:import',
+  exportPlaylist: 'playlists:export',
   togglePlaylistPin: 'playlists:pin',
   evaluateSmartPlaylist: 'playlists:evaluate-smart',
 
@@ -158,5 +169,4 @@ export const IPC = {
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
-
 export type { PlaybackState } from './types'

@@ -65,19 +65,22 @@
       <div class="card">
         <h3>Downloads fail or never start</h3>
         <p>
-          Oli bundles <code>yt-dlp</code> inside the app. If downloads fail, check that:
+          Oli bundles <code>yt-dlp</code> inside the app and keeps it up to date. If YouTube downloads fail, open
+          <em>Preferences, YouTube engine</em> and press <strong>Check for update</strong> (a banner at the top of the
+          window also tells you when the engine is missing). Also check that:
         </p>
         <ul>
           <li>You are online and YouTube is reachable.</li>
           <li>You chose a destination folder you have write access to.</li>
           <li>
-            The file <code>resources\bin\yt-dlp.exe</code> exists inside the installation folder
-            (reinstall if it is missing).
+            You are not blocking <code>yt-dlp</code> with an antivirus (the banner says "does not run" in that case;
+            press Reinstall).
           </li>
         </ul>
         <p>
           For video downloads, ffmpeg is needed. Oli uses the ffmpeg already installed on your
-          system — install it with <code>winget install ffmpeg</code> if video downloads fail.
+          system — install it with <code>winget install ffmpeg</code> (Windows) or <code>brew install ffmpeg</code> (macOS) if
+          video downloads fail.
         </p>
       </div>
 
@@ -134,7 +137,7 @@
 
     <footer>
       <p>
-        Oli — a desktop music player for Windows · <a href="https://github.com/cyttorak-j/Oli">Source code</a> ·
+        Oli — a desktop music player for Windows and macOS · <a href="https://github.com/cyttorak-j/Oli">Source code</a> ·
         <a href="faq.html">FAQ</a> · <a href="support.html">Support</a>
       </p>
     </footer>

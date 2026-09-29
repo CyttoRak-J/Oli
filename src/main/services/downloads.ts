@@ -2,13 +2,14 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { spawn } from 'node:child_process'
 import { Readable } from 'node:stream'
-import { finished } from 'node:stream/promises'
+import { pipeline } from 'node:stream/promises'
 import { EventEmitter } from 'node:events'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { getLogger } from './logger'
 import type { Database } from './database'
 import type { DownloadItem, TrackTagInput } from '@shared/types'
 import type { RichTrackMeta } from './provider'
+import { writeAudioTags, type FileTags } from '../util/audioTags'
 
 const CONCURRENCY = 3
 
@@ -33,6 +34,10 @@ export interface DownloadHooks {
   whenYtChildGone?: (videoId: string, maxWaitMs: number) => Promise<void>
   /** Whether a yt-dlp child for the video is still alive right now. */
   ytChildRunning?: (videoId: string) => boolean
+  /** PID of the yt-dlp child for a video (for a targeted external kill). */
+  ytChildPid?: (videoId: string) => number | null
+  /** Path of the app's own yt-dlp binary (orphan cleanup only touches that one). */
+  ytdlpPaths?: () => string[]
   /** Download a video's best audio only (used by "Download song"). */
   downloadYouTubeAudioFile?: (
     videoId: string,
@@ -118,6 +123,10 @@ export class DownloadService extends EventEmitter {
   private lastCreatedAt = 0
   /** In-flight HTTP download file streams, so abort/remove can tear them down. */
   private activeFiles = new Map<string, fs.WriteStream>()
+  /** Expected md5 of plain-file downloads (Internet Archive); checked once complete. */
+  private expectedMd5 = new Map<string, string>()
+  /** Tags to fill into plain-file downloads once they are verified. */
+  private fileTags = new Map<string, FileTags>()
 
   constructor(
     private db: Database,
@@ -148,17 +157,7 @@ export class DownloadService extends EventEmitter {
     // (killing the app does not kill its children on Windows). Drop them
     // BEFORE starting any job — and wait until the kill actually lands, so
     // a fresh yt-dlp process can never be killed by its own cleanup.
-    const killOrphans = (): Promise<void> =>
-      new Promise<void>((resolve) => {
-        try {
-          const kill = spawn('taskkill', ['/F', '/IM', 'yt-dlp.exe'], { windowsHide: true })
-          kill.on('close', () => resolve())
-          kill.on('error', () => resolve())
-          setTimeout(resolve, 5000)
-        } catch {
-          resolve()
-        }
-      })
+    const killOrphans = (): Promise<void> => this.killAppYtDlp(null)
     const rows = this.db.all<{ id: string; url: string; dest_path: string; kind: string }>(
       "SELECT id, url, dest_path, kind FROM downloads WHERE state IN ('downloading', 'queued')"
     )
@@ -257,6 +256,53 @@ export class DownloadService extends EventEmitter {
     return this.getItem(id)
   }
 
+  /**
+   * Queue one plain file (Internet Archive track). Goes into
+   * `<destDir>/<folder>/<fileName>` so several files of one item stay
+   * together and never overwrite each other. When `md5` is known the finished
+   * file is hashed and a mismatch marks the download failed.
+   */
+  async enqueueFile(
+    url: string,
+    opts: {
+      title: string
+      fileName: string
+      folder?: string
+      destDir?: string
+      md5?: string | null
+      tags?: FileTags
+    }
+  ): Promise<DownloadItem | null> {
+    if (!safeUrl(url)) {
+      getLogger().warn('Rejected invalid download URL', url)
+      return null
+    }
+    const base = opts.destDir && opts.destDir.trim() ? opts.destDir.trim() : this.downloadsDir
+    const dir = opts.folder ? path.join(base, sanitizeFilename(opts.folder)) : base
+    // sanitizeFilename caps the length: keep the extension out of that cap.
+    const ext = path.extname(opts.fileName).slice(0, 8)
+    const destPath = path.join(dir, sanitizeFilename(opts.fileName.slice(0, opts.fileName.length - ext.length)) + ext)
+    // Same file already queued or running: return that row instead of a duplicate.
+    const existing = this.db.get<{ id: string }>(
+      "SELECT id FROM downloads WHERE dest_path = ? AND url = ? AND state IN ('queued', 'downloading', 'paused')",
+      [destPath, url]
+    )
+    if (existing) return this.getItem(existing.id)
+    const id = randomUUID()
+    const now = Math.max(Date.now(), this.lastCreatedAt + 1)
+    this.lastCreatedAt = now
+    this.db.run(
+      `INSERT INTO downloads (id, title, url, dest_path, state, kind, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'queued', 'file', ?, ?)`,
+      [id, opts.title.slice(0, 200), url, destPath, now, now]
+    )
+    if (opts.md5 && /^[0-9a-f]{32}$/i.test(opts.md5)) this.expectedMd5.set(id, opts.md5.toLowerCase())
+    if (opts.tags) this.fileTags.set(id, opts.tags)
+    this.emit('changed')
+    void this.pump()
+    return this.getItem(id)
+  }
+
   pause(id: string): void {
     this.aborted.add(id)
     this.killStream(id)
@@ -318,6 +364,8 @@ export class DownloadService extends EventEmitter {
     )?.[1]
     this.aborted.add(id)
     this.ytJobs.delete(id)
+    this.expectedMd5.delete(id)
+    this.fileTags.delete(id)
     this.killStream(id)
     // Kill the yt-dlp child NOW (the abort poll below would take up to 500ms,
     // and Windows refuses deletion while the process keeps the file open).
@@ -337,7 +385,7 @@ export class DownloadService extends EventEmitter {
         const delAfterGone = async (): Promise<void> => {
           await this.hooks.whenYtChildGone?.(ytId, 15_000)
           if (this.hooks.ytChildRunning?.(ytId)) {
-            await this.killYtExternally()
+            await this.killAppYtDlp(this.hooks.ytChildPid?.(ytId) ?? null)
             await this.hooks.whenYtChildGone?.(ytId, 8_000)
           }
           if (this.hooks.ytChildRunning?.(ytId)) {
@@ -355,14 +403,38 @@ export class DownloadService extends EventEmitter {
     this.emit('changed')
   }
 
-  /** Kill stray yt-dlp processes via an external taskkill (safe, survivable). */
-  private killYtExternally(): Promise<void> {
+  /**
+   * Kill yt-dlp via an external process (safe, survivable): one PID when
+   * known, otherwise only processes running THIS app's yt-dlp binary. It
+   * used to be `taskkill /IM yt-dlp.exe`, which also killed any yt-dlp the
+   * user was running on their own outside the app.
+   */
+  private killAppYtDlp(pid: number | null): Promise<void> {
+    if (process.platform !== 'win32') return Promise.resolve()
+    let cmd: string
+    let args: string[]
+    if (pid) {
+      cmd = 'taskkill'
+      args = ['/F', '/T', '/PID', String(pid)]
+    } else {
+      // Both the downloaded and the shipped yt-dlp may have been started by an earlier session.
+      const exes = this.hooks.ytdlpPaths?.() ?? []
+      if (exes.length === 0) return Promise.resolve()
+      const list = exes.map((e) => `'${e.replace(/'/g, "''")}'`).join(',')
+      cmd = 'powershell.exe'
+      args = [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Get-Process -Name yt-dlp -ErrorAction SilentlyContinue | Where-Object { @(${list}) -contains $_.Path } | Stop-Process -Force -ErrorAction SilentlyContinue`
+      ]
+    }
     return new Promise<void>((resolve) => {
       try {
-        const kill = spawn('taskkill', ['/F', '/IM', 'yt-dlp.exe'], { windowsHide: true })
+        const kill = spawn(cmd, args, { windowsHide: true })
         kill.on('close', () => resolve())
         kill.on('error', () => resolve())
-        setTimeout(resolve, 4000)
+        setTimeout(resolve, 5000)
       } catch {
         resolve()
       }
@@ -530,38 +602,75 @@ export class DownloadService extends EventEmitter {
   }
 
   /**
-   * Enqueue every song of a playlist (YouTube or Spotify URL). Each song
-   * becomes a tagged audio download row; the queue downloads them one by one.
+   * Enqueue a chosen list of songs / videos: each becomes tagged audio
+   * (mode 'song') or a merged video file (mode 'video', optional height cap).
+   * The queue then downloads them one by one.
    */
-  async enqueuePlaylist(
-    url: string,
-    opts: { audio?: 'best' | 'm4a' | 'opus'; destDir?: string } = {}
-  ): Promise<{ found: number; enqueued: number; error?: string; capped?: boolean }> {
-    const resolved = (await this.hooks.resolvePlaylistEntries?.(url)) ?? { entries: [] }
-    if (resolved.error) return { found: 0, enqueued: 0, error: resolved.error }
+  async enqueueEntries(
+    entries: Array<{
+      videoId: string
+      title: string
+      duration?: number
+      track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
+    }>,
+    opts: {
+      mode?: 'song' | 'video'
+      audio?: 'best' | 'm4a' | 'opus'
+      height?: number
+      destDir?: string
+    } = {}
+  ): Promise<{ found: number; enqueued: number }> {
     const active = new Set<string>()
     for (const [, job] of this.ytJobs.entries()) active.add(job.videoId)
     let enqueued = 0
-    for (const entry of resolved.entries) {
-      if (active.has(entry.videoId)) continue
-      const row = await this.enqueueYouTubeSong(entry.videoId, entry.title, {
-        ...opts,
-        duration: entry.duration,
-        track: entry.track
-      })
+    for (const entry of entries) {
+      if (!/^[\w-]{11}$/.test(entry.videoId) || active.has(entry.videoId)) continue
+      const row =
+        opts.mode === 'video'
+          ? await this.enqueueYouTubeVideo(entry.videoId, entry.title, {
+              height: opts.height,
+              audio: opts.audio,
+              destDir: opts.destDir
+            })
+          : await this.enqueueYouTubeSong(entry.videoId, entry.title, {
+              audio: opts.audio,
+              destDir: opts.destDir,
+              duration: entry.duration,
+              track: entry.track
+            })
       if (row) {
         active.add(entry.videoId)
         enqueued++
       }
     }
-    return { found: resolved.entries.length, enqueued, capped: resolved.capped === true }
+    return { found: entries.length, enqueued }
+  }
+
+  /**
+   * Enqueue every song of a playlist (YouTube or Spotify URL). Each song
+   * becomes a tagged audio download row (or a video, see enqueueEntries).
+   */
+  async enqueuePlaylist(
+    url: string,
+    opts: {
+      mode?: 'song' | 'video'
+      audio?: 'best' | 'm4a' | 'opus'
+      height?: number
+      destDir?: string
+    } = {}
+  ): Promise<{ found: number; enqueued: number; error?: string; capped?: boolean }> {
+    const resolved = (await this.hooks.resolvePlaylistEntries?.(url)) ?? { entries: [] }
+    if (resolved.error) return { found: 0, enqueued: 0, error: resolved.error }
+    const r = await this.enqueueEntries(resolved.entries, opts)
+    return { found: resolved.entries.length, enqueued: r.enqueued, capped: resolved.capped === true }
   }
 
   /**
    * Swap in a resolved title (the enqueue happens instantly with a
    * placeholder, then the real title lands here once YouTube answers).
    */
-  updateTitle(id: string, title: string): void {    const clean = title.trim().slice(0, 200)
+  updateTitle(id: string, title: string): void {
+    const clean = title.trim().slice(0, 200)
     if (!clean) return
     const cur = this.db.get<{ title: string }>('SELECT title FROM downloads WHERE id = ?', [id])
     if (!cur || cur.title === clean) return
@@ -762,6 +871,15 @@ export class DownloadService extends EventEmitter {
     const startedBytes =
       item.downloadedBytes > 0 && fs.existsSync(destPath) ? item.downloadedBytes : 0
 
+    // Claim the row synchronously: pump() re-queries 'queued' rows in a loop
+    // right after starting this job, and the state used to change only after
+    // the fetch() round-trip, so the same download started up to 3 times in
+    // parallel, all writing the same file.
+    this.db.run("UPDATE downloads SET state = 'downloading', updated_at = ? WHERE id = ?", [
+      Date.now(),
+      id
+    ])
+    this.emit('changed')
     let file: fs.WriteStream | null = null
     try {
       fs.mkdirSync(path.dirname(destPath), { recursive: true })
@@ -825,11 +943,11 @@ export class DownloadService extends EventEmitter {
           this.emit('changed')
         }
       })
-      nodeStream.on('error', () => {
-        /* handled by finished() */
-      })
-      nodeStream.pipe(file)
-      await finished(nodeStream)
+      // pipeline() resolves only once the FILE has flushed everything to
+      // disk (waiting on the network stream alone let the finally block
+      // below destroy the file with its last chunks still buffered), and
+      // rejects on errors from either side.
+      await pipeline(nodeStream, file)
 
       if (this.aborted.has(id)) {
         this.markStopped(item)
@@ -839,9 +957,34 @@ export class DownloadService extends EventEmitter {
         this.fail(id, `Incomplete download (${received}/${resolvedTotal})`)
         return
       }
+      const wantMd5 = this.expectedMd5.get(id)
+      if (wantMd5) {
+        const got = await md5OfFile(destPath)
+        if (got !== wantMd5) {
+          this.fail(id, 'Checksum mismatch: the downloaded file is damaged. Retry to download it again.')
+          try {
+            fs.rmSync(destPath, { force: true })
+          } catch {
+            // leave it; retry starts from zero anyway
+          }
+          return
+        }
+      }
+      // Tag after the checksum passed (tagging changes the bytes). A tagging
+      // problem never fails the download: the audio is intact either way.
+      const tags = this.fileTags.get(id)
+      if (tags) {
+        try {
+          const written = writeAudioTags(destPath, tags)
+          if (written.length > 0) getLogger().info(`Tagged ${path.basename(destPath)}: ${written.join(', ')}`)
+        } catch (err) {
+          getLogger().warn(`Could not tag ${destPath}`, err)
+        }
+      }
+      const finalSize = fs.existsSync(destPath) ? fs.statSync(destPath).size : received
       this.db.run(
-        `UPDATE downloads SET downloaded_bytes = ?, progress = 1, speed = 0, eta_seconds = NULL, state = 'completed', error = NULL, updated_at = ? WHERE id = ?`,
-        [received, Date.now(), id]
+        `UPDATE downloads SET downloaded_bytes = ?, total_bytes = ?, progress = 1, speed = 0, eta_seconds = NULL, state = 'completed', error = NULL, updated_at = ? WHERE id = ?`,
+        [finalSize, finalSize, Date.now(), id]
       )
       this.emit('changed')
     } catch (err) {
@@ -854,6 +997,12 @@ export class DownloadService extends EventEmitter {
       this.activeFiles.delete(id)
       if (file && !file.destroyed) file.destroy()
       this.aborted.delete(id)
+      // Completed rows no longer need the checksum; failed/paused ones keep it for retry.
+      const st = this.db.get<{ state: string }>('SELECT state FROM downloads WHERE id = ?', [id])
+      if (!st || st.state === 'completed') {
+        this.expectedMd5.delete(id)
+        this.fileTags.delete(id)
+      }
     }
   }
 
@@ -1097,6 +1246,16 @@ export function ytVideoIdFromUrl(raw: string): string | null {
     // ignore
   }
   return null
+}
+
+function md5OfFile(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('md5')
+    fs.createReadStream(file)
+      .on('data', (chunk) => hash.update(chunk))
+      .on('error', reject)
+      .on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 function parseContentLength(value: string | null): number | null {

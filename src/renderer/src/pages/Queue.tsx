@@ -15,8 +15,7 @@ export function Queue(): React.JSX.Element {
       index: s.index,
       status: s.status,
       clearQueue: s.clearQueue,
-      pause: s.pause,
-      play: s.play,
+      toggle: s.toggle,
       playTrack: s.playTrack,
       removeFromQueue: s.removeFromQueue
     }))
@@ -59,7 +58,7 @@ export function Queue(): React.JSX.Element {
         <div className="flex flex-col">
           {queue.map((track, i) => {
             const isCurrent = i === index && status !== 'idle'
-            const isPlaying = isCurrent && status === 'playing'
+            const isPlaying = isCurrent && (status === 'playing' || status === 'loading')
             return (
               <div
                 key={track.id}
@@ -73,8 +72,8 @@ export function Queue(): React.JSX.Element {
                 <button
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-surface-4 bg-surface-2 text-ink-2 transition-colors group-hover:border-accent group-hover:text-ink-0"
                   onClick={() => {
-                    if (isPlaying) player.pause()
-                    else if (isCurrent) player.play()
+                    // toggle() also pauses while the track is buffering
+                    if (isCurrent) player.toggle()
                     else playAt(track)
                   }}
                   aria-label={isPlaying ? 'Pause' : 'Play'}

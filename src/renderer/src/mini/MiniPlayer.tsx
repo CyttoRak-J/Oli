@@ -9,6 +9,7 @@ import {
   Maximize2,
   Volume2,
   VolumeX,
+  Shuffle,
   CircleDot,
   SlidersHorizontal
 } from 'lucide-react'
@@ -82,7 +83,9 @@ export function MiniPlayer(): React.JSX.Element {
   const muted = state?.volume === 0 || (state?.muted ?? false)
   const volume = localVol ?? state?.volume ?? 0.8
 
-  const cmd = (c: 'playPause' | 'next' | 'previous' | 'toggleMute'): void => {
+  const shuffle = state?.shuffle ?? false
+
+  const cmd = (c: 'playPause' | 'next' | 'previous' | 'toggleMute' | 'toggleShuffle'): void => {
     commandPlayback(c)
   }
 
@@ -90,6 +93,11 @@ export function MiniPlayer(): React.JSX.Element {
     const v = Math.min(1, Math.max(0, (muted ? 0 : volume) + delta))
     setLocalVol(v)
     commandPlayback(`setVolume:${v}`)
+  }
+
+  const commitSeek = (): void => {
+    if (localSeek != null) commandPlayback(`seek:${localSeek}`)
+    setLocalSeek(null)
   }
 
   const onWheel = (e: React.WheelEvent): void => {
@@ -188,11 +196,14 @@ export function MiniPlayer(): React.JSX.Element {
             background: `linear-gradient(to right, var(--color-accent) ${pct}%, var(--color-surface-4) ${pct}%)`
           }}
           onInput={(e) => {
-            const v = Number((e.target as HTMLInputElement).value)
-            setLocalSeek(v)
-            commandPlayback(`seek:${v}`)
+            // Preview only while dragging; seeking on every input event
+            // floods the player with seeks (each one re-buffers the stream).
+            setLocalSeek(Number((e.target as HTMLInputElement).value))
           }}
-          onPointerUp={() => setLocalSeek(null)}
+          onPointerUp={commitSeek}
+          onKeyUp={(e) => {
+            if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') commitSeek()
+          }}
           onBlur={() => setLocalSeek(null)}
           aria-label="Seek"
         />
@@ -204,6 +215,17 @@ export function MiniPlayer(): React.JSX.Element {
 
       <div className="flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 pb-3 pt-1">
         <button
+          className={`rounded-md p-1 transition-colors ${NO_DRAG} ${
+            shuffle ? 'bg-accent/15 text-accent' : 'text-ink-2 hover:text-ink-0'
+          }`}
+          onClick={() => cmd('toggleShuffle')}
+          title={shuffle ? 'Shuffle: on' : 'Shuffle: off'}
+          aria-label={shuffle ? 'Shuffle on' : 'Shuffle off'}
+          aria-pressed={shuffle}
+        >
+          <Shuffle size={16} />
+        </button>
+        <button
           className={`text-ink-2 transition-colors hover:text-ink-0 ${NO_DRAG}`}
           onClick={() => cmd('previous')}
           title="Previous"
@@ -214,10 +236,10 @@ export function MiniPlayer(): React.JSX.Element {
         <button
           className={`flex h-11 w-11 items-center justify-center rounded-full bg-accent text-white shadow-lg transition-transform hover:scale-105 ${NO_DRAG}`}
           onClick={() => cmd('playPause')}
-          title={status === 'playing' ? 'Pause' : 'Play'}
+          title={status === 'playing' || status === 'loading' ? 'Pause' : 'Play'}
           aria-label="Play or pause"
         >
-          {status === 'playing' ? (
+          {status === 'playing' || status === 'loading' ? (
             <Pause size={18} className="fill-current" />
           ) : (
             <Play size={18} className="ml-0.5 fill-current" />

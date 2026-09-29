@@ -33,9 +33,9 @@ export function History(): React.JSX.Element {
     const videoId = track.id.startsWith('youtube:') ? track.id.slice('youtube:'.length) : ''
     if (!videoId) return
     setResolvingId(entry.id)
+    // Even if pre-resolving fails, the player resolves / downloads by itself.
     void resolveYouTubeStream(videoId)
       .then((urls) => {
-        if (urls.length === 0) return
         player.playTracks(
           [{ ...track, missing: false, streamUrl: urls[0], streamUrls: urls }],
           0,
@@ -58,7 +58,6 @@ export function History(): React.JSX.Element {
     setResolvingId(entry.id)
     void resolveYouTubeStream(videoId)
       .then((urls) => {
-        if (urls.length === 0) return
         player.playNext({ ...track, missing: false, streamUrl: urls[0], streamUrls: urls })
       })
       .finally(() => setResolvingId(null))

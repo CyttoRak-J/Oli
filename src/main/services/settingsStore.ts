@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import type { Database } from './database'
 import { DEFAULT_SETTINGS } from '@shared/constants'
 import type { AppSettings } from '@shared/types'
+import { getLogger } from './logger'
 
 const FLAT_DEFAULTS = flatten(DEFAULT_SETTINGS)
 
@@ -39,7 +40,8 @@ export class SettingsStore extends EventEmitter {
     if (raw === undefined) return this.defaults(key)
     try {
       return JSON.parse(raw) as AppSettings[K]
-    } catch {
+    } catch (err) {
+      getLogger().warn(`Setting "${String(key)}" has corrupted value in DB, using default`, err)
       return this.defaults(key)
     }
   }
@@ -65,7 +67,8 @@ export class SettingsStore extends EventEmitter {
       'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       [key, raw]
     )
-    this.emit('changed', { key, value })
+    // Same shape as setMany(): an object of the changed keys.
+    this.emit('changed', { [key]: value })
   }
 
   setMany(entries: Partial<AppSettings>): void {

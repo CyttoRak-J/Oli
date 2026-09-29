@@ -4,8 +4,10 @@ import * as path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { getLogger } from './logger'
+import { playablePath } from '../util/longPath'
 
-const TMP_DIR = path.join(os.tmpdir(), 'cyttos-transcode')
+export const TRANSCODE_TMP_DIR = path.join(os.tmpdir(), 'cyttos-transcode')
+const TMP_DIR = TRANSCODE_TMP_DIR
 
 interface QueueItem {
   file: string
@@ -15,7 +17,7 @@ interface QueueItem {
 
 /**
  * Fallback decoder: when Chromium cannot play a local file (e.g. some opus
- * files, ape/wavpack/…), transcode it once to MP3 with ffmpeg and play the
+ * files, ape/wavpack/...), transcode it once to MP3 with ffmpeg and play the
  * cached result. MP3 (libmp3lame) is available in the GPL ffmpeg builds that
  * ship with yt-dlp, and always plays in Chromium.
  *
@@ -41,7 +43,7 @@ export class TranscodeService {
         for (const entry of fs.readdirSync(TMP_DIR)) {
           const p = path.join(TMP_DIR, entry)
           try {
-            if (fs.statSync(p).size <= 0) fs.unlinkSync(p)
+            if (entry.endsWith('.part') || fs.statSync(p).size <= 0) fs.unlinkSync(p)
           } catch {
             // ignore
           }
@@ -57,8 +59,30 @@ export class TranscodeService {
     if (!file || !fs.existsSync(file)) return null
     const stat = fs.statSync(file)
     if (!stat.isFile() || stat.size === 0) return null
-    const cached = this.cache.get(cacheKey(file, stat))
-    if (cached && fs.existsSync(cached) && fs.statSync(cached).size > 0) return cached
+    return this.lookup(cacheKey(file, stat))
+  }
+
+  /**
+   * Finished MP3 for a cache key: the in-memory map, or a file written by an
+   * earlier session (outputs are only renamed into place once complete, so
+   * an existing .mp3 is always whole).
+   */
+  private lookup(key: string): string | null {
+    for (const candidate of [
+      this.cache.get(key),
+      path.join(TMP_DIR, `${key}.m4a`),
+      path.join(TMP_DIR, `${key}.mp3`)
+    ]) {
+      if (!candidate) continue
+      try {
+        if (fs.statSync(candidate).size > 0) {
+          this.cache.set(key, candidate)
+          return candidate
+        }
+      } catch {
+        // not cached
+      }
+    }
     return null
   }
 
@@ -69,8 +93,8 @@ export class TranscodeService {
       const stat = fs.statSync(file)
       if (!stat.isFile() || stat.size === 0) return null
       const key = cacheKey(file, stat)
-      const cached = this.cache.get(key)
-      if (cached && fs.existsSync(cached) && fs.statSync(cached).size > 0) return cached
+      const cached = this.lookup(key)
+      if (cached) return cached
       return await this.enqueue(file, key, true)
     } catch (err) {
       getLogger().debug(`Transcode failed for ${file}`, err)
@@ -157,18 +181,41 @@ export class TranscodeService {
         return null
       }
       if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true })
-      const out = path.join(TMP_DIR, `${key}.mp3`)
-      await runFfmpeg(bin, file, out)
-      if (!fs.existsSync(out) || fs.statSync(out).size <= 0) {
+      // ffmpeg cannot open paths beyond MAX_PATH either.
+      const input = await playablePath(file)
+      // Write to a temp name and rename when complete: an interrupted run
+      // (app closed mid-transcode) must never leave a truncated file that a
+      // later session would treat as finished and cut the song short.
+      const attempt = async (out: string, remux: boolean): Promise<string | null> => {
+        const part = `${out}.part`
         try {
-          fs.unlinkSync(out)
-        } catch {
-          // ignore
+          await runFfmpeg(bin, input, part, remux)
+          if (!fs.existsSync(part) || fs.statSync(part).size <= 0) return null
+          fs.renameSync(part, out)
+          return out
+        } catch (err) {
+          getLogger().debug(`${remux ? 'Remux' : 'Transcode'} failed for ${file}`, err)
+          return null
+        } finally {
+          try {
+            if (fs.existsSync(part)) fs.unlinkSync(part)
+          } catch {
+            // ignore
+          }
         }
-        return null
       }
-      this.cache.set(key, out)
-      return out
+      // AAC in an MP4 container that Chromium rejects (typically because of
+      // an embedded cover "video" track) only needs its audio copied into a
+      // clean file: instant and lossless, unlike an MP3 re-encode.
+      const ext = path.extname(file).toLowerCase()
+      let result: string | null = null
+      if (ext === '.m4a' || ext === '.mp4') {
+        result = await attempt(path.join(TMP_DIR, `${key}.m4a`), true)
+      }
+      if (!result) result = await attempt(path.join(TMP_DIR, `${key}.mp3`), false)
+      if (!result) return null
+      this.cache.set(key, result)
+      return result
     } catch (err) {
       getLogger().debug(`Transcode failed for ${file}`, err)
       return null
@@ -254,36 +301,36 @@ function isFfprobe(bin: string): Promise<boolean> {
   })
 }
 
-function runFfmpeg(bin: string, input: string, output: string): Promise<void> {
+function runFfmpeg(bin: string, input: string, output: string, remux = false): Promise<void> {
+  const codecArgs = remux
+    ? ['-vn', '-c:a', 'copy', '-movflags', '+faststart', '-f', 'mp4']
+    : ['-vn', '-acodec', 'libmp3lame', '-b:a', '192k', '-ar', '44100', '-ac', '2', '-f', 'mp3']
   return new Promise((resolve, reject) => {
+    // The output name ends in .part, so the container is given explicitly.
     const child = spawn(
       bin,
-      [
-        '-y',
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-i',
-        input,
-        '-vn',
-        '-acodec',
-        'libmp3lame',
-        '-b:a',
-        '192k',
-        '-ar',
-        '44100',
-        '-ac',
-        '2',
-        output
-      ],
+      ['-y', '-hide_banner', '-loglevel', 'error', '-i', input, ...codecArgs, output],
       { windowsHide: true }
     )
+    // One worker serves every transcode: a hung ffmpeg (corrupt input,
+    // unreachable network share) must not block playback forever.
+    const timer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {
+        // ignore
+      }
+    }, 10 * 60_000)
     let errOut = ''
     child.stderr.on('data', (d: Buffer) => {
-      errOut += String(d)
+      if (errOut.length < 4000) errOut += String(d)
     })
-    child.on('error', reject)
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
     child.on('close', (code) => {
+      clearTimeout(timer)
       if (code === 0) resolve()
       else reject(new Error(`ffmpeg exited ${code}: ${errOut.slice(0, 300)}`))
     })
@@ -315,3 +362,4 @@ function runFfprobe(bin: string, input: string): Promise<number | null> {
     )
   })
 }
+

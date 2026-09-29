@@ -1,13 +1,17 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { IPC } from '@shared/ipc'
 import { windowControl } from './lib/ipc'
 import { bumpArtworkRevision } from './lib/artwork'
-import { usePlayer, resumePlayback } from './store/player'
+import { usePlayer, resumePlayback, applyAudioSettings } from './store/player'
 import { usePanels, type PanelKind } from './store/panels'
 import { useSettings } from './store/settings'
+import { useGlobalShortcuts } from './lib/useGlobalShortcuts'
+import { ShortcutsPanel } from './components/ShortcutsPanel'
 import { TitleBar } from './components/TitleBar'
+import { YtEngineBanner } from './components/YtEngineBanner'
 import { Sidebar } from './components/Sidebar'
 import { PlayerBar } from './components/PlayerBar'
 import { RightPanel } from './components/RightPanel'
@@ -33,6 +37,7 @@ import { Lyrics } from './pages/Lyrics'
 import { Queue } from './pages/Queue'
 import { History } from './pages/History'
 import { Downloads } from './pages/Downloads'
+import { Archive } from './pages/Archive'
 import { Settings } from './pages/Settings'
 import { NotFound } from './pages/NotFound'
 
@@ -74,6 +79,10 @@ function ThemeSync(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    document.documentElement.dataset.reduceMotion = settings?.reduceMotion ? 'true' : 'false'
+  }, [settings?.reduceMotion])
+
+  useEffect(() => {
     const root = document.documentElement
     root.dataset.theme = settings?.themeMode ?? 'dark'
     const accent = settings?.accentColor
@@ -97,6 +106,8 @@ function ThemeSync(): React.JSX.Element {
 function MainShell(): React.JSX.Element {
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
 
   // One-time bootstrap: load settings, hydrate player, restore last page.
   useEffect(() => {
@@ -108,8 +119,18 @@ function MainShell(): React.JSX.Element {
       await resumePlayback()
     })()
 
+    // A single hardware media-key press can reach us twice (global shortcut
+    // plus the OS media overlay / keyboard driver): a doubled 'playPause'
+    // pauses and instantly resumes, a doubled 'next' skips two songs.
+    // Identical transport commands this close together are one press.
+    let lastTransport = { command: '', at: 0 }
     const unsubCommands = window.cytto.on(IPC.onPlaybackCommand, (raw) => {
       const command = String(raw)
+      if (command === 'playPause' || command === 'next' || command === 'previous') {
+        const now = Date.now()
+        if (lastTransport.command === command && now - lastTransport.at < 250) return
+        lastTransport = { command, at: now }
+      }
       const p = usePlayer.getState()
       if (command === 'playPause') p.toggle()
       else if (command === 'pause') p.pause()
@@ -117,6 +138,7 @@ function MainShell(): React.JSX.Element {
       else if (command === 'next') p.next()
       else if (command === 'previous') p.previous()
       else if (command === 'toggleMute') p.toggleMute()
+      else if (command === 'toggleShuffle') p.toggleShuffle()
       else if (command.startsWith('setVolume:')) {
         p.setVolume(Number(command.slice('setVolume:'.length)))
       } else if (command.startsWith('seek:')) {
@@ -126,8 +148,19 @@ function MainShell(): React.JSX.Element {
 
     // Library mutations (metadata fixes, tag edits, rescans) can re-embed
     // cover art; bump the revision so cached artwork URLs refetch.
+    // Scans, metadata fixes/edits and merges change what every library page
+    // shows. Only the Songs page used to refetch; Home, Albums, Artists,
+    // Genres, detail pages etc. kept stale data.
+    const LIBRARY_KEYS = new Set([
+      'songs', 'song', 'albums', 'album', 'album-songs', 'artists', 'artist', 'artist-songs',
+      'artist-albums', 'genres', 'genre-songs', 'composers', 'composer-songs', 'stats',
+      'favorite-songs', 'playlists', 'playlist', 'playlist-entries', 'meta-attention'
+    ])
     const unsubLibrary = window.cytto.on(IPC.onLibraryChanged, () => {
       bumpArtworkRevision()
+      void queryClient.invalidateQueries({
+        predicate: (q) => LIBRARY_KEYS.has(String(q.queryKey[0]))
+      })
     })
 
     void useSettings.getState().load().then(() => {
@@ -175,9 +208,19 @@ function MainShell(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Speed / pitch / ReplayGain from Preferences, applied live (the player
+  // lives in this window only, so this is not in ThemeSync).
+  const audioSettings = useSettings((s) => s.settings)
+  useEffect(() => {
+    if (audioSettings) applyAudioSettings(audioSettings)
+  }, [audioSettings?.playbackSpeed, audioSettings?.preservePitch, audioSettings?.replayGainMode]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useGlobalShortcuts(() => setShortcutsOpen(true))
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-0 text-ink-0">
       <TitleBar />
+      <YtEngineBanner />
       <div className="relative flex min-h-0 flex-1">
         <Sidebar />
         <main className="min-w-0 flex-1 overflow-y-auto">
@@ -201,6 +244,7 @@ function MainShell(): React.JSX.Element {
             <Route path="/queue" element={<Queue />} />
             <Route path="/history" element={<History />} />
             <Route path="/downloads" element={<Downloads />} />
+            <Route path="/archive" element={<Archive />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
@@ -208,6 +252,7 @@ function MainShell(): React.JSX.Element {
         <RightPanel />
       </div>
       <PlayerBar />
+      {shortcutsOpen && <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />}
     </div>
   )
 }

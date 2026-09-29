@@ -1,4 +1,4 @@
-﻿import { Tray, Menu, nativeImage, app } from 'electron'
+import { Tray, Menu, nativeImage, app } from 'electron'
 import * as path from 'node:path'
 import { APP_NAME } from '@shared/constants'
 import { markQuitting } from './appState'
@@ -36,6 +36,10 @@ export class TrayManager {
       (snapshot.status === 'playing' || snapshot.status === 'loading') && snapshot.songId
     this.tray.setToolTip(playing ? `Now playing in ${APP_NAME}` : APP_NAME)
     this.tray.setContextMenu(this.buildMenu())
+  }
+
+  isActive(): boolean {
+    return this.tray != null && !this.tray.isDestroyed()
   }
 
   destroy(): void {

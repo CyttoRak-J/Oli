@@ -1,4 +1,5 @@
-﻿import { BrowserWindow, nativeImage, screen, shell } from 'electron'
+import { BrowserWindow, Menu, nativeImage, screen, shell } from 'electron'
+import type { MenuItemConstructorOptions } from 'electron'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { getLogger } from './services/logger'
@@ -69,6 +70,13 @@ export class WindowManager {
   bubbleWindow: BrowserWindow | null = null
   videoWindow: BrowserWindow | null = null
 
+  /** Whether the tray icon is showing (set by the app once the tray exists). */
+  private trayActive: () => boolean = () => false
+
+  setTrayActiveCheck(fn: () => boolean): void {
+    this.trayActive = fn
+  }
+
   constructor(
     private boundsStore: BoundsPersistence,
     private settings: SettingsStore,
@@ -96,7 +104,52 @@ export class WindowManager {
     return path.join(__dirname, '../renderer/index.html')
   }
 
+  /**
+   * ADDED: Electron does not provide a native OS right-click context menu on
+   * web content — you have to build one. Without this, right-clicking any
+   * text input (the search bar, playlist name fields, settings fields, etc.)
+   * or any selected text anywhere in the app does nothing at all. Wired once
+   * per window (called from loadInto so every window — main, mini, bubble,
+   * video — gets it) rather than per-component, so it works everywhere
+   * automatically, not just on the search bar.
+   */
+  private attachContextMenu(win: BrowserWindow): void {
+    win.webContents.on('context-menu', (_event, params) => {
+      const items: MenuItemConstructorOptions[] = []
+
+      if (params.isEditable) {
+        items.push(
+          { role: 'undo', enabled: params.editFlags.canUndo },
+          { role: 'redo', enabled: params.editFlags.canRedo },
+          { type: 'separator' },
+          { role: 'cut', enabled: params.editFlags.canCut },
+          { role: 'copy', enabled: params.editFlags.canCopy },
+          { role: 'paste', enabled: params.editFlags.canPaste },
+          { type: 'separator' },
+          { role: 'selectAll', enabled: params.editFlags.canSelectAll }
+        )
+      } else if (params.selectionText) {
+        items.push({ role: 'copy' })
+      }
+
+      if (params.misspelledWord) {
+        const suggestions = params.dictionarySuggestions.slice(0, 5).map((s) => ({
+          label: s,
+          click: () => win.webContents.replaceMisspelling(s)
+        }))
+        items.unshift(
+          ...(suggestions.length ? suggestions : [{ label: 'No suggestions', enabled: false }]),
+          { type: 'separator' as const }
+        )
+      }
+
+      if (items.length === 0) return
+      Menu.buildFromTemplate(items).popup({ window: win })
+    })
+  }
+
   private async loadInto(win: BrowserWindow, hash = ''): Promise<void> {
+    this.attachContextMenu(win)
     const target = await this.rendererUrl()
     if (target.startsWith('http')) {
       const url = `${target}#${hash}`
@@ -133,7 +186,7 @@ export class WindowManager {
         preload: path.join(__dirname, '../preload/index.js'),
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
+        sandbox: true,
         spellcheck: false
       }
     })
@@ -161,8 +214,13 @@ export class WindowManager {
     win.on('closed', () => {
       this.mainWindow = null
     })
+    // "Minimize to tray" (Preferences): only when the tray icon exists to
+    // bring the window back.
+    win.on('minimize', () => {
+      if (this.settings.getBoolean('minimizeToTray') && this.trayActive()) win.hide()
+    })
     win.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url)
+      if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
       return { action: 'deny' }
     })
     win.webContents.on('will-navigate', (event, url) => {
@@ -174,7 +232,7 @@ export class WindowManager {
         url.startsWith('cyttos-local:')
       if (!isLocal) {
         event.preventDefault()
-        void shell.openExternal(url)
+        if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
       }
     })
     void this.loadInto(win)
@@ -221,7 +279,7 @@ export class WindowManager {
         preload: path.join(__dirname, '../preload/index.js'),
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
+        sandbox: true,
         spellcheck: false
       }
     })
@@ -229,6 +287,7 @@ export class WindowManager {
     win.on('ready-to-show', () => win.show())
     win.on('closed', () => {
       this.miniWindow = null
+      this.restoreMainIfOrphaned()
     })
     // Clicking anywhere else collapses the mini player back into a bubble.
     // The mini does not regain focus on every window it steals it from, but
@@ -248,8 +307,26 @@ export class WindowManager {
       if (Date.now() - this.floatingSwitchAt < 400) return
       this.toBubble()
     })
-    void this.loadInto(win, 'mini')
+    void this.loadInto(win, '/mini')
     return win
+  }
+
+  /**
+   * The main window hides (instead of closing) while a mini player / bubble
+   * is open. When the last floating widget then closes, bring the main
+   * window back: otherwise the app keeps playing with no visible window
+   * (unless "close to tray" deliberately keeps it in the tray).
+   */
+  private restoreMainIfOrphaned(): void {
+    // Deferred: toBubble()/toMini() close one widget and open the other.
+    setTimeout(() => {
+      if (isQuitting()) return
+      if (this.miniWindow && !this.miniWindow.isDestroyed()) return
+      if (this.bubbleWindow && !this.bubbleWindow.isDestroyed()) return
+      if (process.env['CYTTO_CLOSE_TO_TRAY'] === '1') return
+      const main = this.mainWindow
+      if (main && !main.isDestroyed() && !main.isVisible()) main.show()
+    }, 150)
   }
 
   /** Apply always-on-top / taskbar settings to an existing mini window. */
@@ -383,7 +460,7 @@ export class WindowManager {
         preload: path.join(__dirname, '../preload/index.js'),
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
+        sandbox: true,
         spellcheck: false
       }
     })
@@ -396,8 +473,9 @@ export class WindowManager {
     })
     win.on('closed', () => {
       this.bubbleWindow = null
+      this.restoreMainIfOrphaned()
     })
-    void this.loadInto(win, 'bubble')
+    void this.loadInto(win, '/bubble')
     return win
   }
 
@@ -441,7 +519,7 @@ export class WindowManager {
         webPreferences: {
           contextIsolation: true,
           nodeIntegration: false,
-          sandbox: false,
+          sandbox: true,
           spellcheck: false,
           preload: path.join(__dirname, '../preload/index.js')
         }
@@ -664,7 +742,8 @@ export class WindowManager {
   }
 
   /** Bring the main window up and close any floating widget (mini / bubble). */
-  showMain(): BrowserWindow {    let win = this.getMain()
+  showMain(): BrowserWindow {
+    let win = this.getMain()
     if (!win || win.isDestroyed()) {
       win = this.createMainWindow()
     } else {
@@ -700,7 +779,8 @@ export class WindowManager {
     this.showMain()
   }
 
-  private persistBounds(win: BrowserWindow): void {    if (win.isMinimized() || win.isFullScreen()) return
+  private persistBounds(win: BrowserWindow): void {
+    if (win.isMinimized() || win.isFullScreen()) return
     try {
       this.boundsStore.save({
         ...win.getBounds(),

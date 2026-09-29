@@ -9,3 +9,5 @@ release
 coverage
 npm-debug.log*
 yarn-error.log*
+# yt-dlp is fetched by scripts/fetch-yt-dlp.mjs (npm postinstall), checksum-verified; never committed
+bin/

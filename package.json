@@ -1,8 +1,8 @@
 {
   "name": "oli",
   "productName": "Oli",
-  "version": "1.0.2",
-  "description": "A premium desktop music player and local library manager for Windows.",
+  "version": "1.1.0",
+  "description": "A premium desktop music player and local library manager for Windows and macOS.",
   "main": "./out/main/index.js",
   "author": {
     "name": "Cytto",
@@ -29,6 +29,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "icons": "node scripts/icon-gen.mjs",
+    "fetch:yt-dlp": "node scripts/fetch-yt-dlp.mjs",
+    "postinstall": "node scripts/fetch-yt-dlp.mjs",
     "build:win": "npm run typecheck && npm run build && electron-builder --win",
     "build:win:dir": "npm run typecheck && npm run build && electron-builder --win --dir",
     "build:mac": "npm run typecheck && npm run build && electron-builder --mac",

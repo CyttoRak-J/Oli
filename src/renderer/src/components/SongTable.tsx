@@ -64,8 +64,7 @@ export function SongTable({
     useShallow((s) => ({
       current: s.current,
       status: s.status,
-      pause: s.pause,
-      play: s.play,
+      toggle: s.toggle,
       playNext: s.playNext,
       playTracks: s.playTracks,
       patchTrack: s.patchTrack
@@ -205,7 +204,22 @@ export function SongTable({
                 'group grid items-center gap-2 px-4 py-1.5 transition-colors',
                 active ? 'bg-surface-2' : 'hover:bg-surface-1'
               )}
-              style={{ gridTemplateColumns: columns }}
+              style={{
+                gridTemplateColumns: columns,
+                // ADDED: content-visibility skips layout/style/paint for rows
+                // scrolled off-screen without changing the DOM/scroll
+                // structure — a real, low-risk perf win for large libraries,
+                // since useIncrementalRender's visible window only grows
+                // (never unmounts rows already scrolled past). This is a
+                // browser-native mitigation, not full virtualization; true
+                // windowing would need the scroll container ref threaded
+                // down from App.tsx's <main>, which is a bigger structural
+                // change not made here without being able to verify it
+                // against a running app (sticky headers, ListJumpButtons'
+                // scrollIntoView, etc. all depend on that container).
+                contentVisibility: 'auto',
+                containIntrinsicSize: '0 34px'
+              }}
               onDoubleClick={() => {
                 if (navTimerRef.current) {
                   clearTimeout(navTimerRef.current)
@@ -236,13 +250,13 @@ export function SongTable({
                     <button
                       className={cn('absolute hidden text-ink-0 group-hover:block', active && 'block')}
                       onClick={() => {
-                        if (active && player.status === 'playing') player.pause()
-                        else if (active) player.play()
+                        // toggle() also pauses while the track is buffering
+                        if (active) player.toggle()
                         else playAt(index)
                       }}
                       aria-label={active ? 'Pause' : 'Play'}
                     >
-                      {active && player.status === 'playing' ? (
+                      {active && (player.status === 'playing' || player.status === 'loading') ? (
                         <Pause size={14} className="fill-current" />
                       ) : (
                         <Play size={14} className="ml-0.5 fill-current" />
@@ -476,6 +490,13 @@ function MetadataDialog({
     const ok = await editMetadata(track.id, edits).catch(() => false)
     setBusy(false)
     if (ok) {
+      // Player bar / queue show the edited names right away.
+      usePlayer.getState().patchTrack(track.id, {
+        title: form.title.trim() || track.title,
+        artist: form.artist.trim() || track.artist,
+        album: form.album.trim() || track.album,
+        albumArtist: form.albumArtist
+      })
       setMsg('Saved')
       setTimeout(() => onOpenChange(false), 500)
     } else {
@@ -540,7 +561,7 @@ function toForm(t: Track): Record<string, string> {
   return {
     title: t.title,
     artist: t.artist,
-    albumArtist: t.albumArtist,
+    albumArtist: t.albumArtist ?? '',
     album: t.album,
     genre: t.genre ?? '',
     composer: t.composer ?? '',

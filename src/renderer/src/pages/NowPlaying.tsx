@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Disc3, ListMusic } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Disc3, ListMusic, Radio } from 'lucide-react'
 import { usePlayer } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { Artwork } from '../components/Artwork'
 import { EmptyState } from '../components/EmptyState'
 import { formatDuration } from '../lib/format'
 import { useTrackInfo } from '../lib/useTrackInfo'
+import { SleepTimer } from '../components/SleepTimer'
 import type { Track } from '@shared/types'
 
 /**
@@ -25,13 +26,15 @@ export function NowPlaying(): React.JSX.Element {
       playTrack: s.playTrack,
       previous: s.previous,
       seek: s.seek,
-      toggle: s.toggle
+      toggle: s.toggle,
+      radioMode: s.radioMode,
+      toggleRadioMode: s.toggleRadioMode
     }))
   )
   const openInfo = useTrackInfo()
   const [previewTime, setPreviewTime] = useState<number | null>(null)
 
-  const { current, status, currentTime, duration, queue, index } = player
+  const { current, status, currentTime, duration, queue, index, radioMode, toggleRadioMode } = player
 
   if (!current || status === 'idle') {
     return (
@@ -105,6 +108,9 @@ export function NowPlaying(): React.JSX.Element {
           }}
           onInput={(e) => onSeek((e.target as HTMLInputElement).value)}
           onPointerUp={onSeekCommit}
+          onKeyUp={(e) => {
+            if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') onSeekCommit()
+          }}
           aria-label="Seek"
         />
         <div className="mt-1 flex justify-between text-[10.5px] tabular-nums text-ink-3">
@@ -124,9 +130,9 @@ export function NowPlaying(): React.JSX.Element {
         <button
           className="flex h-12 w-12 items-center justify-center rounded-full bg-accent text-white shadow-lg transition-transform hover:scale-105"
           onClick={player.toggle}
-          aria-label={status === 'playing' ? 'Pause' : 'Play'}
+          aria-label={status === 'playing' || status === 'loading' ? 'Pause' : 'Play'}
         >
-          {status === 'playing' ? (
+          {status === 'playing' || status === 'loading' ? (
             <Pause size={20} className="fill-current" />
           ) : (
             <Play size={20} className="ml-0.5 fill-current" />
@@ -141,8 +147,24 @@ export function NowPlaying(): React.JSX.Element {
         </button>
       </div>
 
-      <div className="flex items-center gap-2 border-t border-edge pt-4 text-[10.5px] font-bold uppercase tracking-widest text-ink-3">
-        <ListMusic size={13} /> Up Next
+      <div className="flex items-center justify-between border-t border-edge pt-4">
+        <div className="flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-widest text-ink-3">
+          <ListMusic size={13} /> Up Next
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            className={
+              radioMode
+                ? 'flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-bold text-white'
+                : 'flex items-center gap-1 rounded-full border border-surface-4 bg-surface-2 px-2.5 py-1 text-[11px] text-ink-2 hover:border-accent'
+            }
+            onClick={toggleRadioMode}
+            title="Radio mode: auto-queue similar tracks when the queue ends"
+          >
+            <Radio size={12} /> Radio
+          </button>
+          <SleepTimer />
+        </div>
       </div>
       {upcoming.length === 0 ? (
         <div className="py-6 text-center text-[12.5px] text-ink-3">

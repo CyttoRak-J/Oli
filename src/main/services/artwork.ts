@@ -76,6 +76,19 @@ export class ArtworkService {
     }
   }
 
+  /** Delete a file only if it lives inside the artwork cache folder. */
+  private removeFileInCache(file: string | null): void {
+    if (!file) return
+    try {
+      const rel = path.relative(path.resolve(this._cacheDir), path.resolve(file))
+      if (rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel) && fs.existsSync(file)) {
+        fs.unlinkSync(file)
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   /** Drop a cache entry (and its file); returns true when something was removed. */
   remove(key: string): boolean {
     const row = this.db.get<{ stored_path: string }>(
@@ -84,7 +97,10 @@ export class ArtworkService {
     )
     if (!row?.stored_path) return false
     try {
-      if (fs.existsSync(row.stored_path)) fs.unlinkSync(row.stored_path)
+      // Only ever delete our own cache files, never a path elsewhere on disk.
+      const rel = path.relative(path.resolve(this._cacheDir), path.resolve(row.stored_path))
+      const inCache = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
+      if (inCache && fs.existsSync(row.stored_path)) fs.unlinkSync(row.stored_path)
     } catch {
       // ignore
     }
@@ -197,6 +213,21 @@ export class ArtworkService {
 
   /** Evict least-recently-used entries until total size is under maxMB. */
   cleanup(maxMB: number): void {
+    // Entries for songs that no longer exist (removed folders, or written
+    // under ids from an old hashing scheme) can never be shown: drop them.
+    try {
+      const orphans = this.db.all<{ key: string; stored_path: string }>(
+        `SELECT key, stored_path FROM artwork_cache
+         WHERE key LIKE 'song:%' AND key NOT IN (SELECT id FROM songs)`
+      )
+      for (const o of orphans) {
+        this.removeFileInCache(o.stored_path)
+        this.db.run('DELETE FROM artwork_cache WHERE key = ?', [o.key])
+      }
+      if (orphans.length > 0) getLogger().info(`Removed ${orphans.length} orphaned artwork entries`)
+    } catch (err) {
+      getLogger().warn('Artwork orphan cleanup failed', err)
+    }
     let files: { file: string; size: number }[] = []
     try {
       files = fs
@@ -235,12 +266,10 @@ export class ArtworkService {
           'SELECT key FROM artwork_cache WHERE stored_path = ?',
           [file]
         )
-        if (row) {
-          this.db.run('DELETE FROM artwork_cache WHERE stored_path = ?', [file])
-          if (row.key.startsWith('song:')) {
-            this.db.run('UPDATE songs SET has_embedded_artwork = 0 WHERE id = ?', [row.key.slice(5)])
-          }
-        }
+        // The song keeps its "has embedded artwork" flag, so the next scan
+        // extracts the cover again when it is needed (clearing the flag, as
+        // this once tried, would have lost the cover for good).
+        if (row) this.db.run('DELETE FROM artwork_cache WHERE stored_path = ?', [file])
       } catch {
         // ignore
       }

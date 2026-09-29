@@ -5,6 +5,7 @@ import { getAlbumById, getAlbumSongs } from '../lib/ipc'
 import { SongTable } from '../components/SongTable'
 import { Artwork } from '../components/Artwork'
 import { formatDuration } from '../lib/format'
+import { EmptyState } from '../components/EmptyState'
 
 export function AlbumDetail(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -20,8 +21,17 @@ export function AlbumDetail(): React.JSX.Element {
     enabled: Boolean(id)
   })
 
-  if (album.isLoading || !album.data) {
+  if (album.isLoading) {
     return <AlbumSkeleton />
+  }
+  // Merged away / removed with its folder: a null result used to show the
+  // loading skeleton forever.
+  if (!album.data) {
+    return (
+      <div className="p-6">
+        <EmptyState title="Album not found" description="It may have been merged or removed from your library." />
+      </div>
+    )
   }
 
   const a = album.data

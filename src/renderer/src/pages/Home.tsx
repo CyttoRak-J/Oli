@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react'
-import { useLiveOnlineSearch } from '../lib/useLiveOnlineSearch'
+import { useLiveOnlineSearch, usePrefetchOnlineStreams, searchKeepingOnline } from '../lib/useLiveOnlineSearch'
 import {
   getSongs,
   getAlbums,
@@ -27,6 +27,7 @@ import type { Album, Track } from '@shared/types'
 
 export function Home(): React.JSX.Element {
   const playTracks = usePlayer((s) => s.playTracks)
+  const queryClient = useQueryClient()
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
   const [searchFocused, setSearchFocused] = useState(false)
@@ -53,7 +54,7 @@ export function Home(): React.JSX.Element {
 
   const results = useQuery({
     queryKey: ['search', debounced],
-    queryFn: () => runSearch(debounced, undefined, false),
+    queryFn: () => searchKeepingOnline(queryClient, debounced, false),
     enabled: debounced.length > 2 && !link
   })
   const history = useQuery({
@@ -65,6 +66,7 @@ export function Home(): React.JSX.Element {
   const local: Track[] = results.data?.local ?? []
   const online = results.data?.online ?? []
   useLiveOnlineSearch(debounced)
+  usePrefetchOnlineStreams(online)
 
   return (
     <div className="p-6">
@@ -260,3 +262,4 @@ function AlbumCard({ album }: { album: Album }): React.JSX.Element {
     </Link>
   )
 }
+

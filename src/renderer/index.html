@@ -1,12 +1,12 @@
-﻿<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data: cyttos-art: https:; media-src 'self' file: blob: cyttos-art: cyttos-local: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:* cyttos-art: cyttos-local:;"
+      content="default-src 'self'; script-src 'self' cyttos-vendor:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: file: cyttos-art: cyttos-local:; media-src 'self' https: file: cyttos-local: http://127.0.0.1:*; connect-src 'self' https:;"
     />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Oli</title>
   </head>
   <body>
@@ -14,4 +14,3 @@
     <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>
-

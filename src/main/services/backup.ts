@@ -46,7 +46,8 @@ export class BackupService {
           return { path: p, createdAt: stat.mtimeMs, size: stat.size }
         })
         .sort((a, b) => b.createdAt - a.createdAt)
-    } catch {
+    } catch (err) {
+      getLogger().warn('Could not list backups', err)
       return []
     }
   }

@@ -1,10 +1,14 @@
-﻿import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { IPC } from '@shared/ipc'
 import { ANALYTICS_KEYS, APP_NAME } from '@shared/constants'
 import { getLogger } from './services/logger'
+import { buildDownloadUrl, isValidIdentifier } from './services/archive'
+import { runMigrations } from './services/migrations'
 import type { AppPaths } from './paths'
+import type { ArchiveService } from './services/archive'
+import type { YtdlpEngine } from './services/ytdlpEngine'
 import type { ArtworkService } from './services/artwork'
 import type { BackupService } from './services/backup'
 import type { DownloadService } from './services/downloads'
@@ -20,6 +24,7 @@ import type { SearchService } from './services/search'
 import type { SettingsStore } from './services/settingsStore'
 import type { NotificationService } from './services/notifications'
 import type { TranscodeService } from './services/transcode'
+import type { MediaServer } from './services/mediaServer'
 import type { UpdaterService } from './services/updater'
 import type { AnalyticsService } from './services/analytics'
 import type { WindowManager } from './windows'
@@ -40,6 +45,8 @@ export interface ServiceContainer {
   queue: QueueService
   history: HistoryService
   downloads: DownloadService
+  archive: ArchiveService
+  ytEngine: YtdlpEngine
   backup: BackupService
   updater: UpdaterService
   analytics: AnalyticsService
@@ -47,6 +54,7 @@ export interface ServiceContainer {
   metadataOps: MetadataOpsService
   metaFix: MetaFixService
   transcode: TranscodeService
+  media: MediaServer
   windows: WindowManager
   tray: TrayManager
   paths: AppPaths
@@ -62,7 +70,7 @@ function toResult<T>(fn: () => T): T | null {
 }
 
 export function registerIpc(services: ServiceContainer): void {
-  const { settings, library, artwork, lyrics, providers, search, playlists, favorites, playback, queue, history, downloads, backup, updater, analytics, metadataOps, metaFix, transcode, windows, tray, paths, db } = services
+  const { settings, library, artwork, lyrics, providers, search, playlists, favorites, playback, queue, history, downloads, archive, ytEngine, backup, updater, analytics, metadataOps, metaFix, transcode, media, windows, tray, paths, db } = services
 
   // ------------------------------------------------------------------ app
   ipcMain.handle(IPC.getAppInfo, () => ({
@@ -129,12 +137,12 @@ export function registerIpc(services: ServiceContainer): void {
   })
 
   // ----------------------------------------------------------------- settings
-ipcMain.handle(IPC.getSettings, () => settings.all())
+  ipcMain.handle(IPC.getSettings, () => settings.all())
   ipcMain.handle(IPC.setSettings, (_e, patch: Partial<AppSettings>) => {
     // setMany stringifies each value itself; pre-stringifying objects here
     // would double-encode them.
+    // setMany emits 'changed', which applies runtime settings (listener below).
     settings.setMany(patch)
-    applyRuntimeSettings(services)
     // Settings UI and any window may react (sender included: the store also
     // learns of changes made from other windows, e.g. the mini player)
     for (const win of BrowserWindow.getAllWindows()) {
@@ -145,7 +153,20 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
     return settings.all()
   })
 
-  settings.on('changed', () => applyRuntimeSettings(services))
+  // Only settings that affect windows / tray need re-applying. Playback
+  // bookkeeping (lastSongId, lastPositionSeconds every few seconds, bubble
+  // position while dragging) must not re-theme and re-pin every window.
+  const RUNTIME_KEYS = [
+    'closeToTray',
+    'taskbarProgressEnabled',
+    'miniPlayerTaskbar',
+    'miniPlayerAlwaysOnTop',
+    'themeMode',
+    'showTrayIcon'
+  ]
+  settings.on('changed', (changed: Record<string, unknown>) => {
+    if (RUNTIME_KEYS.some((k) => k in changed)) applyRuntimeSettings(services)
+  })
 
   // ----------------------------------------------------------------- library
   ipcMain.handle(IPC.getLibrary, () => library.getFolders())
@@ -166,6 +187,9 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
   )
   ipcMain.handle(IPC.getGenres, () => library.getGenres())
   ipcMain.handle(IPC.getGenreSongs, (_e, g) => library.getGenreSongs(g))
+  ipcMain.handle(IPC.getSimilarTracks, (_e, songId: string, excludeIds: string[], limit?: number) =>
+    library.getSimilarTracks(songId, excludeIds, limit)
+  )
   ipcMain.handle(IPC.getComposers, () => library.getComposers())
   ipcMain.handle(IPC.getComposerSongs, (_e, c) => library.getComposerSongs(c))
   ipcMain.handle(IPC.metaNeedsAttention, () => metaFix.attention())
@@ -203,6 +227,7 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
       return false
     }
   })
+  ipcMain.handle(IPC.getMediaBase, () => media.baseUrl)
   ipcMain.handle(IPC.transcodeLocalFile, async (_e, filePath: string) => {
     try {
       return await transcode.transcodeToMp3(filePath)
@@ -270,9 +295,23 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
       return partial
     }
   )
-  ipcMain.handle(IPC.resolveYouTubeStream, (_e, videoId: string) =>
-    toResult(() => providers.resolveYouTubeStream(videoId))
+  ipcMain.handle(IPC.resolveYouTubeStream, (_e, videoId: string, fresh?: boolean) =>
+    toResult(() => providers.resolveYouTubeStream(videoId, fresh === true))
   )
+  // Engine status is cached in main; "check" re-reads what is installed and asks GitHub for the newest
+  // release, "update" installs the newest release (also when it is only "up to date": a broken or
+  // system copy is replaced by a verified one).
+  ipcMain.handle(IPC.ytEngineInfo, () => ytEngine.status)
+  ipcMain.handle(IPC.ytEngineCheck, () => ytEngine.refresh(true))
+  ipcMain.handle(IPC.ytEngineUpdate, () => ytEngine.install())
+  ipcMain.on(IPC.prefetchYouTubeStreams, (_e, ids: unknown, priority: unknown) => {
+    if (Array.isArray(ids)) {
+      providers.prefetchYouTubeStreams(
+        ids.filter((i): i is string => typeof i === 'string').slice(0, 12),
+        priority === true
+      )
+    }
+  })
   ipcMain.handle(IPC.resolveYouTubeStreamBatch, (_e, videoIds: string[]) =>
     toResult(() => providers.resolveYouTubeStreamBatch(videoIds))
   )
@@ -295,7 +334,7 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
     await windows.openVideoWindow(videoId)
     // Opening the video takes over: pause the app's song, and remember to
     // resume it when the video ends.
-    const snap = playback.get()
+    const snap = playback.getSnapshot()
     if (snap.status === 'playing' && snap.songId) {
       windows.noteSongPausedByVideo()
       windows.sendToMain(IPC.onPlaybackCommand, 'pause')
@@ -388,6 +427,19 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
     return playlists.importPlaylist(result.filePaths[0], null)
   })
 
+  ipcMain.handle(IPC.exportPlaylist, async (_e, playlistId: string) => {
+    const playlist = playlists.get(playlistId)
+    if (!playlist) return false
+    const safeName = playlist.name.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'playlist'
+    const result = await dialog.showSaveDialog(windows.getMain()!, {
+      title: 'Export playlist',
+      defaultPath: `${safeName}.m3u8`,
+      filters: [{ name: 'M3U Playlist', extensions: ['m3u8'] }]
+    })
+    if (result.canceled || !result.filePath) return false
+    return playlists.exportPlaylist(playlistId, result.filePath)
+  })
+
   // ----------------------------------------------------------------- favorites
   ipcMain.handle(IPC.getFavorites, (_e, itemType: string) => favorites.list(itemType))
   ipcMain.handle(IPC.toggleFavorite, (_e, itemType: string, itemId: string) => {
@@ -400,8 +452,12 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
   ipcMain.handle(IPC.clearQueue, () => queue.clear())
   ipcMain.handle(IPC.getHistory, (_e, limit = 50) => history.recent(limit))
   ipcMain.handle(IPC.clearHistory, () => history.clear())
-  ipcMain.handle(IPC.getHistoryBackups, () => history.backups())
-  ipcMain.handle(IPC.restoreHistory, (_e, id: string) => history.restoreBackup(id))
+  // NOTE: IPC.getHistoryBackups / IPC.restoreHistory previously called
+  // history.backups() / history.restoreBackup(), which don't exist on
+  // HistoryService and aren't called anywhere in the renderer (it only
+  // uses the backup:* channels below). Removed as dead/mis-wired code —
+  // if you need history-specific backups, implement them on HistoryService
+  // and re-add the handlers.
 
   // Latch so the video is paused only when a song actually starts playing,
   // not on every playback-state tick (timeupdate keeps status 'playing').
@@ -412,7 +468,8 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
   let persistedResumeSongId: string | null = null
   let lastResumePosAt = 0
   ipcMain.on(IPC.playbackState, (e, state) => {
-    const snap = playback.update(state)
+    playback.update(state)
+    const snap = playback.getSnapshot()
     playback.recordPlayIfNew()
     tray.update(snap)
     const songId = snap.songId
@@ -434,11 +491,11 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
     // Echo to other windows only (mini player syncs this way)
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed() && win.webContents !== e.sender) {
-        win.webContents.send(IPC.playbackState, playback.toIpc())
+        win.webContents.send(IPC.playbackState, playback.toPlaybackState())
       }
     }
   })
-  ipcMain.handle(IPC.getPlaybackState, () => playback.toIpc())
+  ipcMain.handle(IPC.getPlaybackState, () => playback.toPlaybackState())
 
   ipcMain.on(IPC.commandPlayback, (_e, command: string) => {
     const sender = _e.sender
@@ -465,6 +522,43 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
       })
     }
   )
+  ipcMain.handle(
+    IPC.enqueueEntries,
+    async (
+      _e,
+      entries: unknown,
+      opts?: { mode?: string; audio?: string; height?: number; destDir?: string | null }
+    ) => {
+      if (!Array.isArray(entries)) return { found: 0, enqueued: 0 }
+      const clean = entries
+        .filter(
+          (x): x is {
+            videoId: string
+            title: string
+            duration?: number
+            track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
+          } => Boolean(x) && typeof x.videoId === 'string' && typeof x.title === 'string'
+        )
+        .slice(0, 300)
+        .map((x) => ({
+          videoId: x.videoId,
+          title: x.title,
+          duration: typeof x.duration === 'number' ? x.duration : undefined,
+          // Spotify entries carry the exact source track (better tags).
+          track:
+            x.track && typeof x.track.name === 'string' && Array.isArray(x.track.artists)
+              ? x.track
+              : undefined
+        }))
+      const audio = opts?.audio === 'm4a' || opts?.audio === 'opus' ? opts.audio : 'best'
+      return downloads.enqueueEntries(clean, {
+        mode: opts?.mode === 'video' ? 'video' : 'song',
+        audio,
+        height: Number.isFinite(Number(opts?.height)) ? Number(opts?.height) : 0,
+        destDir: opts?.destDir ? String(opts.destDir) : undefined
+      })
+    }
+  )
   ipcMain.handle(IPC.pauseDownload, (_e, id: string) => downloads.pause(id))
   ipcMain.handle(IPC.resumeDownload, (_e, id: string) => downloads.resume(id))
   ipcMain.handle(IPC.cancelDownload, (_e, id: string) => downloads.cancel(id))
@@ -483,6 +577,50 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
   })
   ipcMain.handle(IPC.openDownloadsFolder, () => shell.openPath(paths.downloadsDir))
 
+  // ----------------------------------------------------------------- internet archive
+  ipcMain.handle(IPC.archiveSearch, (_e, text: unknown, page?: unknown, losslessOnly?: unknown) =>
+    archive.search(
+      typeof text === 'string' ? text.slice(0, 200) : '',
+      Number.isFinite(Number(page)) ? Number(page) : 1,
+      losslessOnly !== false
+    )
+  )
+  ipcMain.handle(IPC.archiveItem, (_e, identifier: unknown) => archive.getItem(identifier as string))
+  ipcMain.handle(
+    IPC.archiveEnqueue,
+    async (_e, identifier: unknown, fileNames: unknown, destDir?: unknown) => {
+      if (!isValidIdentifier(identifier) || !Array.isArray(fileNames)) return { found: 0, enqueued: 0 }
+      // Only files that the item really lists can be queued (the renderer never
+      // supplies a URL), and the item's own title names the folder.
+      const item = await archive.getItem(identifier)
+      const wanted = new Set(fileNames.filter((n): n is string => typeof n === 'string').slice(0, 500))
+      const chosen = item.files.filter((f) => wanted.has(f.name))
+      let enqueued = 0
+      for (const f of chosen) {
+        const coverData = await archive.getCover(item, f.name)
+        const row = await downloads.enqueueFile(buildDownloadUrl(identifier, f.name), {
+          title: f.title ?? f.name.replace(/\.[^.]+$/, ''),
+          fileName: f.name.split('/').pop() ?? f.name,
+          folder: item.title || identifier,
+          destDir: typeof destDir === 'string' && destDir.trim() ? destDir : undefined,
+          md5: f.md5,
+          // Fill only what the file lacks: its own tags, then the item's.
+          tags: {
+            title: f.title ?? f.name.split('/').pop()?.replace(/\.[^.]+$/, '').replace(/_/g, ' '),
+            artist: f.artist ?? item.creator,
+            album: f.album ?? item.title,
+            track: f.track,
+            date: item.date,
+            genre: f.genre,
+            cover: coverData
+          }
+        })
+        if (row) enqueued++
+      }
+      return { found: chosen.length, enqueued }
+    }
+  )
+
   // ----------------------------------------------------------------- backup
   ipcMain.handle(IPC.createBackup, () => backup.create())
   ipcMain.handle(IPC.listBackups, () => backup.list())
@@ -495,8 +633,11 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
     if (result.canceled || result.filePaths.length === 0) return false
     const ok = await backup.restore(result.filePaths[0])
     if (ok) {
+      // An older backup may predate schema changes: bring it up to date.
+      runMigrations(db)
       settings.load()
       library.rebuildAggregates()
+      windows.broadcast(IPC.onLibraryChanged, library.getStats())
     }
     return ok
   })
@@ -525,8 +666,11 @@ ipcMain.handle(IPC.getSettings, () => settings.all())
     if (result.canceled || result.filePaths.length === 0) return false
     const ok = await backup.restore(result.filePaths[0])
     if (ok) {
+      // An older backup may predate schema changes: bring it up to date.
+      runMigrations(db)
       settings.load()
       library.rebuildAggregates()
+      windows.broadcast(IPC.onLibraryChanged, library.getStats())
     }
     return ok
   })
@@ -564,5 +708,11 @@ function applyRuntimeSettings(services: ServiceContainer): void {
   } catch {
     // ignore
   }
-  void tray
+  // The "Show tray icon" toggle only took effect after a restart.
+  try {
+    if (settings.getBoolean('showTrayIcon')) tray.create()
+    else tray.destroy()
+  } catch {
+    // ignore
+  }
 }

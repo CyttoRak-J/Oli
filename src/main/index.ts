@@ -1,4 +1,4 @@
-﻿import { app } from 'electron'
+import { app, globalShortcut } from 'electron'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { IPC } from '@shared/ipc'
@@ -16,7 +16,10 @@ import { FavoritesService } from './services/favorites'
 import { PlaylistService } from './services/playlists'
 import { PlaybackStateStore, QueueService, HistoryService } from './services/playerState'
 import { TranscodeService } from './services/transcode'
+import { MediaServer } from './services/mediaServer'
 import { DownloadService } from './services/downloads'
+import { ArchiveService } from './services/archive'
+import { YtdlpEngine } from './services/ytdlpEngine'
 import { BackupService } from './services/backup'
 import { UpdaterService } from './services/updater'
 import { AnalyticsService } from './services/analytics'
@@ -159,6 +162,8 @@ if (!gotLock) {
     registerVendorProtocol()
 
     const transcode = new TranscodeService()
+    const media = new MediaServer(db)
+    await media.start()
     const library = new LibraryService(db, artwork, transcode)
     const lyrics = new LyricsService(db, () => settings.get('lyricsOnline') === 'enabled')
     const providers = new ProviderService(db)
@@ -175,6 +180,8 @@ if (!gotLock) {
       forceKillYouTube: (videoId) => providers.forceKillYtChild(videoId),
       whenYtChildGone: (videoId, maxWaitMs) => providers.whenYtChildGone(videoId, maxWaitMs),
       ytChildRunning: (videoId) => providers.isYtChildRunning(videoId),
+      ytChildPid: (videoId) => providers.ytChildPid(videoId),
+      ytdlpPaths: () => providers.ytdlpPaths(),
       downloadYouTubeAudioFile: (videoId, destDir, opts) =>
         providers.downloadYouTubeAudioFile(videoId, destDir, opts),
       tagYouTubeAudioFile: (filePath, videoId, meta) =>
@@ -199,10 +206,21 @@ if (!gotLock) {
       ytConcurrency: () => Math.min(3, Math.max(1, Number(settings.get('ytConcurrency')) || 1))
     })
     void downloads.start()
+    const archive = new ArchiveService()
+    // The YouTube engine (yt-dlp): finds it, installs it when missing, keeps it current.
+    const ytEngine = new YtdlpEngine({
+      userDir: path.join(paths.userData, 'bin'),
+      bundledPath: () => providers.bundledYtdlpPath(),
+      systemPath: () => providers.systemYtdlpPath(),
+      autoUpdate: () => settings.getBoolean('ytdlpAutoUpdate'),
+      isBusy: () => providers.hasYtChildren(),
+      onInstalled: () => providers.resetStreamCache()
+    })
+    providers.setEngine(ytEngine)
     const backup = new BackupService(db, paths.backupsDir)
     const updater = new UpdaterService()
     const analytics = new AnalyticsService(db)
-    const notifications = new NotificationService()
+    const notifications = new NotificationService(() => settings.getBoolean('notificationsEnabled'))
     const metadataOps = new MetadataOpsService(db, library, artwork)
     const metaFix = new MetaFixService(db, providers, library, metadataOps, () => ({
       spotifyClientId: settings.get('spotifyClientId'),
@@ -226,6 +244,8 @@ if (!gotLock) {
       }
     })
 
+    windows.setTrayActiveCheck(() => tray.isActive())
+
     serviceContainer = {
       db,
       settings,
@@ -240,6 +260,8 @@ if (!gotLock) {
       queue,
       history,
       downloads,
+      archive,
+      ytEngine,
       backup,
       updater,
       analytics,
@@ -247,6 +269,7 @@ if (!gotLock) {
       metadataOps,
       metaFix,
       transcode,
+      media,
       windows,
       tray,
       paths
@@ -258,6 +281,11 @@ if (!gotLock) {
     library.on('scan-progress', (p) => windows.broadcast(IPC.onScanProgress, p))
     library.on('library-changed', () => {
       windows.broadcast(IPC.onLibraryChanged, library.getStats())
+    })
+    ytEngine.on('status', (status) => windows.broadcast(IPC.onYtEngineStatus, status))
+    settings.on('changed', (changed: Record<string, unknown>) => {
+      // Turning "update automatically" on should act on a pending update right away.
+      if (changed['ytdlpAutoUpdate'] === true) void ytEngine.refresh(true)
     })
     downloads.on('changed', () => {
       windows.broadcast(IPC.onDownloadsChanged, downloads.list())
@@ -275,10 +303,41 @@ if (!gotLock) {
       onNext: () => windows.sendToMain(IPC.onPlaybackCommand, 'next')
     })
 
+    // ---------------------------------------------------------- global media keys
+    // ADDED: Settings has a working "System media keys" toggle that saved its
+    // value correctly but nothing ever registered the actual OS-level
+    // shortcuts — the toggle did nothing. Wired up here using the same
+    // onPlaybackCommand broadcast the tray/thumbar buttons already use.
+    const MEDIA_KEY_MAP: Record<string, string> = {
+      MediaPlayPause: 'playPause',
+      MediaNextTrack: 'next',
+      MediaPreviousTrack: 'previous',
+      MediaStop: 'pause'
+    }
+    function applyMediaKeyRegistration(): void {
+      globalShortcut.unregisterAll()
+      if (!settings.getBoolean('mediaKeysEnabled')) return
+      for (const [accelerator, command] of Object.entries(MEDIA_KEY_MAP)) {
+        try {
+          globalShortcut.register(accelerator, () => {
+            windows.sendToMain(IPC.onPlaybackCommand, command)
+          })
+        } catch (err) {
+          getLogger().warn(`Failed to register media key ${accelerator}`, err)
+        }
+      }
+    }
+    applyMediaKeyRegistration()
+    settings.on('changed', (changed: Record<string, unknown>) => {
+      if ('mediaKeysEnabled' in changed) applyMediaKeyRegistration()
+    })
+    app.on('will-quit', () => globalShortcut.unregisterAll())
+
     // ---------------------------------------------------------- runtime
     const firstRun = db.count('SELECT id FROM library_locations') === 0
     analytics.incrementLaunch()
 
+    ytEngine.start()
     if (settings.getBoolean('showTrayIcon')) tray.create()
     if (settings.getBoolean('watchFolders')) library.startWatchers()
     if (settings.getBoolean('scanOnLaunch')) {
@@ -316,13 +375,19 @@ if (!gotLock) {
       }, 4000)
     }
 
+    // The database lives in memory (sql.js) and must be flushed on the way
+    // out. Keyed on its own flag: the tray's "Quit" marks the app as quitting
+    // BEFORE calling app.quit(), and checking app.isQuitting here used to
+    // skip the flush entirely for that path (losing recent changes).
+    let dbClosed = false
     app.on('before-quit', async (event) => {
-      if (app.isQuitting) {
-        return
-      }
+      if (dbClosed) return
       event.preventDefault()
+      dbClosed = true
       markQuitting()
       try {
+        globalShortcut.unregisterAll()
+        media.stop()
         await db.close()
       } catch (err) {
         log.error('Database close failed', err)
@@ -332,7 +397,9 @@ if (!gotLock) {
   }
 
   app.on('window-all-closed', () => {
-    // On Windows the app keeps running in the tray / mini player.
+    // Keep running only when the tray icon is there to bring the app back;
+    // otherwise closing the last window left an invisible process behind.
+    if (!serviceContainer?.tray.isActive()) app.quit()
   })
 }
 

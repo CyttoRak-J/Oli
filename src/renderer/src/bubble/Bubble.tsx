@@ -156,7 +156,7 @@ export function Bubble(): React.JSX.Element {
     }
   }
 
-  const isPlaying = state?.status === 'playing'
+  const isPlaying = state?.status === 'playing' || state?.status === 'loading'
 
   return (
     <div

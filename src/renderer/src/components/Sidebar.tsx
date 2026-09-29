@@ -5,6 +5,7 @@ import {
   Heart,
   ListMusic,
   Download,
+  Archive,
   Settings,
   PlusCircle,
   CircleDot,
@@ -60,6 +61,7 @@ export function Sidebar(): React.JSX.Element {
         <div className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-widest text-ink-3">
           More
         </div>
+        <Item to="/archive" label="Internet Archive" icon={<Archive size={16} />} />
         <Item to="/downloads" label="Downloads" icon={<Download size={16} />} />
         <Item to="/settings" label="Preferences" icon={<Settings size={16} />} />
       </nav>

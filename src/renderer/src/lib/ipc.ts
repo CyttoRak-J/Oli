@@ -4,6 +4,8 @@ import type {
   Artist,
   AppSettings,
   AttentionItem,
+  ArchiveItem,
+  ArchiveSearchResult,
   ComposerInfo,
   DownloadItem,
   FavoriteItem,
@@ -20,7 +22,8 @@ import type {
   QueueEntry,
   ScanProgress,
   SearchResults,
-  Track
+  Track,
+  YtEngineStatus
 } from '@shared/types'
 
 /** Thin typed wrapper around the context-bridged `window.cytto` API. */
@@ -79,6 +82,8 @@ export const mergeArtists = (canonicalId: string, aliasIds: string[]): Promise<n
   call(IPC.mergeArtists, canonicalId, aliasIds)
 export const getGenres = (): Promise<Genre[]> => call(IPC.getGenres)
 export const getGenreSongs = (g: string): Promise<Track[]> => call(IPC.getGenreSongs, g)
+export const getSimilarTracks = (songId: string, excludeIds: string[], limit?: number): Promise<Track[]> =>
+  call(IPC.getSimilarTracks, songId, excludeIds, limit)
 export const getComposers = (): Promise<ComposerInfo[]> => call(IPC.getComposers)
 export const getComposerSongs = (c: string): Promise<Track[]> => call(IPC.getComposerSongs, c)
 
@@ -126,21 +131,31 @@ export const search = (
   filters?: { library?: boolean; spotify?: boolean; youtube?: boolean },
   record?: boolean
 ): Promise<SearchResults> => call(IPC.search, query, filters, record)
-export const resolveYouTubeStream = (videoId: string): Promise<string[]> =>
-  call(IPC.resolveYouTubeStream, videoId)
+/** `fresh` bypasses main's short URL cache (use after the cached URLs failed). */
+export const resolveYouTubeStream = (videoId: string, fresh = false): Promise<string[]> =>
+  call<string[] | null>(IPC.resolveYouTubeStream, videoId, fresh).then((urls) => urls ?? [])
+/** Warm the stream cache in the background so Play is instant. */
+export const prefetchYouTubeStreams = (videoIds: string[], priority = false): void =>
+  send(IPC.prefetchYouTubeStreams, videoIds, priority)
 export const resolveYouTubeStreamBatch = (
   videoIds: string[]
 ): Promise<Array<{ videoId: string; urls: string[] }>> =>
-  call(IPC.resolveYouTubeStreamBatch, videoIds)
+  // main answers null when the handler throws; callers expect a list
+  call<Array<{ videoId: string; urls: string[] }> | null>(IPC.resolveYouTubeStreamBatch, videoIds).then(
+    (r) => r ?? []
+  )
 export const resolveYouTubeUrl = (url: string): Promise<OnlineSearchResult[]> =>
-  call(IPC.resolveYouTubeUrl, url)
+  call<OnlineSearchResult[] | null>(IPC.resolveYouTubeUrl, url).then((r) => r ?? [])
 export const resolvePlaylistEntries = (
   url: string
 ): Promise<{
+  title?: string
+  mix?: boolean
   entries: Array<{
     videoId: string
     title: string
     duration?: number
+    channel?: string | null
     thumbnail?: string | null
     track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
   }>
@@ -151,6 +166,7 @@ export const resolveDownloadYouTubeAudio = (videoId: string): Promise<string | n
   call(IPC.downloadYouTubeAudio, videoId)
 export const transcodeLocalFile = (filePath: string): Promise<string | null> =>
   call(IPC.transcodeLocalFile, filePath)
+export const getMediaBase = (): Promise<string> => call(IPC.getMediaBase)
 export const probeDuration = (filePath: string): Promise<number | null> =>
   call(IPC.probeDuration, filePath)
 export const openVideoWindow = (videoId: string): Promise<void> => call(IPC.openVideoWindow, videoId)
@@ -184,6 +200,7 @@ export const reorderPlaylist = (id: string, orderedIds: string[]): Promise<unkno
   call(IPC.reorderPlaylist, id, orderedIds)
 export const togglePlaylistPin = (id: string): Promise<unknown> => call(IPC.togglePlaylistPin, id)
 export const importPlaylist = (): Promise<Playlist | null> => call(IPC.importPlaylist)
+export const exportPlaylist = (playlistId: string): Promise<boolean> => call(IPC.exportPlaylist, playlistId)
 
 // ----------------------------------------------------------------- favorites
 export const getFavorites = (itemType: string): Promise<FavoriteItem[]> => call(IPC.getFavorites, itemType)
@@ -211,6 +228,47 @@ export const enqueuePlaylist = (
   destDir: string | null = null
 ): Promise<{ found: number; enqueued: number; error?: string; capped?: boolean }> =>
   call(IPC.enqueuePlaylist, url, audio, destDir)
+export interface LinkPlaylistEntry {
+  videoId: string
+  title: string
+  duration?: number
+  channel?: string | null
+  thumbnail?: string | null
+}
+/** Queue chosen playlist entries as tagged audio ('song') or video files. */
+export const enqueueEntries = (
+  entries: Array<{
+    videoId: string
+    title: string
+    duration?: number
+    track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
+  }>,
+  opts: {
+    mode: 'song' | 'video'
+    audio?: string | null
+    height?: number
+    destDir?: string | null
+  }
+): Promise<{ found: number; enqueued: number }> => call(IPC.enqueueEntries, entries, opts)
+// ----------------------------------------------------------------- YouTube engine (yt-dlp)
+export const getYtEngineStatus = (): Promise<YtEngineStatus> => call(IPC.ytEngineInfo)
+/** Re-read what is installed and ask GitHub for the newest release (installs it when "automatic" is on). */
+export const checkYtEngine = (): Promise<YtEngineStatus> => call(IPC.ytEngineCheck)
+/** Download, verify and install the newest release now. */
+export const installYtEngine = (): Promise<YtEngineStatus> => call(IPC.ytEngineUpdate)
+
+// ----------------------------------------------------------------- internet archive
+export const archiveSearch = (
+  text: string,
+  page = 1,
+  losslessOnly = true
+): Promise<ArchiveSearchResult> => call(IPC.archiveSearch, text, page, losslessOnly)
+export const archiveItem = (identifier: string): Promise<ArchiveItem> => call(IPC.archiveItem, identifier)
+export const archiveEnqueue = (
+  identifier: string,
+  fileNames: string[],
+  destDir: string | null = null
+): Promise<{ found: number; enqueued: number }> => call(IPC.archiveEnqueue, identifier, fileNames, destDir)
 export const pauseDownload = (id: string): Promise<void> => call(IPC.pauseDownload, id)
 export const resumeDownload = (id: string): Promise<void> => call(IPC.resumeDownload, id)
 export const cancelDownload = (id: string): Promise<void> => call(IPC.cancelDownload, id)

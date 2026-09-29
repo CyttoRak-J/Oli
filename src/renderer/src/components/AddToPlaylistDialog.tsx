@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X, Plus } from 'lucide-react'
-import type { Playlist, Track } from '@shared/types'
+import type { Track } from '@shared/types'
 import { getPlaylists, createPlaylist, addToPlaylist } from '../lib/ipc'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 export function AddToPlaylistDialog({
   open,
@@ -15,45 +15,41 @@ export function AddToPlaylistDialog({
   tracks: Track[]
 }): React.JSX.Element {
   const qc = useQueryClient()
-  const [playlists, setPlaylists] = useState<Playlist[]>([])
+  // The parent opens the dialog with open={true}; Radix only calls
+  // onOpenChange for its own triggers, so the old "load on open" handler
+  // never ran and the playlist list stayed empty.
+  const playlistsQuery = useQuery({ queryKey: ['playlists'], queryFn: getPlaylists, enabled: open })
+  const playlists = playlistsQuery.data ?? []
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
 
-  const load = useCallback(async () => {
-    const list = await getPlaylists().catch(() => [])
-    setPlaylists(list)
-    setSelected(Object.fromEntries(list.map((p) => [p.id, false])))
-  }, [])
-
-  function handleOpenChange(open: boolean): void {
-    if (open) {
-      void load()
-    } else {
-      setDone(false)
-      setBusy(false)
-      setNewName('')
-    }
-    onOpenChange(open)
+  function handleOpenChange(next: boolean): void {
+    onOpenChange(next)
   }
 
   const save = async (): Promise<void> => {
     setBusy(true)
-    const ids = Object.entries(selected)
-      .filter(([, v]) => v)
-      .map(([id]) => id)
-    const target = tracks.map((t) => t.id)
-    for (const id of ids) {
-      await addToPlaylist(id, target)
+    try {
+      const ids = Object.entries(selected)
+        .filter(([, v]) => v)
+        .map(([id]) => id)
+      const target = tracks.map((t) => t.id)
+      for (const id of ids) {
+        await addToPlaylist(id, target)
+      }
+      if (newName.trim()) {
+        const pl = await createPlaylist({ name: newName.trim() })
+        if (pl) await addToPlaylist(pl.id, target)
+      }
+      setDone(true)
+    } finally {
+      setBusy(false)
+      void qc.invalidateQueries({ queryKey: ['playlists'] })
+      void qc.invalidateQueries({ queryKey: ['playlist'] })
+      void qc.invalidateQueries({ queryKey: ['playlist-entries'] })
     }
-    if (newName.trim()) {
-      const pl = await createPlaylist({ name: newName.trim() })
-      if (pl) await addToPlaylist(pl.id, target)
-    }
-    setBusy(false)
-    setDone(true)
-    qc.invalidateQueries({ queryKey: ['playlists'] })
   }
 
   return (

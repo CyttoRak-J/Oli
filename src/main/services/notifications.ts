@@ -11,7 +11,11 @@ export interface NotifyOptions {
 export class NotificationService {
   private clickHandler: (() => void) | null = null
 
+  /** `enabled`: the "Desktop notifications" preference (checked on every show). */
+  constructor(private enabled: () => boolean = () => true) {}
+
   show(opts: NotifyOptions): void {
+    if (!this.enabled()) return
     if (!Notification.isSupported()) return
     try {
       const notification = new Notification({

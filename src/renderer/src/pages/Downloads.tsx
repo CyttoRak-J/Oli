@@ -56,10 +56,15 @@ export function Downloads(): React.JSX.Element {
     }
   })
 
+  const queryClient = useQueryClient()
   useEffect(() => {
-    const unsub = on<unknown>(IPC.onDownloadsChanged, () => void downloads.refetch())
-    return unsub
-  }, [downloads])
+    // The event already carries the full list (it fires on every progress
+    // tick): use it instead of a refetch round-trip per tick. Subscribing
+    // once, not on every render (the query object changes each render).
+    return on<DownloadItem[]>(IPC.onDownloadsChanged, (list) => {
+      if (Array.isArray(list)) queryClient.setQueryData(['downloads'], list)
+    })
+  }, [queryClient])
 
   const items = downloads.data ?? []
   const pendingCount = items.filter(
@@ -377,8 +382,8 @@ function DownloadRow({
             }}
           >
             {item.state === 'downloading' || item.state === 'queued'
-              ? 'Cancel &amp; delete file'
-              : 'Delete row &amp; file'}
+              ? 'Cancel & delete file'
+              : 'Delete row & file'}
           </button>
           <button
             className="rounded-md border border-surface-4 bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-1 hover:text-ink-0"

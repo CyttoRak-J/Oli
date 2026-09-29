@@ -6,7 +6,7 @@
     <title>Oli — Help Center</title>
     <meta
       name="description"
-      content="Oli is a premium desktop music player for Windows. Get setup help, troubleshooting, and FAQ."
+      content="Oli is a premium desktop music player for Windows and macOS. Get setup help, troubleshooting, and FAQ."
     />
     <link rel="icon" href="icon.png" />
     <link rel="stylesheet" href="style.css" />
@@ -29,7 +29,7 @@
     <main>
       <h1>Welcome to Oli</h1>
       <p class="subtitle">
-        Oli is a premium desktop music player and local library manager for Windows. Here you'll
+        Oli is a premium desktop music player and local library manager for Windows and macOS. Here you'll
         find everything you need to get started.
       </p>
 
@@ -38,6 +38,7 @@
         <p>
           <span class="tag">Local library</span>
           <span class="tag">YouTube playback &amp; downloads</span>
+          <span class="tag">Internet Archive lossless</span>
           <span class="tag">Smart playlists</span>
           <span class="tag">Mini player</span>
           <span class="tag">Lyrics</span>
@@ -46,6 +47,7 @@
         <ul>
           <li>Play your own music collection with full metadata, artwork, and gapless control.</li>
           <li>Search and play YouTube videos, or download them as video or tagged audio files.</li>
+          <li>Search the Internet Archive and download free lossless music (FLAC, WAV) with tags and cover art.</li>
           <li>Queue, history, favorites, and smart playlists — everything is saved locally.</li>
           <li>Dark theme (including OLED), mini player, taskbar controls, and tray integration.</li>
         </ul>
@@ -54,13 +56,15 @@
       <h2>Getting started</h2>
       <ol class="steps">
         <li>
-          <strong>Install Oli.</strong> Download <code>Oli-Setup-1.0.0.exe</code> from the
-          <a href="https://github.com/cyttorak-j/Oli/releases">Releases page</a> and run it.
-          No additional runtime is required.
+          <strong>Install Oli.</strong> Download <code>Oli-Setup-&lt;version&gt;.exe</code> (Windows) or the
+          <code>.dmg</code> for your Mac from the
+          <a href="https://github.com/CyttoRak-J/Oli/releases">Releases page</a> and open it.
+          The builds are not code-signed, so Windows shows SmartScreen (More info, Run anyway)
+          and macOS needs a right-click, Open the first time. No additional runtime is required.
         </li>
         <li>
           <strong>Add your music.</strong> Open <em>Settings → Library</em> and add the folder with
-          your music (for example <code>A:\Flac</code>). Oli scans it automatically and keeps it
+          your music (for example <code>A:\Flac</code> or <code>~/Music</code>). Oli scans it automatically and keeps it
           up to date.
         </li>
         <li>
@@ -93,7 +97,7 @@
 
     <footer>
       <p>
-        Oli — a desktop music player for Windows · <a href="https://github.com/cyttorak-j/Oli">Source code</a> ·
+        Oli — a desktop music player for Windows and macOS · <a href="https://github.com/cyttorak-j/Oli">Source code</a> ·
         <a href="faq.html">FAQ</a> · <a href="support.html">Support</a>
       </p>
     </footer>

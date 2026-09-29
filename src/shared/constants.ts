@@ -1,6 +1,6 @@
-﻿export const APP_NAME = 'Oli'
+export const APP_NAME = 'Oli'
 export const APP_NAME_COMPACT = 'Oli'
-export const APP_VERSION = '1.0.2'
+export const APP_VERSION = '1.1.0'
 export const APP_ID = 'com.cyttos.oli'
 
 export const MAIN_WINDOW = 'main'
@@ -116,7 +116,8 @@ export const DEFAULT_SETTINGS = {
   repeat: 'off',
   resumeOnLaunch: true,
   showTrayIcon: true,
-  minimizeToTray: true,
+  // Off by default: minimizing should not make the window vanish unless asked.
+  minimizeToTray: false,
   closeToTray: false,
   mediaKeysEnabled: true,
   taskbarProgressEnabled: true,
@@ -125,7 +126,8 @@ export const DEFAULT_SETTINGS = {
   miniPlayerOpacity: 0.5,
   bubblePosition: null,
   notificationsEnabled: true,
-  cacheArtworkMB: 512,
+  // Full-size covers for a big library exceed 512 MB; evicting them made covers vanish.
+  cacheArtworkMB: 2048,
   scanOnLaunch: true,
   watchFolders: true,
   autoUpdateEnabled: true,
@@ -142,6 +144,7 @@ export const DEFAULT_SETTINGS = {
   spotifyClientSecret: '',
   youtubeApiKey: '',
   acoustidApiKey: '',
+  ytdlpAutoUpdate: true,
   songsAhead: 3,
   ytConcurrency: 1,
   lastPage: '/',

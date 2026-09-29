@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -24,7 +24,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { usePanels } from '../store/panels'
 import { toggleFavorite } from '../lib/ipc'
 import { invalidateFavorites } from '../lib/favorites'
-import { formatDuration } from '../lib/format'
+import { audioQuality, formatDuration } from '../lib/format'
+import { readOutputSampleRate } from '../lib/audioOutput'
 
 const rangeFill = (pct: number): React.CSSProperties => ({
   background: `linear-gradient(to right, var(--color-accent) ${pct}%, var(--color-surface-4) ${pct}%)`
@@ -56,6 +57,13 @@ export function PlayerBar(): React.JSX.Element {
   const togglePanel = usePanels((s) => s.toggle)
   const queryClient = useQueryClient()
   const [previewTime, setPreviewTime] = useState<number | null>(null)
+  // The output device's rate can change (different DAC, new Windows format):
+  // look again whenever the track changes.
+  const currentId = player.current?.id
+  const outputRate = useMemo(() => {
+    void currentId
+    return readOutputSampleRate()
+  }, [currentId])
 
   const sliderValue = previewTime ?? player.currentTime
   const progressMax = Math.max(1, player.duration)
@@ -85,6 +93,13 @@ export function PlayerBar(): React.JSX.Element {
     })
   }
 
+  // Buffering counts as playing: the button then pauses, matching toggle().
+  const busy = player.status === 'playing' || player.status === 'loading'
+
+  const quality = player.current ? audioQuality(player.current) : null
+  // Source rate above what the output runs at: it is converted down.
+  const srcRate = player.current?.sampleRate ?? 0
+  const downsampled = Boolean(quality?.hires && outputRate > 0 && srcRate > outputRate)
   const repeatLabel =
     player.repeat === 'off' ? 'Repeat: off' : player.repeat === 'one' ? 'Repeat: one' : 'Repeat: all'
 
@@ -115,6 +130,27 @@ export function PlayerBar(): React.JSX.Element {
           >
             {player.current?.artist ?? 'Pick a track to begin'}
           </button>
+          {quality && (
+            <div
+              className={cn(
+                'mt-0.5 flex w-fit items-center gap-1 rounded px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide',
+                quality.hires ? 'bg-accent/15 text-accent' : 'bg-surface-2 text-ink-3'
+              )}
+              title={
+                downsampled
+                  ? `The file is decoded losslessly, but Windows is set to ${outputRate / 1000} kHz for this output device, so it is converted to ${outputRate / 1000} kHz before it reaches your sound card. To play ${srcRate / 1000} kHz natively: Windows Sound settings > your device > Properties > Advanced > Default Format, choose a ${player.current?.bitDepth ?? 24}-bit / ${srcRate / 1000} kHz (or higher) format, then restart Oli.`
+                  : quality.hires
+                    ? `Hi-Res source, decoded losslessly${outputRate ? ` and output at ${outputRate / 1000} kHz` : ''}.`
+                    : 'Source quality'
+              }
+            >
+              {quality.hires && <span>Hi-Res</span>}
+              <span className="normal-case">{quality.label}</span>
+              {downsampled && (
+                <span className="normal-case text-amber-400">→ {outputRate / 1000} kHz out</span>
+              )}
+            </div>
+          )}
         </div>
         {player.current && (
           <Tip label={player.current.favorite ? 'Remove from favorites' : 'Add to favorites'}>
@@ -154,13 +190,13 @@ export function PlayerBar(): React.JSX.Element {
               <SkipBack size={20} />
             </button>
           </Tip>
-          <Tip label={player.status === 'playing' ? 'Pause' : 'Play'}>
+          <Tip label={busy ? 'Pause' : 'Play'}>
             <button
               className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white transition-transform hover:scale-105"
               onClick={player.toggle}
-              aria-label={player.status === 'playing' ? 'Pause' : 'Play'}
+              aria-label={busy ? 'Pause' : 'Play'}
             >
-              {player.status === 'playing' ? (
+              {busy ? (
                 <Pause size={20} className="fill-current" />
               ) : (
                 <Play size={20} className="ml-0.5 fill-current" />

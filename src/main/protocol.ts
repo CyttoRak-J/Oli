@@ -1,9 +1,11 @@
-import { protocol } from 'electron'
+import { net, protocol } from 'electron'
+import { pathToFileURL } from 'node:url'
 import * as fs from 'node:fs'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
 import { Readable } from 'node:stream'
 import { getLogger } from './services/logger'
+import { playablePath } from './util/longPath'
 import type { ArtworkService } from './services/artwork'
 
 export const ART_SCHEME = 'cyttos-art'
@@ -110,31 +112,16 @@ function sniffImageMime(file: string): string {
   }
 }
 
-const AUDIO_MIME: Record<string, string> = {
-  '.flac': 'audio/flac',
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.aiff': 'audio/aiff',
-  '.aif': 'audio/aiff',
-  '.m4a': 'audio/mp4',
-  '.aac': 'audio/aac',
-  '.mp4': 'audio/mp4',
-  '.ogg': 'audio/ogg',
-  '.oga': 'audio/ogg',
-  '.opus': 'audio/ogg',
-  '.wma': 'audio/x-ms-wma',
-  '.webm': 'audio/webm',
-  '.mp2': 'audio/mpeg',
-  '.ape': 'audio/x-ape',
-  '.wv': 'audio/x-wavpack',
-  '.mka': 'audio/x-matroska'
-}
-
-function audioMime(file: string): string {
-  return AUDIO_MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream'
-}
-
-/** Serves local files (music) over cyttos-local://file/<encoded absolute path>, with Range support. */
+/**
+ * Serves local files (music) over cyttos-local://file/<encoded absolute path>.
+ *
+ * The bytes come from Chromium's own file loader (net.fetch on a file:// URL
+ * with the protocol handlers bypassed), which implements Range requests
+ * exactly the way the media pipeline expects. A hand-written Range handler
+ * here made seeking fail with "FFmpegDemuxer: data source error" (so a
+ * resume after pause or a click on the progress bar broke playback) and
+ * made Opus files unplayable.
+ */
 export function registerLocalProtocol(): void {
   protocol.handle(LOCAL_SCHEME, async (request) => {
     try {
@@ -143,48 +130,15 @@ export function registerLocalProtocol(): void {
       if (!file || !path.isAbsolute(file)) return new Response('Bad request', { status: 400 })
       const stat = await fsp.stat(file)
       if (!stat.isFile()) return new Response('Not found', { status: 404 })
-      const total = stat.size
-      const range = request.headers.get('range')
-
-      if (range && /^bytes=\d*-\d*$/.test(range.trim())) {
-        const [startRaw, endRaw] = range.trim().slice(6).split('-')
-        let start = startRaw === '' ? 0 : parseInt(startRaw, 10)
-        let end = endRaw === '' ? total - 1 : parseInt(endRaw, 10)
-        if (startRaw === '' && endRaw !== '') {
-          start = Math.max(0, total - parseInt(endRaw, 10))
-          end = total - 1
-        }
-        if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
-          return new Response('Range Not Satisfiable', {
-            status: 416,
-            headers: { 'Content-Range': `bytes */${total}` }
-          })
-        }
-        end = Math.min(end, total - 1)
-        const stream = Readable.toWeb(fs.createReadStream(file, { start, end }))
-        return new Response(stream as ReadableStream, {
-          status: 206,
-          headers: {
-            'Content-Range': `bytes ${start}-${end}/${total}`,
-            'Accept-Ranges': 'bytes',
-            'Content-Length': String(end - start + 1),
-            'Content-Type': audioMime(file)
-          }
-        })
-      }
-
-      const stream = Readable.toWeb(fs.createReadStream(file))
-      return new Response(stream as ReadableStream, {
-        status: 200,
-        headers: {
-          'Accept-Ranges': 'bytes',
-          'Content-Length': String(total),
-          'Content-Type': audioMime(file)
-        }
+      // Very long paths (> Windows MAX_PATH) are served from a short-path copy.
+      const readable = await playablePath(file)
+      return await net.fetch(pathToFileURL(readable).toString(), {
+        headers: request.headers,
+        bypassCustomProtocolHandlers: true
       })
     } catch (err) {
       getLogger().debug('cyttos-local handler error', err)
-      return new Response('Bad request', { status: 400 })
+      return new Response('Not found', { status: 404 })
     }
   })
 }

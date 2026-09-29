@@ -13,7 +13,7 @@ import {
   EyeOff,
   X
 } from 'lucide-react'
-import type { AppSettings, ScanProgress, ThemeMode, RepeatMode } from '@shared/types'
+import type { AppSettings, ScanProgress, ThemeMode, RepeatMode, YtEngineStatus } from '@shared/types'
 import { useSettings } from '../store/settings'
 import {
   addLibraryFolder,
@@ -27,6 +27,9 @@ import {
   restoreBackup,
   createBackup,
   checkForUpdates,
+  checkYtEngine,
+  getYtEngineStatus,
+  installYtEngine,
   isProviderConfigured,
   on
 } from '../lib/ipc'
@@ -34,6 +37,7 @@ import { formatCount, formatFileSize } from '../lib/format'
 import { IPC } from '@shared/ipc'
 import { cn } from '../components/cn'
 import { ThemedSelect } from '../components/ThemedSelect'
+import { usePlayer } from '../store/player'
 
 export function Settings(): React.JSX.Element {
   const store = useSettings()
@@ -46,6 +50,7 @@ export function Settings(): React.JSX.Element {
   const acoustidKeyRef = useRef<HTMLInputElement>(null)
 
   const appInfo = useQuery({ queryKey: ['app-info'], queryFn: getAppInfo })
+  const queryClient = useQueryClient()
 
   if (!s) return <div className="p-6 text-[13px] text-ink-3">Loading settings…</div>
 
@@ -62,6 +67,7 @@ export function Settings(): React.JSX.Element {
     })
     setSavedKeys(true)
     setTimeout(() => setSavedKeys(false), 1500)
+    void queryClient.invalidateQueries({ queryKey: ['providers'] })
   }
 
   return (
@@ -92,7 +98,6 @@ export function Settings(): React.JSX.Element {
                 value={s.accentColor ?? '#7c3aed'}
                 onChange={(e) => set({ accentColor: e.target.value })}
               />
-              <Toggle checked={s.accentFromArtwork} onChange={(v) => set({ accentFromArtwork: v })} label="From artwork" />
             </div>
           </Row>
           <Row label="Reduce motion">
@@ -112,9 +117,6 @@ export function Settings(): React.JSX.Element {
               ]}
             />
           </Row>
-          <Row label="Crossfade (seconds)">
-            <NumberInput value={s.crossfadeSeconds} min={0} max={12} step={0.5} onChange={(v) => set({ crossfadeSeconds: v })} />
-          </Row>
           <Row label="Playback speed">
             <NumberInput value={s.playbackSpeed} min={0.5} max={2} step={0.05} onChange={(v) => set({ playbackSpeed: v })} />
           </Row>
@@ -122,12 +124,22 @@ export function Settings(): React.JSX.Element {
             <Toggle checked={s.preservePitch} onChange={(v) => set({ preservePitch: v })} />
           </Row>
           <Row label="Shuffle default">
-            <Toggle checked={s.shuffle} onChange={(v) => set({ shuffle: v })} />
+            <Toggle
+              checked={s.shuffle}
+              onChange={(v) => {
+                // Same setting the player's shuffle button uses: keep them in sync.
+                usePlayer.setState({ shuffle: v })
+                set({ shuffle: v })
+              }}
+            />
           </Row>
           <Row label="Repeat default">
             <ThemedSelect
               value={s.repeat}
-              onChange={(v) => set({ repeat: v as RepeatMode })}
+              onChange={(v) => {
+                usePlayer.setState({ repeat: v as RepeatMode })
+                set({ repeat: v as RepeatMode })
+              }}
               options={[
                 ['off', 'Off'],
                 ['queue', 'Queue'],
@@ -145,6 +157,15 @@ export function Settings(): React.JSX.Element {
           <ToggleRow label="Close to tray" checked={s.closeToTray} onChange={(v) => set({ closeToTray: v })} />
           <ToggleRow label="Show tray icon" checked={s.showTrayIcon} onChange={(v) => set({ showTrayIcon: v })} />
           <ToggleRow label="System media keys" checked={s.mediaKeysEnabled} onChange={(v) => set({ mediaKeysEnabled: v })} />
+          <div className="flex items-center justify-between py-2">
+            <span className="text-[12.5px] text-ink-1">Keyboard shortcuts</span>
+            <button
+              className="rounded-lg border border-surface-4 bg-surface-2 px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-accent"
+              onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '?' }))}
+            >
+              View shortcuts (or press ?)
+            </button>
+          </div>
           <ToggleRow label="Taskbar progress" checked={s.taskbarProgressEnabled} onChange={(v) => set({ taskbarProgressEnabled: v })} />
           <ToggleRow label="Desktop notifications" checked={s.notificationsEnabled} onChange={(v) => set({ notificationsEnabled: v })} />
           <ToggleRow label="Online lyrics" checked={s.lyricsOnline === 'enabled'} onChange={(v) => set({ lyricsOnline: v ? 'enabled' : 'disabled' })} />
@@ -236,6 +257,10 @@ export function Settings(): React.JSX.Element {
           </div>
         </Section>
 
+        <Section title="YouTube engine">
+          <YtEngineSection />
+        </Section>
+
         <Section title="Backup & restore">
           <BackupSection />
         </Section>
@@ -260,7 +285,8 @@ export function Settings(): React.JSX.Element {
   )
 }
 
-function ProviderStatus(): React.JSX.Element {  const providers = useQuery({ queryKey: ['providers'], queryFn: () => isProviderConfigured() })
+function ProviderStatus(): React.JSX.Element {
+  const providers = useQuery({ queryKey: ['providers'], queryFn: () => isProviderConfigured() })
   const data = providers.data
   if (!data) return <span className="text-[11.5px] text-ink-3">checking…</span>
   const set = new Set<string>()
@@ -319,7 +345,13 @@ function LibrarySection(): React.JSX.Element {
     }
   }
 
-  const doRemove = async (id: string): Promise<void> => {
+  const doRemove = async (id: string, path: string): Promise<void> => {
+    if (
+      !window.confirm(
+        `Remove "${path}" from the library?\n\nIts songs disappear from the library (files on disk are not touched).`
+      )
+    )
+      return
     await removeLibraryFolder(id)
     void queryClient.invalidateQueries({ queryKey: ['library-folders'] })
   }
@@ -351,7 +383,7 @@ function LibrarySection(): React.JSX.Element {
       ) : !folders || folders.length === 0 ? (
         <div className="flex items-center gap-2 text-[12.5px] text-ink-3">
           <FolderOpen size={14} />
-          No folders added yet. Click “Add folders” and pick your music directory.
+          No folders added yet. Click "Add folders" and pick your music directory.
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -372,7 +404,7 @@ function LibrarySection(): React.JSX.Element {
               <button
                 className="shrink-0 rounded-lg border border-surface-4 p-1.5 text-ink-3 transition-colors hover:border-red-400 hover:text-red-400"
                 title="Remove folder"
-                onClick={() => void doRemove(folder.id)}
+                onClick={() => void doRemove(folder.id, folder.path)}
               >
                 <Trash2 size={13} />
               </button>
@@ -501,8 +533,10 @@ function NumberInput({
       max={max}
       step={step}
       onChange={(e) => {
+        // An emptied field reads as 0; out-of-range values were saved as-is.
+        if (e.target.value.trim() === '') return
         const v = Number(e.target.value)
-        if (!Number.isNaN(v)) onChange(v)
+        if (!Number.isNaN(v)) onChange(Math.min(max, Math.max(min, v)))
       }}
     />
   )
@@ -524,7 +558,103 @@ const SecretInput = forwardRef<HTMLInputElement, {
   )
 })
 
+function YtEngineSection(): React.JSX.Element {
+  const store = useSettings()
+  const queryClient = useQueryClient()
+  const info = useQuery({ queryKey: ['yt-engine'], queryFn: getYtEngineStatus })
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  // The main process pushes every state change (checking, installing, done).
+  useEffect(
+    () => on<YtEngineStatus>(IPC.onYtEngineStatus, (st) => queryClient.setQueryData(['yt-engine'], st)),
+    [queryClient]
+  )
+
+  const run = async (fn: () => Promise<YtEngineStatus>): Promise<void> => {
+    setBusy(true)
+    setMsg('')
+    try {
+      const st = await fn()
+      queryClient.setQueryData(['yt-engine'], st)
+      setMsg(
+        st.message ??
+          (st.state === 'ok'
+            ? `yt-dlp ${st.version ?? ''} is up to date.`
+            : st.state === 'update-available'
+              ? `A newer version is available (${st.latest}).`
+              : '')
+      )
+    } catch {
+      setMsg('That did not work. Check your internet connection.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const v = info.data
+  const sourceText =
+    v?.source === 'user'
+      ? 'downloaded by Oli'
+      : v?.source === 'bundled'
+        ? 'shipped with Oli'
+        : v?.source === 'system'
+          ? 'installed on this PC'
+          : ''
+  const working = busy || v?.state === 'installing'
+  const needsInstall =
+    v?.state === 'missing' || v?.state === 'broken' || v?.state === 'update-available' || v?.state === 'failed'
+  return (
+    <>
+      <Row label="yt-dlp (streams and downloads)">
+        <div className="flex items-center gap-2">
+          <span className="text-[12.5px] text-ink-2">
+            {info.isLoading
+              ? '…'
+              : v?.state === 'missing'
+                ? 'not found'
+                : v?.state === 'broken'
+                  ? 'does not run'
+                  : v?.version
+                    ? `version ${v.version}${sourceText ? ` (${sourceText})` : ''}`
+                    : '…'}
+          </span>
+          <button
+            className="flex items-center gap-1.5 rounded-lg border border-surface-4 px-3 py-1.5 text-[12px] text-ink-2 hover:border-accent disabled:opacity-50"
+            disabled={working}
+            onClick={() => void run(checkYtEngine)}
+          >
+            {working ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            Check for update
+          </button>
+          {needsInstall && (
+            <button
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              disabled={working}
+              onClick={() => void run(installYtEngine)}
+            >
+              {v?.state === 'update-available' ? 'Update now' : v?.state === 'failed' ? 'Try again' : 'Install now'}
+            </button>
+          )}
+        </div>
+      </Row>
+      <ToggleRow
+        label="Update the YouTube engine automatically"
+        checked={store.settings?.ytdlpAutoUpdate ?? true}
+        onChange={(on) => void store.set({ ytdlpAutoUpdate: on })}
+      />
+      <div className="text-[12px] text-ink-3">
+        YouTube changes often. When this is on, Oli installs a missing or newer yt-dlp itself from the official
+        yt-dlp releases on GitHub (checked against the published SHA-256 before it is used) and checks again every
+        12 hours. If songs stop loading or downloads fail with &quot;403&quot;, use Check for update.
+        {msg && <span className="ml-1 text-accent">{msg}</span>}
+      </div>
+    </>
+  )
+}
+
 function BackupSection(): React.JSX.Element {
+  const queryClient = useQueryClient()
   const [busy, setBusy] = useState<string | null>(null)
   const [count, setCount] = useState<number | null>(null)
   const [msg, setMsg] = useState('')
@@ -535,18 +665,36 @@ function BackupSection(): React.JSX.Element {
 
   const doCreate = async (): Promise<void> => {
     setBusy('create')
-    await createBackup()
-    setBusy(null)
+    let ok = false
+    try {
+      ok = Boolean(await createBackup())
+    } catch {
+      ok = false
+    } finally {
+      setBusy(null)
+    }
     void listBackups().then((l) => setCount(l.length))
-    setMsg('Backup created')
+    setMsg(ok ? 'Backup created' : 'Backup failed')
     setTimeout(() => setMsg(''), 2000)
   }
 
   const doRestore = async (): Promise<void> => {
+    if (!window.confirm('Replace your current library with a backup file? Current data will be overwritten.')) return
     setBusy('restore')
-    const ok = await restoreBackup()
-    setBusy(null)
-    setMsg(ok ? 'Restored (restart may be needed)' : 'Restore failed')
+    let ok = false
+    try {
+      ok = await restoreBackup()
+    } catch {
+      ok = false
+    } finally {
+      setBusy(null)
+    }
+    if (ok) {
+      // Everything on screen came from the old database.
+      void useSettings.getState().load()
+      void queryClient.invalidateQueries()
+    }
+    setMsg(ok ? 'Restored' : 'Restore cancelled or failed')
     setTimeout(() => setMsg(''), 3000)
   }
 
@@ -568,7 +716,7 @@ function BackupSection(): React.JSX.Element {
             onClick={() => void doRestore()}
           >
             {busy === 'restore' ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-            Restore latest
+            Restore from file…
           </button>
         </div>
       </Row>

@@ -10,6 +10,35 @@ export function formatDuration(seconds: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+/**
+ * Short audio-quality description of a track for the player badge, e.g.
+ * "FLAC 24-bit / 96 kHz". `hires` is true above CD quality (more than
+ * 16 bits or above 44.1 kHz) for lossless formats.
+ */
+export function audioQuality(t: {
+  format?: string | null
+  codec?: string | null
+  bitDepth?: number | null
+  sampleRate?: number | null
+  bitrate?: number | null
+}): { label: string; hires: boolean } | null {
+  const name = (t.format || t.codec || '').toUpperCase()
+  if (!name) return null
+  const lossless = /FLAC|ALAC|WAV|AIFF?|APE|WV|WAVPACK|DSD/.test(name)
+  const khz =
+    t.sampleRate && t.sampleRate > 0
+      ? `${Number((t.sampleRate / 1000).toFixed(1))} kHz`
+      : null
+  const bits = t.bitDepth && t.bitDepth > 0 ? `${t.bitDepth}-bit` : null
+  const hires = lossless && ((t.bitDepth ?? 16) > 16 || (t.sampleRate ?? 44100) > 44100)
+  const detail = lossless
+    ? [bits, khz].filter(Boolean).join(' / ')
+    : t.bitrate && t.bitrate > 0
+      ? `${Math.round(t.bitrate / 1000)} kbps`
+      : ''
+  return { label: detail ? `${name} ${detail}` : name, hires }
+}
+
 export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -59,5 +88,7 @@ export function initialsOf(name: string): string {
 }
 
 export function clamp(value: number, min: number, max: number): number {
+  // NaN would otherwise pass through (and e.g. audio.volume = NaN throws).
+  if (Number.isNaN(value)) return min
   return Math.min(max, Math.max(min, value))
 }
