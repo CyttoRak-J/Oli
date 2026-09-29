@@ -40,5 +40,12 @@ What I want next:
 - Version 1.1.0. Windows installer and macOS disk images are built by GitHub Actions when a `v*` tag is pushed
   (`.github/workflows/build.yml`) and published as a GitHub Release with `SHA256SUMS.txt`.
 - The macOS build is ad-hoc signed (`scripts/adhoc-sign.cjs`) and has **not** been run on a real Mac.
-- Android is **not built**. The plan and open questions live in `ANDROID_PLAN.md` once it exists.
+- Android alpha 0.1.0: a Capacitor app reusing the UI (`android/`, `capacitor.config.ts`, `vite.android.config.ts`, backend in
+  `src/renderer/src/platform/webBackend.ts`). A tag `android-v*` builds `Oli-<version>-android.apk` with `.github/workflows/android.yml` and publishes a
+  pre-release (first one: `android-v0.1.0`, signature verified by apksigner in CI). It has Internet Archive search/download, the phone layout, settings; it has
+  NOT been run on a real phone; no phone-music scan, background playback, playlists persistence or YouTube yet. Plan, status table and open decisions
+  (native rewrite vs Capacitor, YouTube in Android, real signing key) are in `ANDROID_PLAN.md`.
+- After adding npm packages, check `node_modules/electron/dist` still exists (newer npm skips install scripts); if not, run `node node_modules/electron/install.js`.
+- Test-window trick that works here: the browser pane cannot open local pages (and Chromium blocks port 5060); serve `out/renderer-android` on port 8765 and open it
+  in a throwaway Electron window without the desktop preload (`window.cytto` is then installed by the web backend), driven over the debug port.
 - Open items are listed in the "Not verified / open ideas" section of `HANDOFF.md`.

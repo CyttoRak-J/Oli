@@ -70,11 +70,13 @@ Checks at the end of the bug-fix session: typecheck, lint and build clean; **76 
 
 ## GitHub, releases and Android (2026-09-29)
 - Published to https://github.com/CyttoRak-J/Oli as a new commit on top of the existing `main` (old history and tags `v1.0.1`, `v1.0.2`,
-  `Music` kept). The user's own icons, README, LICENSE and docs site were kept and updated. Version is now **1.1.0**.
+  `Music` kept). The user's own icons, README, LICENSE and docs site were kept and updated. Version is now **1.1.0**. Released as tag `v1.1.0` (installer hash re-checked after download: matches).
 - `.github/workflows/build.yml`: tag `v*` builds Windows (nsis) + macOS (dmg/zip, x64 + arm64, ad-hoc signed by `scripts/adhoc-sign.cjs`) and
   publishes a release with `SHA256SUMS.txt` (notes in `.github/release-notes.md`). First run (tag v1.1.0, 2026-09-29) succeeded: Windows lint+tests+installer, macOS x64+arm64 dmg/zip with `codesign --verify` OK, release published with 5 files + SHA256SUMS. Windows installer hash not re-checked after upload; macOS never launched on a real Mac.
-- Android: not built. The user asked whether a full native app can have YouTube and Internet Archive; answer given in chat (see
-  `ANDROID_PLAN.md`). Waiting for the user's choice of approach before any Android code.
+- Android alpha (Capacitor, reuses the UI): built by `.github/workflows/android.yml` on tag `android-v*`; `android-v0.1.0` produced
+  `Oli-0.1.0-android.apk` (3.6 MB, apksigner verify OK in CI, checksum matches, pre-release published). Phone layout + Internet Archive
+  search/download + songs from downloads work in a phone-size test window; NOT run on a real phone. Details, status table and open decisions:
+  `ANDROID_PLAN.md`. Signed with a public alpha key (`android/keystore`).
 - To continue in a new chat, paste the block in `CONTINUE_PROMPT.md`.
 
 ## Not verified / open ideas

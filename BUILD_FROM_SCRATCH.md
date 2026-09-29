@@ -162,7 +162,9 @@ app this does not matter; for the existing library it does (see the legacy migra
   build/icon.png tray-16.png tray-32.png tray-prev.png tray-pause.png tray-next.png license.txt
   scripts/fetch-yt-dlp.mjs adhoc-sign.cjs icon-gen.mjs electron-icon-main.cjs
   .github/workflows/build.yml  .github/release-notes.md
-  README.md  LICENSE  CONTINUE_PROMPT.md  docs/ (GitHub Pages help site: index faq troubleshooting support .html + style.css)
+  README.md  LICENSE  CONTINUE_PROMPT.md  ANDROID_PLAN.md  capacitor.config.ts  vite.android.config.ts  android/ (Capacitor Android project)
+  .github/workflows/android.yml  .github/android-release-notes.md
+  docs/ (GitHub Pages help site: index faq troubleshooting support .html + style.css)
   src/
     shared/   constants.ts  ipc.ts  types.ts
     preload/  index.ts
@@ -234,9 +236,15 @@ Line endings: **LF everywhere**. Set `git config core.autocrlf false`.
     "build:win:dir": "npm run typecheck && npm run build && electron-builder --win --dir",
     "build:mac": "npm run typecheck && npm run build && electron-builder --mac",
     "build:mac:dir": "npm run typecheck && npm run build && electron-builder --mac --dir",
-    "dist": "npm run build:win"
+    "dist": "npm run build:win",
+    "build:android-web": "vite build -c vite.android.config.ts",
+    "android:sync": "npm run build:android-web && cap sync android",
+    "android:apk": "npm run android:sync && cd android && gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.3",
     "@tanstack/react-query": "^5.101.4",
     "clsx": "^2.1.1",
     "framer-motion": "^13.0.0",
@@ -251,6 +259,7 @@ Line endings: **LF everywhere**. Set `git config core.autocrlf false`.
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
     "@eslint/js": "^9.39.0",
     "@radix-ui/react-checkbox": "^1.2.6",
     "@radix-ui/react-context-menu": "^2.2.18",
@@ -388,7 +397,7 @@ export default defineConfig({
       "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src/main", "src/preload", "src/shared", "electron.vite.config.ts"]
+  "include": ["src/main", "src/preload", "src/shared", "electron.vite.config.ts", "vite.android.config.ts", "capacitor.config.ts"]
 }
 ```
 
@@ -419,7 +428,7 @@ import globals from 'globals'
 import eslintConfigPrettier from 'eslint-config-prettier'
 
 export default tseslint.config(
-  { ignores: ['out', 'dist', 'node_modules', '**/*.d.ts'] },
+  { ignores: ['out', 'dist', 'node_modules', 'android', '**/*.d.ts'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -3405,220 +3414,30 @@ everything else (images, spectrograms, torrents, XML) is dropped from the audio 
 ```ts
 // src/main/services/archive.ts
 import { getLogger } from './logger'
-import type {
-  ArchiveFile,
-  ArchiveHit,
-  ArchiveImage,
-  ArchiveItem,
-  ArchiveSearchResult
-} from '@shared/types'
+import {
+  ARCHIVE_API,
+  ARCHIVE_ITEM_CACHE_MS,
+  ARCHIVE_MAX_COVER_BYTES,
+  ARCHIVE_TIMEOUT_MS,
+  ARCHIVE_USER_AGENT,
+  buildDownloadUrl,
+  buildSearchUrl,
+  isValidIdentifier,
+  parseHits,
+  parseItem,
+  pickCover
+} from '@shared/archiveCore'
+import type { ArchiveItem, ArchiveSearchResult } from '@shared/types'
 
-const API = 'https://archive.org'
-const USER_AGENT = 'Oli/1.0 (desktop music player; https://archive.org/services/docs/api/)'
-const TIMEOUT_MS = 15_000
-const ITEM_CACHE_MS = 10 * 60_000
-const PAGE_SIZE = 25
-const MAX_COVER_BYTES = 8 * 1024 * 1024
-/** archive.org format labels of real pictures (thumbnails and spectrograms are other labels). */
-const IMAGE_FORMATS = ['JPEG', 'PNG']
-
-/** archive.org item format labels that hold lossless audio, best first. */
-const LOSSLESS_FORMATS = ['24bit Flac', 'Flac', 'WAVE', 'AIFF', 'Apple Lossless Audio']
-/** Lossy formats worth listing (the rest of an item's files are images, text, etc.). */
-const LOSSY_FORMATS = ['VBR MP3', '128Kbps MP3', '64Kbps MP3', 'MP3', 'Ogg Vorbis', 'Opus', 'M4A']
-
-const LABELS: Record<string, string> = {
-  '24bit Flac': '24-bit FLAC',
-  Flac: 'FLAC',
-  WAVE: 'WAV',
-  AIFF: 'AIFF',
-  'Apple Lossless Audio': 'ALAC',
-  'VBR MP3': 'MP3 (VBR)',
-  '128Kbps MP3': 'MP3 128k',
-  '64Kbps MP3': 'MP3 64k',
-  MP3: 'MP3',
-  'Ogg Vorbis': 'Ogg Vorbis',
-  Opus: 'Opus',
-  M4A: 'AAC'
-}
-
-/** archive.org identifiers are letters, digits, dot, dash and underscore. */
-export function isValidIdentifier(id: unknown): id is string {
-  return typeof id === 'string' && id.length <= 200 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)
-}
-
-export function isLosslessFormat(format: string): boolean {
-  return LOSSLESS_FORMATS.includes(format)
-}
-
-/** Sort key: lossless first (best format first), then lossy. Unknown formats are dropped. */
-export function formatRank(format: string): number {
-  const i = LOSSLESS_FORMATS.indexOf(format)
-  if (i >= 0) return i
-  const j = LOSSY_FORMATS.indexOf(format)
-  return j >= 0 ? LOSSLESS_FORMATS.length + j : -1
-}
-
-/** Escape user text for archive.org's Lucene query (strip syntax characters). */
-export function cleanQuery(text: string): string {
-  return text.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-export function buildSearchUrl(text: string, page: number, losslessOnly: boolean): string | null {
-  const q = cleanQuery(text)
-  if (!q) return null
-  let query = `(${q}) AND mediatype:audio`
-  if (losslessOnly) {
-    query += ` AND format:(${LOSSLESS_FORMATS.map((f) => (f.includes(' ') ? `"${f}"` : f)).join(' OR ')})`
-  }
-  const params = new URLSearchParams()
-  params.set('q', query)
-  for (const f of ['identifier', 'title', 'creator', 'year', 'downloads', 'licenseurl']) {
-    params.append('fl[]', f)
-  }
-  params.set('rows', String(PAGE_SIZE))
-  params.set('page', String(Math.max(1, Math.floor(page) || 1)))
-  params.set('output', 'json')
-  params.append('sort[]', 'downloads desc')
-  return `${API}/advancedsearch.php?${params.toString()}`
-}
-
-/** Direct download URL for a file of an item (each path segment encoded). */
-export function buildDownloadUrl(identifier: string, fileName: string): string {
-  return `${API}/download/${encodeURIComponent(identifier)}/${fileName
-    .split('/')
-    .map(encodeURIComponent)
-    .join('/')}`
-}
-
-function firstString(v: unknown): string | null {
-  if (Array.isArray(v)) v = v[0]
-  if (typeof v !== 'string') return null
-  const t = v.trim()
-  return t ? t : null
-}
-
-function joinStrings(v: unknown): string | null {
-  if (Array.isArray(v)) {
-    const parts = v.filter((x): x is string => typeof x === 'string' && x.trim() !== '')
-    if (parts.length === 0) return null
-    return parts.length > 3 ? `${parts.slice(0, 3).join(', ')} and others` : parts.join(', ')
-  }
-  return firstString(v)
-}
-
-function parseNumber(v: unknown): number | null {
-  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number.parseFloat(v) : NaN
-  return Number.isFinite(n) ? n : null
-}
-
-/** archive.org "length" is either seconds ("10406.5") or "m:ss". */
-export function parseLength(v: unknown): number | null {
-  if (typeof v === 'string' && v.includes(':')) {
-    const parts = v.split(':').map((p) => Number.parseFloat(p))
-    if (parts.some((p) => !Number.isFinite(p))) return null
-    return parts.reduce((acc, p) => acc * 60 + p, 0)
-  }
-  return parseNumber(v)
-}
-
-export function parseHits(body: unknown): { hits: ArchiveHit[]; total: number } {
-  const resp = (body as { response?: { numFound?: number; docs?: Array<Record<string, unknown>> } })
-    ?.response
-  const docs = Array.isArray(resp?.docs) ? resp.docs : []
-  const hits: ArchiveHit[] = []
-  for (const d of docs) {
-    const identifier = d.identifier
-    if (!isValidIdentifier(identifier)) continue
-    hits.push({
-      identifier,
-      title: firstString(d.title) ?? identifier,
-      creator: joinStrings(d.creator),
-      year: parseNumber(d.year),
-      downloads: parseNumber(d.downloads) ?? 0,
-      licenseUrl: firstString(d.licenseurl)
-    })
-  }
-  return { hits, total: Number(resp?.numFound) || hits.length }
-}
-
-export function parseItem(identifier: string, body: unknown): ArchiveItem {
-  const b = body as {
-    metadata?: Record<string, unknown>
-    files?: Array<Record<string, unknown>>
-  }
-  const meta = b?.metadata ?? {}
-  const files: ArchiveFile[] = []
-  for (const f of Array.isArray(b?.files) ? b.files : []) {
-    const name = typeof f.name === 'string' ? f.name : ''
-    const format = typeof f.format === 'string' ? f.format : ''
-    if (!name || formatRank(format) < 0) continue
-    files.push({
-      name,
-      format,
-      label: LABELS[format] ?? format,
-      lossless: isLosslessFormat(format),
-      size: parseNumber(f.size) ?? 0,
-      durationSec: parseLength(f.length),
-      track: firstString(f.track),
-      title: firstString(f.title),
-      artist: firstString(f.artist) ?? firstString(f.creator),
-      album: firstString(f.album),
-      genre: firstString(f.genre),
-      md5: firstString(f.md5)
-    })
-  }
-  const images: ArchiveImage[] = []
-  for (const f of Array.isArray(b?.files) ? b.files : []) {
-    const name = typeof f.name === 'string' ? f.name : ''
-    const format = typeof f.format === 'string' ? f.format : ''
-    const size = parseNumber(f.size) ?? 0
-    if (name && IMAGE_FORMATS.includes(format) && size > 0 && size <= MAX_COVER_BYTES) images.push({ name, size })
-  }
-  files.sort(
-    (a, z) =>
-      formatRank(a.format) - formatRank(z.format) ||
-      (Number.parseInt(a.track ?? '', 10) || 0) - (Number.parseInt(z.track ?? '', 10) || 0) ||
-      a.name.localeCompare(z.name, undefined, { numeric: true })
-  )
-  return {
-    identifier,
-    title: firstString(meta.title) ?? identifier,
-    creator: joinStrings(meta.creator),
-    date: firstString(meta.date) ?? firstString(meta.year),
-    licenseUrl: firstString(meta.licenseurl),
-    files,
-    images
-  }
-}
-
-function stemOf(name: string): string {
-  const base = name.split('/').pop() ?? name
-  const dot = base.lastIndexOf('.')
-  return (dot > 0 ? base.slice(0, dot) : base).toLowerCase()
-}
-
-/**
- * Best cover for one audio file: a picture named like the track, then one
- * named like cover art (cover/front/folder/artwork/album), then the largest
- * picture of the item. null when the item has no usable picture.
- */
-export function pickCover(images: ArchiveImage[], audioName: string): ArchiveImage | null {
-  if (images.length === 0) return null
-  const stem = stemOf(audioName)
-  return (
-    images.find((i) => stemOf(i.name) === stem) ??
-    images.find((i) => /(^|[^a-z])(cover|front|folder|artwork|album)([^a-z]|$)/i.test(stemOf(i.name))) ??
-    [...images].sort((a, z) => z.size - a.size)[0]
-  )
-}
+// The pure helpers live in shared/archiveCore.ts; re-exported so existing imports keep working.
+export * from '@shared/archiveCore'
 
 async function getJson(url: string): Promise<unknown> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), ARCHIVE_TIMEOUT_MS)
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      headers: { 'User-Agent': ARCHIVE_USER_AGENT, Accept: 'application/json' },
       signal: controller.signal
     })
     if (!res.ok) throw new Error(`archive.org answered HTTP ${res.status}`)
@@ -3659,9 +3478,9 @@ export class ArchiveService {
       return { identifier: String(identifier), title: '', creator: null, date: null, licenseUrl: null, files: [], images: [], error: 'Invalid item' }
     }
     const cached = this.items.get(identifier)
-    if (cached && Date.now() - cached.at < ITEM_CACHE_MS) return cached.item
+    if (cached && Date.now() - cached.at < ARCHIVE_ITEM_CACHE_MS) return cached.item
     try {
-      const body = await getJson(`${API}/metadata/${encodeURIComponent(identifier)}`)
+      const body = await getJson(`${ARCHIVE_API}/metadata/${encodeURIComponent(identifier)}`)
       const item = parseItem(identifier, body)
       this.items.set(identifier, { at: Date.now(), item })
       if (this.items.size > 50) this.items.delete(this.items.keys().next().value as string)
@@ -3680,15 +3499,15 @@ export class ArchiveService {
     const hit = this.covers.get(key)
     if (hit) return hit
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    const timer = setTimeout(() => controller.abort(), ARCHIVE_TIMEOUT_MS)
     try {
       const res = await fetch(buildDownloadUrl(item.identifier, pick.name), {
-        headers: { 'User-Agent': USER_AGENT },
+        headers: { 'User-Agent': ARCHIVE_USER_AGENT },
         signal: controller.signal
       })
       if (!res.ok) return null
       const data = Buffer.from(await res.arrayBuffer())
-      if (data.length === 0 || data.length > MAX_COVER_BYTES) return null
+      if (data.length === 0 || data.length > ARCHIVE_MAX_COVER_BYTES) return null
       this.covers.set(key, data)
       if (this.covers.size > 6) this.covers.delete(this.covers.keys().next().value as string)
       return data
@@ -4515,12 +4334,761 @@ Do this only after asking the user for the repository (`owner/repo`) and confirm
 5. **Verify the release**: `GET /repos/<owner>/<repo>/releases/tags/vX.Y.Z` lists the assets. Download the Windows installer and compare its SHA-256 with `SHA256SUMS.txt`.
 6. **Say plainly what is not verified**: macOS builds were only built and signature-checked (`codesign --verify`), never launched on a real Mac; nothing is notarized.
 
-## 20. Android (not built)
-The desktop app is Electron, which does not run on Android. Options that were considered (ask the user which one, see `ANDROID_PLAN.md` when it exists):
+## 20. Android (alpha built with Capacitor; see 20.1 for what exists)
+The desktop app is Electron, which does not run on Android. Options that were considered (ask the user which one; the reference took option A by default, see `ANDROID_PLAN.md`):
 - **Capacitor app reusing the React UI**: the screens are reused, but everything the Electron main process does (library scan, database, playback source, downloads, tag writing) must be re-implemented
   for Android (`window.cytto` becomes an adapter over Capacitor plugins). Internet Archive works with plain HTTP. YouTube needs a native plugin around a yt-dlp build for Android.
 - **Full native app (Kotlin, Jetpack Compose, Media3 player, Room database, MediaStore scanning)**: best experience, a complete rewrite.
 Either way: Internet Archive downloads are straightforward; YouTube downloading is possible with `youtubedl-android` (bundles yt-dlp, Python and ffmpeg) or NewPipeExtractor, but Google Play policy
 rejects apps that download YouTube content, so such an app is distributed as an APK on GitHub Releases, not through Play. The APK would be built by a GitHub Actions job (Temurin JDK 17 + Android SDK, `./gradlew assembleRelease`).
+
+### 20.1 What the reference Android alpha contains (Capacitor, reuses the React UI)
+- `capacitor.config.ts` (`appId` = the app id, `webDir: out/renderer-android`, `CapacitorHttp` enabled so `fetch()` to archive.org is native and not blocked by browser cross-origin rules),
+  `vite.android.config.ts` (web build of the same renderer into `out/renderer-android`, `base: './'`), scripts `build:android-web`, `android:sync` (web build + `cap sync android`).
+  Packages: `@capacitor/core`, `@capacitor/android`, `@capacitor/filesystem` (+ `@capacitor/cli` as a dev dependency). Capacitor 8 needs **JDK 21** and Node 22.
+- `android/` is the generated Gradle project (`npx cap add android`), committed. Changes made to it: `versionName "0.1.0"`, a `signingConfigs.release` that uses `android/keystore/oli-alpha.jks`
+  (public **alpha** key, password `oli-alpha-public`; testing only), launcher icons generated from the user's `build/icon.png` (legacy, round and adaptive foreground PNGs; background colour `#241A3D`).
+  `android/.gitignore` already ignores the synced web assets and the generated cordova-plugins folder; CI regenerates them with `cap sync`.
+- **The idea:** the screens call `window.cytto.invoke(channel, ...)`. On desktop the Electron preload provides it. `src/renderer/src/main.tsx` calls `installPlatform()` first; if `window.cytto` is missing it
+  loads `platform/webBackend.ts`, which answers every channel inside the web view (unsupported channels answer `null` and log a warning once, so every screen still opens). `lib/platform.ts` tells
+  the UI which shell it runs in (`desktop`, `android`, `web`); for the phone shell the app shows `MobileNav` (bottom navigation) and `MobilePlayerBar` (compact player), hides the title bar and sidebar, uses a
+  one-line-per-song table in `SongTable`, hides the folder picker on the Archive page, and `lib/media.ts` maps a saved file to `Capacitor.convertFileSrc(uri)`.
+- **Shared code:** the pure Internet Archive functions live in `src/shared/archiveCore.ts` (no Node imports) and are used by both `services/archive.ts` (desktop main process) and the web backend.
+- **Phone backend features so far:** settings (localStorage), Internet Archive search / item listing / downloads (`Filesystem.downloadFile` into `Directory.External`, progress events, size check only),
+  and a song list built from the downloaded files (artist/album/format/length from the archive metadata), with albums and artists derived from it. Not there: scanning the phone's music, playlists / favorites /
+  queue / history persistence, lyrics, YouTube, background playback service, md5/tags/cover art.
+- `android/` is excluded from eslint (`ignores`), and `tsconfig.node.json` includes `vite.android.config.ts` and `capacitor.config.ts`.
+
+`.github/workflows/android.yml` (verbatim). A tag `android-vX.Y.Z` builds `Oli-X.Y.Z-android.apk`, checks it with Android's own `apksigner verify`, writes `SHA256SUMS-android.txt`, and publishes a pre-release
+(re-running a tag replaces the release). `npm ci --ignore-scripts` is used because the web build needs neither the Electron binary nor yt-dlp.
+```yaml
+name: android
+
+# Builds the Android app (an installable APK) and, for an `android-v*` tag, publishes it as a GitHub pre-release.
+# The APK is signed with the ALPHA key in android/keystore (public on purpose, for testing only).
+# Before a real release: put your own keystore in GitHub secrets and change signingConfigs in android/app/build.gradle.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'android-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # Capacitor 8 needs JDK 21.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # The web build needs no Electron binary and no yt-dlp: skip their install scripts.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build the web UI and sync it into the Android project
+        run: npm run android:sync
+
+      - name: Build the APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      # Android's own verifier (from the SDK build-tools on the runner): fails the job if the signature is invalid.
+      - name: Verify the APK signature
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 24 android/app/build/outputs/apk/release/*.apk
+
+      - name: Name the APK and write its checksum
+        run: |
+          # Android has its own version: the tag (android-v0.1.0) or, for a manual run, versionName in build.gradle.
+          VERSION="${GITHUB_REF_NAME#android-v}"
+          if [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            VERSION=$(grep -oP 'versionName "\K[^"]+' android/app/build.gradle)
+          fi
+          mkdir -p out-apk
+          cp android/app/build/outputs/apk/release/*.apk "out-apk/Oli-${VERSION}-android.apk"
+          (cd out-apk && sha256sum *.apk | tee SHA256SUMS-android.txt)
+          ls -la out-apk
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: oli-android
+          path: out-apk/*
+          if-no-files-found: error
+
+  release:
+    name: Publish Android pre-release
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    needs: apk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: oli-android
+          path: artifacts
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Re-running a tag replaces the release (and its old files); the tag itself stays.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes
+          fi
+          gh release create "$TAG" artifacts/* \
+            --prerelease \
+            --title "Oli Android ${TAG#android-v} (alpha)" \
+            --notes-file .github/android-release-notes.md
+```
+
+`.github/android-release-notes.md` (verbatim):
+```md
+## Oli for Android (alpha)
+
+An early build of Oli for Android phones. **Install:** download `Oli-<version>-android.apk` to your phone, open it, and allow
+"Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
+
+### What works in this alpha
+- The same screens as the desktop app, with a phone layout (bottom navigation, compact player).
+- **Internet Archive:** search free lossless music, open an item, pick a format and tracks, download to the phone.
+  Downloaded files show up under **Songs** with their artist, album, format and length, and can be played.
+- Settings (theme, accent colour and more).
+
+### What is not there yet
+- Scanning music that is already on your phone, playlists, favorites, queue and history saving, lyrics.
+- YouTube search, playback and downloads.
+- Background playback with lock-screen controls (playback may stop when the screen turns off).
+- Checksum verification, tags and cover art for downloaded files (only the file size is checked).
+
+### Notes
+- The APK is signed with a public **alpha** key, so it is for testing. A later, properly signed build will not install over it: uninstall first.
+- Files are saved in the app's own storage (`Android/data/com.cyttos.oli/files/Oli/`), so they are removed when the app is uninstalled.
+- This build was produced by GitHub Actions and has **not** been run on a real phone by the author. Please open an issue with what you see.
+```
+
+The web backend (verbatim):
+```ts
+// src/renderer/src/platform/webBackend.ts
+/**
+ * Backend for platforms without the Electron main process (the Android app, or a plain browser).
+ *
+ * The screens talk to `window.cytto.invoke(channel, ...)`. On desktop the Electron main process answers;
+ * here this file answers instead, inside the web view. It implements what the Android app supports so far:
+ * settings, the Internet Archive (search, listing, downloads to the phone), and a small song list made of the
+ * files that were downloaded. Everything else answers with an empty result so every screen still opens.
+ *
+ * Phase status is tracked in ANDROID_PLAN.md.
+ */
+import { Directory, Filesystem } from '@capacitor/filesystem'
+import { DEFAULT_SETTINGS } from '@shared/constants'
+import {
+  ARCHIVE_ITEM_CACHE_MS,
+  ARCHIVE_TIMEOUT_MS,
+  buildDownloadUrl,
+  buildSearchUrl,
+  isValidIdentifier,
+  parseHits,
+  parseItem
+} from '@shared/archiveCore'
+import { IPC } from '@shared/ipc'
+import type {
+  Album,
+  Artist,
+  ArchiveFile,
+  ArchiveItem,
+  ArchiveSearchResult,
+  DownloadItem,
+  Track,
+  YtEngineStatus
+} from '@shared/types'
+
+type Handler = (...args: never[]) => unknown
+type Listener = (...args: unknown[]) => void
+
+const SETTINGS_KEY = 'oli.settings'
+const SONGS_KEY = 'oli.songs'
+const DOWNLOADS_KEY = 'oli.downloads'
+const APP_VERSION = '1.1.0'
+
+// ------------------------------------------------------------------ small helpers
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? (JSON.parse(raw) as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+function writeJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // storage full or blocked: keep working in memory
+  }
+}
+const uid = (): string => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+const slug = (s: string): string => s.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+/** File and folder names: same rules as the desktop app (no path characters, capped length). */
+const safeName = (s: string): string =>
+  s.replace(/[<>:"/\\|?*]/g, '_').replace(/\p{C}/gu, '_').trim().slice(0, 120) || 'download'
+
+// ------------------------------------------------------------------ events
+const listeners = new Map<string, Set<Listener>>()
+function emit(channel: string, ...args: unknown[]): void {
+  for (const fn of listeners.get(channel) ?? []) {
+    try {
+      fn(...args)
+    } catch {
+      // a broken listener must not stop the others
+    }
+  }
+}
+
+// ------------------------------------------------------------------ settings
+function currentSettings(): Record<string, unknown> {
+  return { ...DEFAULT_SETTINGS, ...readJson<Record<string, unknown>>(SETTINGS_KEY, {}) }
+}
+function setSettings(patch: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...readJson<Record<string, unknown>>(SETTINGS_KEY, {}), ...patch }
+  writeJson(SETTINGS_KEY, merged)
+  emit(IPC.onSettingsChanged, patch)
+  return currentSettings()
+}
+
+// ------------------------------------------------------------------ songs (files downloaded on this phone)
+let songs: Track[] = readJson<Track[]>(SONGS_KEY, [])
+
+function saveSongs(): void {
+  writeJson(SONGS_KEY, songs)
+  emit(IPC.onLibraryChanged, libraryStats())
+}
+
+function makeTrack(file: ArchiveFile, item: ArchiveItem, uri: string, size: number): Track {
+  const artist = file.artist ?? item.creator ?? 'Unknown Artist'
+  const album = file.album ?? item.title ?? 'Unknown Album'
+  const year = item.date ? Number.parseInt(item.date.slice(0, 4), 10) : NaN
+  const now = Date.now()
+  return {
+    id: `song:${uri}`,
+    title: file.title ?? file.name.replace(/\.[^.]+$/, '').replace(/_/g, ' '),
+    artist,
+    artistId: `artist:${slug(artist)}`,
+    albumArtist: item.creator ?? artist,
+    album,
+    albumId: `album:${slug(item.creator ?? '')}:${slug(album)}`,
+    genre: file.genre,
+    composer: null,
+    year: Number.isFinite(year) ? year : null,
+    releaseDate: item.date,
+    trackNo: Number.parseInt(file.track ?? '', 10) || null,
+    discNo: null,
+    isrc: null,
+    rating: null,
+    duration: file.durationSec ?? 0,
+    bitrate: null,
+    sampleRate: null,
+    bitDepth: file.format.startsWith('24bit') ? 24 : null,
+    channels: null,
+    codec: null,
+    format: file.label,
+    fileSize: size,
+    path: uri,
+    folderId: null,
+    libraryId: null,
+    hash: null,
+    replayGain: null,
+    replayGainAlbum: null,
+    lyrics: null,
+    hasEmbeddedArtwork: false,
+    addedAt: now,
+    modifiedAt: now,
+    lastPlayedAt: null,
+    playCount: 0,
+    favorite: false,
+    missing: false,
+    error: null
+  }
+}
+
+function group<T>(items: T[], keyOf: (t: T) => string | null): Map<string, T[]> {
+  const out = new Map<string, T[]>()
+  for (const it of items) {
+    const k = keyOf(it)
+    if (!k) continue
+    out.set(k, [...(out.get(k) ?? []), it])
+  }
+  return out
+}
+
+function albums(): Album[] {
+  return [...group(songs, (t) => t.albumId).entries()].map(([id, list]) => ({
+    id,
+    title: list[0].album,
+    artist: list[0].albumArtist || list[0].artist,
+    year: list[0].year,
+    genre: list[0].genre,
+    trackId: list[0].id,
+    trackCount: list.length,
+    totalDuration: list.reduce((s, t) => s + t.duration, 0),
+    favorite: false,
+    hasEmbeddedArtwork: false,
+    addedAt: Math.min(...list.map((t) => t.addedAt))
+  }))
+}
+
+function artists(): Artist[] {
+  return [...group(songs, (t) => t.artistId).entries()].map(([id, list]) => ({
+    id,
+    name: list[0].artist,
+    sortName: list[0].artist.toLowerCase(),
+    genre: list[0].genre,
+    biography: null,
+    favorite: false,
+    trackCount: list.length,
+    albumCount: new Set(list.map((t) => t.albumId)).size,
+    addedAt: Math.min(...list.map((t) => t.addedAt))
+  }))
+}
+
+function libraryStats(): Record<string, number> {
+  return {
+    folderCount: songs.length > 0 ? 1 : 0,
+    trackCount: songs.length,
+    albumCount: albums().length,
+    artistCount: artists().length,
+    playlistCount: 0,
+    favoriteCount: 0,
+    missingCount: 0,
+    totalDuration: songs.reduce((s, t) => s + t.duration, 0),
+    totalSize: songs.reduce((s, t) => s + (t.fileSize ?? 0), 0)
+  }
+}
+
+const SORT_KEYS: Record<string, (t: Track) => string | number> = {
+  title: (t) => t.title.toLowerCase(),
+  artist: (t) => t.artist.toLowerCase(),
+  album: (t) => t.album.toLowerCase(),
+  year: (t) => t.year ?? 0,
+  addedAt: (t) => t.addedAt,
+  lastPlayed: (t) => t.lastPlayedAt ?? 0,
+  playCount: (t) => t.playCount ?? 0,
+  duration: (t) => t.duration,
+  trackNo: (t) => t.trackNo ?? 0
+}
+
+function querySongs(q: Record<string, unknown> = {}): { tracks: Track[]; total: number } {
+  let list = [...songs]
+  const text = typeof q.search === 'string' ? q.search.trim().toLowerCase() : ''
+  if (text) list = list.filter((t) => `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(text))
+  if (typeof q.albumId === 'string') list = list.filter((t) => t.albumId === q.albumId)
+  if (typeof q.artistId === 'string') list = list.filter((t) => t.artistId === q.artistId)
+  if (typeof q.format === 'string' && q.format) list = list.filter((t) => (t.format ?? '').toLowerCase().includes(String(q.format).toLowerCase()))
+  const sort = typeof q.sort === 'string' ? q.sort : 'title'
+  if (sort === 'random') list.sort(() => Math.random() - 0.5)
+  else {
+    const key = SORT_KEYS[sort] ?? SORT_KEYS.title
+    const dir = q.direction === 'desc' ? -1 : 1
+    list.sort((a, b) => (key(a) < key(b) ? -dir : key(a) > key(b) ? dir : 0))
+  }
+  const total = list.length
+  const offset = Number(q.offset) || 0
+  const limit = Number(q.limit) || 0
+  if (offset || limit) list = list.slice(offset, limit ? offset + limit : undefined)
+  return { tracks: list, total }
+}
+
+// ------------------------------------------------------------------ Internet Archive (fetch straight from the phone)
+const itemCache = new Map<string, { at: number; item: ArchiveItem }>()
+
+async function getJson(url: string): Promise<unknown> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ARCHIVE_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: controller.signal })
+    if (!res.ok) throw new Error(`archive.org answered HTTP ${res.status}`)
+    return await res.json()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function describe(err: unknown): string {
+  const e = err as Error
+  return e?.name === 'AbortError' ? 'archive.org took too long to answer' : e?.message || 'Could not reach archive.org'
+}
+
+async function archiveSearch(text: string, page = 1, losslessOnly = true): Promise<ArchiveSearchResult> {
+  const url = buildSearchUrl(String(text ?? '').slice(0, 200), Number(page) || 1, losslessOnly !== false)
+  if (!url) return { hits: [], total: 0, page: 1 }
+  try {
+    const { hits, total } = parseHits(await getJson(url))
+    return { hits, total, page: Number(page) || 1 }
+  } catch (err) {
+    return { hits: [], total: 0, page: Number(page) || 1, error: describe(err) }
+  }
+}
+
+async function archiveItem(identifier: string): Promise<ArchiveItem> {
+  const empty = (error: string): ArchiveItem => ({
+    identifier: String(identifier),
+    title: '',
+    creator: null,
+    date: null,
+    licenseUrl: null,
+    files: [],
+    images: [],
+    error
+  })
+  if (!isValidIdentifier(identifier)) return empty('Invalid item')
+  const cached = itemCache.get(identifier)
+  if (cached && Date.now() - cached.at < ARCHIVE_ITEM_CACHE_MS) return cached.item
+  try {
+    const item = parseItem(identifier, await getJson(`https://archive.org/metadata/${encodeURIComponent(identifier)}`))
+    itemCache.set(identifier, { at: Date.now(), item })
+    return item
+  } catch (err) {
+    return empty(describe(err))
+  }
+}
+
+// ------------------------------------------------------------------ downloads (saved into the app's storage on the phone)
+interface Job {
+  file: ArchiveFile
+  item: ArchiveItem
+  relPath: string
+}
+
+let downloads: DownloadItem[] = readJson<DownloadItem[]>(DOWNLOADS_KEY, []).map((d) =>
+  // A download that was running when the app closed cannot continue: show it as failed so it can be retried.
+  d.state === 'downloading' || d.state === 'queued' ? { ...d, state: 'failed', error: 'Interrupted', speed: 0 } : d
+)
+const jobs = new Map<string, Job>()
+let pumping = false
+
+function publishDownloads(): void {
+  writeJson(DOWNLOADS_KEY, downloads.slice(0, 200))
+  emit(IPC.onDownloadsChanged, [...downloads])
+}
+
+function patchDownload(id: string, patch: Partial<DownloadItem>): void {
+  downloads = downloads.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d))
+  publishDownloads()
+}
+
+async function pumpDownloads(): Promise<void> {
+  if (pumping) return
+  pumping = true
+  try {
+    for (;;) {
+      const next = [...downloads].reverse().find((d) => d.state === 'queued' && jobs.has(d.id))
+      if (!next) break
+      await downloadOne(next, jobs.get(next.id) as Job)
+    }
+  } finally {
+    pumping = false
+  }
+}
+
+async function downloadOne(row: DownloadItem, job: Job): Promise<void> {
+  patchDownload(row.id, { state: 'downloading', error: null })
+  const startedAt = Date.now()
+  const handle = await Filesystem.addListener('progress', (ev) => {
+    if (ev.url !== row.url) return
+    const total = ev.contentLength > 0 ? ev.contentLength : job.file.size
+    const elapsed = Math.max(1, (Date.now() - startedAt) / 1000)
+    const speed = ev.bytes / elapsed
+    patchDownload(row.id, {
+      downloadedBytes: ev.bytes,
+      totalBytes: total || null,
+      progress: total ? Math.min(1, ev.bytes / total) : 0,
+      speed: Math.round(speed),
+      etaSeconds: total && speed > 0 ? Math.round((total - ev.bytes) / speed) : null
+    })
+  })
+  try {
+    const res = await Filesystem.downloadFile({
+      url: row.url,
+      path: job.relPath,
+      directory: Directory.External,
+      recursive: true,
+      progress: true
+    })
+    const uri = (await Filesystem.getUri({ path: job.relPath, directory: Directory.External })).uri
+    const stat = await Filesystem.stat({ path: job.relPath, directory: Directory.External })
+    if (job.file.size > 0 && stat.size !== job.file.size) {
+      throw new Error(`Incomplete download (${stat.size} of ${job.file.size} bytes)`)
+    }
+    songs = songs.filter((t) => t.path !== uri)
+    songs.push(makeTrack(job.file, job.item, uri, stat.size))
+    saveSongs()
+    patchDownload(row.id, {
+      state: 'completed',
+      progress: 1,
+      speed: 0,
+      etaSeconds: null,
+      downloadedBytes: stat.size,
+      totalBytes: stat.size,
+      destPath: res.path ?? uri
+    })
+  } catch (err) {
+    patchDownload(row.id, { state: 'failed', speed: 0, error: (err as Error).message || 'Download failed' })
+  } finally {
+    void handle.remove()
+    jobs.delete(row.id)
+  }
+}
+
+async function archiveEnqueue(identifier: string, fileNames: string[]): Promise<{ found: number; enqueued: number }> {
+  if (!isValidIdentifier(identifier) || !Array.isArray(fileNames)) return { found: 0, enqueued: 0 }
+  const item = await archiveItem(identifier)
+  const wanted = new Set(fileNames.filter((n) => typeof n === 'string').slice(0, 500))
+  const chosen = item.files.filter((f) => wanted.has(f.name))
+  let enqueued = 0
+  for (const f of chosen) {
+    const url = buildDownloadUrl(identifier, f.name)
+    const base = f.name.split('/').pop() ?? f.name
+    const dot = base.lastIndexOf('.')
+    const ext = dot > 0 ? base.slice(dot, dot + 9) : ''
+    const relPath = `Oli/${safeName(item.title || identifier)}/${safeName(dot > 0 ? base.slice(0, dot) : base)}${ext}`
+    if (downloads.some((d) => d.url === url && (d.state === 'queued' || d.state === 'downloading'))) continue
+    const id = uid()
+    const now = Date.now()
+    jobs.set(id, { file: f, item, relPath })
+    downloads = [
+      {
+        id,
+        title: f.title ?? base,
+        url,
+        destPath: relPath,
+        state: 'queued',
+        progress: 0,
+        totalBytes: f.size || null,
+        downloadedBytes: 0,
+        speed: 0,
+        etaSeconds: null,
+        error: null,
+        createdAt: now,
+        updatedAt: now
+      },
+      ...downloads
+    ]
+    enqueued++
+  }
+  publishDownloads()
+  void pumpDownloads()
+  return { found: chosen.length, enqueued }
+}
+
+// ------------------------------------------------------------------ channel table
+const engineStatus: YtEngineStatus = {
+  state: 'ok',
+  version: null,
+  latest: null,
+  source: null,
+  path: null,
+  message: null,
+  auto: false
+}
+const noop = (): null => null
+const empty = (): unknown[] => []
+
+const handlers: Record<string, Handler> = {
+  // app and window
+  [IPC.getAppInfo]: () => ({ name: 'Oli', version: APP_VERSION, electron: 'n/a (Android)', chrome: navigator.userAgent, node: 'n/a' }),
+  [IPC.windowControl]: noop,
+  [IPC.getWindowState]: () => ({ maximized: true, fullscreen: false }),
+  [IPC.checkForUpdates]: () => ({
+    checked: true,
+    currentVersion: APP_VERSION,
+    latestVersion: null,
+    updateAvailable: false,
+    updateUrl: null,
+    error: null,
+    checkedAt: Date.now()
+  }),
+  [IPC.openReleasePage]: (url?: string) => {
+    window.open(url ?? 'https://github.com/CyttoRak-J/Oli/releases', '_blank')
+    return null
+  },
+  // settings
+  [IPC.getSettings]: () => currentSettings(),
+  [IPC.setSettings]: ((patch: Record<string, unknown>) => setSettings(patch ?? {})) as Handler,
+  // library (the songs are the files downloaded on this phone)
+  [IPC.getLibrary]: empty,
+  [IPC.getStats]: () => libraryStats(),
+  [IPC.getSongs]: ((q?: Record<string, unknown>) => querySongs(q)) as Handler,
+  [IPC.getSongById]: ((id: string) => songs.find((t) => t.id === id) ?? null) as Handler,
+  [IPC.getAlbums]: () => albums(),
+  [IPC.getAlbumById]: ((id: string) => albums().find((a) => a.id === id) ?? null) as Handler,
+  [IPC.getAlbumSongs]: ((id: string) => songs.filter((t) => t.albumId === id).sort((a, b) => (a.trackNo ?? 0) - (b.trackNo ?? 0))) as Handler,
+  [IPC.getArtists]: () => artists(),
+  [IPC.getArtistById]: ((id: string) => artists().find((a) => a.id === id) ?? null) as Handler,
+  [IPC.getArtistAlbums]: ((id: string) => albums().filter((a) => songs.some((t) => t.albumId === a.id && t.artistId === id))) as Handler,
+  [IPC.getArtistSongs]: ((id: string) => songs.filter((t) => t.artistId === id)) as Handler,
+  [IPC.getGenres]: empty,
+  [IPC.getGenreSongs]: empty,
+  [IPC.getComposers]: empty,
+  [IPC.getComposerSongs]: empty,
+  [IPC.getSimilarTracks]: empty,
+  [IPC.getScanState]: noop,
+  [IPC.addLibraryFolder]: noop,
+  [IPC.removeLibraryFolder]: noop,
+  [IPC.rescanLibrary]: noop,
+  [IPC.cancelScan]: noop,
+  [IPC.metaNeedsAttention]: empty,
+  [IPC.getEmbeddedArtwork]: noop,
+  [IPC.revealInExplorer]: () => false,
+  [IPC.getMediaBase]: () => '',
+  [IPC.probeDuration]: noop,
+  [IPC.transcodeLocalFile]: noop,
+  [IPC.getLyrics]: noop,
+  // search (library only; no online providers on Android yet)
+  [IPC.search]: ((q: string) => ({
+    local: querySongs({ search: String(q ?? '') }).tracks.slice(0, 60),
+    online: [],
+    suggestions: [],
+    onlineDone: true
+  })) as Handler,
+  [IPC.getSearchHistory]: empty,
+  [IPC.clearSearchHistory]: noop,
+  [IPC.removeSearchHistory]: noop,
+  [IPC.pinSearch]: noop,
+  [IPC.unpinSearch]: noop,
+  [IPC.isProviderConfigured]: () => ({ spotifyConfigured: false, youtubeConfigured: false }),
+  // YouTube: not available on Android yet
+  [IPC.ytEngineInfo]: () => engineStatus,
+  [IPC.ytEngineCheck]: () => engineStatus,
+  [IPC.ytEngineUpdate]: () => engineStatus,
+  [IPC.resolveYouTubeStream]: empty,
+  [IPC.resolveYouTubeStreamBatch]: empty,
+  [IPC.resolveYouTubeUrl]: empty,
+  [IPC.resolvePlaylistEntries]: () => ({ entries: [], error: 'YouTube is not available in the Android app yet.' }),
+  // playlists / favorites / queue / history (not persisted on Android yet)
+  [IPC.getPlaylists]: empty,
+  [IPC.getPlaylist]: noop,
+  [IPC.getPlaylistEntries]: empty,
+  [IPC.createPlaylist]: noop,
+  [IPC.getFavorites]: empty,
+  [IPC.toggleFavorite]: () => false,
+  [IPC.getQueue]: empty,
+  [IPC.saveQueue]: noop,
+  [IPC.clearQueue]: noop,
+  [IPC.getHistory]: empty,
+  [IPC.clearHistory]: noop,
+  [IPC.getPlaybackState]: () => ({
+    songId: null,
+    status: 'idle',
+    currentTime: 0,
+    duration: 0,
+    volume: 0.8,
+    muted: false,
+    shuffle: false,
+    repeat: 'off',
+    positionMeta: { queueIndex: -1, queueLength: 0 },
+    timestamp: Date.now()
+  }),
+  // downloads
+  [IPC.getDownloads]: () => [...downloads],
+  [IPC.cancelDownload]: ((id: string) => {
+    jobs.delete(id)
+    patchDownload(id, { state: 'canceled', speed: 0 })
+    return null
+  }) as Handler,
+  [IPC.removeDownload]: ((id: string) => {
+    jobs.delete(id)
+    downloads = downloads.filter((d) => d.id !== id)
+    publishDownloads()
+    return null
+  }) as Handler,
+  [IPC.clearCompleted]: () => {
+    downloads = downloads.filter((d) => !['completed', 'failed', 'canceled'].includes(d.state))
+    publishDownloads()
+    return null
+  },
+  [IPC.clearPending]: () => 0,
+  [IPC.pauseAllDownload]: () => 0,
+  [IPC.resumeAllDownload]: () => 0,
+  [IPC.pauseDownload]: noop,
+  [IPC.resumeDownload]: noop,
+  [IPC.retryDownload]: noop,
+  [IPC.revealDownload]: () => false,
+  [IPC.openDownloadsFolder]: noop,
+  [IPC.videoPickFolder]: noop,
+  // Internet Archive
+  [IPC.archiveSearch]: ((text: string, page?: number, lossless?: boolean) => archiveSearch(text, page, lossless)) as Handler,
+  [IPC.archiveItem]: ((identifier: string) => archiveItem(identifier)) as Handler,
+  [IPC.archiveEnqueue]: ((identifier: string, names: string[]) => archiveEnqueue(identifier, names)) as Handler,
+  // backup
+  [IPC.listBackups]: empty
+}
+
+const warned = new Set<string>()
+
+async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+  const handler = handlers[channel]
+  if (!handler) {
+    if (!warned.has(channel)) {
+      warned.add(channel)
+      console.warn(`[android] channel not supported yet: ${channel}`)
+    }
+    return null
+  }
+  return (handler as (...a: unknown[]) => unknown)(...args)
+}
+
+/** Install `window.cytto` for platforms that have no Electron preload. */
+export function installWebBackend(platform: 'android' | 'web'): void {
+  window.cytto = {
+    platform,
+    versions: { electron: 'n/a', chrome: navigator.userAgent, node: 'n/a' },
+    invoke,
+    send: (channel, ...args) => void invoke(channel, ...args),
+    on: (channel, listener) => {
+      const set = listeners.get(channel) ?? new Set<Listener>()
+      set.add(listener)
+      listeners.set(channel, set)
+      return () => set.delete(listener)
+    },
+    once: (channel, listener) => {
+      const off = window.cytto.on(channel, (...a) => {
+        off()
+        listener(...a)
+      })
+      return off
+    }
+  }
+}
+```
+
+Testing without a phone (worked in the reference): the built-in browser pane could not open local pages, and Chromium blocks port 5060 (`ERR_UNSAFE_PORT`; use e.g. 8765). Serve `out/renderer-android`
+(`python -m http.server 8765 --bind 127.0.0.1`), then open it in a throwaway Electron window that has **no** preload (`new BrowserWindow({width:390,height:800})`, `--user-data-dir` a pre-created temp folder,
+`--remote-debugging-port`), and drive it with the Chrome DevTools Protocol. There the shell reports platform `web` and Capacitor's web filesystem (browser storage) stands in for phone storage.
+Verified that way: layout, Archive search, item listing, a download of exactly the archive's size, the song appearing with its tags. **Not verified:** anything on a real phone or emulator (no Android SDK on the dev PC; CI builds the APK).
+
+Gotcha: newer npm versions skip install scripts by default, so `npm install <package>` can silently leave `node_modules/electron/dist` missing; run `node node_modules/electron/install.js` afterwards.
 
 *End of guide.*

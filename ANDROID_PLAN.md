@@ -4,7 +4,9 @@
 **Capacitor app reusing the React UI** (option A). Done and tested in a phone-size window (not on a phone): phone layout (bottom nav, compact
 player and song list), a backend running inside the web view (`src/renderer/src/platform/webBackend.ts`: settings, Internet Archive search/listing/downloads,
 songs made of downloaded files), web build config (`vite.android.config.ts`), Capacitor project (`android/`), CI (`.github/workflows/android.yml`, tag `android-v*`).
-NOT verified: anything on a real phone or emulator; the first CI APK build. Not started: scanning the phone's music, background playback, playlists/queue
+**CI result:** tag `android-v0.1.0` built `Oli-0.1.0-android.apk` (3.6 MB) on GitHub Actions, Android's `apksigner verify` passed, and a pre-release was
+published (https://github.com/CyttoRak-J/Oli/releases/tag/android-v0.1.0); the downloaded file's SHA-256 matched `SHA256SUMS-android.txt` and it contains the manifest,
+classes.dex and the web app. NOT verified: anything on a real phone or emulator. Not started: scanning the phone's music, background playback, playlists/queue
 persistence, YouTube, real signing key (the APK uses a public alpha key in `android/keystore`). The owner can still switch to a full native rewrite (option B).
 
 ## The question that was asked
