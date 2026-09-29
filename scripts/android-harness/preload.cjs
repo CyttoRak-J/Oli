@@ -9,7 +9,7 @@ const BASE = 'http://127.0.0.1:8765'
 const MEDIA_METHODS = ['getPermission', 'requestPermission', 'queryAudio', 'pickFolder', 'probeFiles', 'getArtwork', 'clearArtworkCache']
 const FLAC_DIR = 'A:/Flac'
 const DL_METHODS = ['getRoot', 'enqueue', 'pause', 'resume', 'cancel', 'getActive', 'writeTags']
-const YT_METHODS = ['status', 'updateEngine', 'search', 'playlist', 'info', 'enqueue', 'pause', 'resume', 'cancel', 'getActive']
+const YT_METHODS = ['status', 'updateEngine', 'search', 'playlist', 'info', 'enqueue', 'pause', 'resume', 'cancel', 'getActive', 'setConcurrency']
 const FS_METHODS = ['readdir', 'writeFile', 'readFile', 'deleteFile', 'getUri', 'stat', 'mkdir']
 const ART_DIR = require('path').join(require('os').tmpdir(), 'oli-harness-art')
 const METHODS = [
@@ -82,6 +82,16 @@ setInterval(() => {
 
 // Buttons of the lock screen / a headset, for the driver.
 fake.command = (c) => emit('command', { command: c })
+// The real player goes idle after a playback error (a phone call took the audio device): play() and seekTo() then do nothing
+// until the source is loaded again. fake.fail() imitates that.
+fake.broken = false
+fake.fail = () => {
+  fake.broken = true
+  fake.playWhenReady = false
+  audio.pause()
+  emit('error', { code: 3, codeName: 'FAKE_AUDIO_TRACK_INIT_FAILED', message: 'AudioTrack init failed' })
+  state()
+}
 fake.outsidePause = (reason = 'audioBecomingNoisy') => {
   fake.playWhenReady = false
   audio.pause()
@@ -119,7 +129,9 @@ function handle(m) {
   let data = {}
   switch (m.methodName) {
     case 'loadSource':
+      fake.broken = false
       fake.token = o.token
+      if (fake.sticky) setTimeout(() => fake.fail(), 60) // a call that has not ended yet: the source cannot open
       fake.playWhenReady = !!o.autoplay
       pendingStart = o.startPositionMs || 0
       audio.src = mapUrl(o.url)
@@ -128,6 +140,7 @@ function handle(m) {
       state()
       break
     case 'play':
+      if (fake.broken) break
       fake.playWhenReady = true
       audio.play().catch(() => {})
       state('user')
@@ -145,6 +158,7 @@ function handle(m) {
       state()
       break
     case 'seekTo':
+      if (fake.broken) break
       audio.currentTime = (o.positionMs || 0) / 1000
       break
     case 'setVolume':

@@ -539,7 +539,7 @@ export function registerIpc(services: ServiceContainer): void {
             track?: { name: string; artists: string[]; album: string | null; durationMs: number | null }
           } => Boolean(x) && typeof x.videoId === 'string' && typeof x.title === 'string'
         )
-        .slice(0, 300)
+        .slice(0, 2000)
         .map((x) => ({
           videoId: x.videoId,
           title: x.title,

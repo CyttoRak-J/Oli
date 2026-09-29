@@ -447,9 +447,12 @@ export class DownloadQueue {
       clearTimeout(this.saveTimer)
       this.saveTimer = null
     }
-    // finished / failed entries beyond the newest 200 are forgotten together with their jobs
-    if (this.items.length > MAX_KEPT) {
-      const keep = this.items.slice(0, MAX_KEPT)
+    // finished / failed entries beyond the newest 200 are forgotten together with their jobs; waiting, running and
+    // paused ones are never dropped (a queued playlist of 1,000 songs must stay whole)
+    const waiting = (d: DownloadItem): boolean => d.state === 'queued' || d.state === 'downloading' || d.state === 'paused'
+    if (this.items.filter((d) => !waiting(d)).length > MAX_KEPT) {
+      let finished = 0
+      const keep = this.items.filter((d) => waiting(d) || ++finished <= MAX_KEPT)
       const ids = new Set(keep.map((d) => d.id))
       for (const id of Object.keys(this.jobs)) if (!ids.has(id)) delete this.jobs[id]
       this.items = keep

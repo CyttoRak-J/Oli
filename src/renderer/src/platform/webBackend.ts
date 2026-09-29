@@ -196,6 +196,25 @@ async function archiveItem(identifier: string): Promise<ArchiveItem> {
   }
 }
 
+/** "Reveal in Explorer" on the phone: open the Files app at the folder, or say where the file is. */
+async function revealOnPhone(uri: string): Promise<boolean> {
+  const plugin = getMediaPlugin()
+  if (!plugin || !uri) return false
+  try {
+    const r = await plugin.revealFile({ uri })
+    if (!r.opened) {
+      window.alert(
+        r.path
+          ? `Android does not let a file app open this folder.\n\nThe file is in:\n${r.path}`
+          : 'Oli could not find where this file is.'
+      )
+    }
+    return r.opened
+  } catch {
+    return false
+  }
+}
+
 // ------------------------------------------------------------------ downloads (native queue, see downloadQueue.ts)
 const JOBS_KEY = 'oli.downloadJobs'
 let queue: DownloadQueue | null = null
@@ -293,6 +312,25 @@ async function downloadCompleted(_d: DownloadItem, job: DownloadJob, file: Compl
 async function startDownloads(): Promise<void> {
   const plugin = getDownloadPlugin()
   if (!plugin) return
+  // How many YouTube songs download at once is a setting; on the phone 2 is the default (it was fixed at 2 before).
+  const ytPlugin = getYouTubePlugin()
+  const applyConcurrency = (n: unknown): void => {
+    const count = Math.max(1, Math.min(6, Number(n) || 2))
+    void ytPlugin?.setConcurrency({ count }).catch(() => undefined)
+  }
+  try {
+    const s = (await core.handlers[IPC.getSettings]()) as { ytConcurrency?: number }
+    if (localStorage.getItem('oli.ytConcurrencySet') !== '1') {
+      localStorage.setItem('oli.ytConcurrencySet', '1')
+      if ((s.ytConcurrency ?? 1) <= 1) await core.handlers[IPC.setSettings]({ ytConcurrency: 2 } as never)
+    }
+    applyConcurrency(((await core.handlers[IPC.getSettings]()) as { ytConcurrency?: number }).ytConcurrency)
+  } catch {
+    // keep the native default
+  }
+  window.cytto.on(IPC.onSettingsChanged, (patch) => {
+    if (patch && typeof patch === 'object' && 'ytConcurrency' in patch) applyConcurrency((patch as { ytConcurrency?: number }).ytConcurrency)
+  })
   queue = new DownloadQueue({
     plugin,
     youtube: getYouTubePlugin() ?? undefined,
@@ -465,7 +503,7 @@ const youtubeHandlers: Record<string, Handler> = {
   }) as Handler,
   [IPC.enqueueEntries]: ((entries: Array<{ videoId: string; title: string; duration?: number; track?: { name: string; artists: string[]; album: string | null } }>, opts?: { mode?: string; audio?: string; height?: number }) => {
     if (!queue || !yt || !Array.isArray(entries)) return { found: 0, enqueued: 0 }
-    const clean = entries.filter((x) => x && typeof x.videoId === 'string' && typeof x.title === 'string').slice(0, 300)
+    const clean = entries.filter((x) => x && typeof x.videoId === 'string' && typeof x.title === 'string').slice(0, 2000)
     const mode = opts?.mode === 'video' ? 'video' : 'song'
     return { found: clean.length, enqueued: queue.add(youtubeEntries(clean, mode, audioChoice(opts?.audio), Number(opts?.height) || 0)) }
   }) as Handler,
@@ -619,7 +657,7 @@ const phoneHandlers: Record<string, Handler> = {
   [IPC.metaNeedsAttention]: empty,
   [IPC.getEmbeddedArtwork]: ((songId: string) =>
     phoneLib ? phoneLib.artworkFor(songId, (p) => deviceFileUrl(`file://${p}`)) : null) as Handler,
-  [IPC.revealInExplorer]: () => false,
+  [IPC.revealInExplorer]: (async (uri: string) => revealOnPhone(uri)) as Handler,
   [IPC.getMediaBase]: () => '',
   [IPC.probeDuration]: noop,
   [IPC.transcodeLocalFile]: noop,
@@ -673,7 +711,10 @@ const phoneHandlers: Record<string, Handler> = {
     queue?.retry(id)
     return null
   }) as Handler,
-  [IPC.revealDownload]: () => false,
+  [IPC.revealDownload]: (async (id: string) => {
+    const item = queue?.list().find((d) => d.id === id)
+    return item?.destPath ? revealOnPhone(item.destPath) : false
+  }) as Handler,
   [IPC.openDownloadsFolder]: noop,
   [IPC.videoPickFolder]: noop,
   // Internet Archive

@@ -14,6 +14,7 @@ $suites = @(
   @{ name = 'player (play, seek, pause, unplug, next, skip)'; script = 'e2e.cjs'; songs = '' },
   @{ name = 'phone music scan'; script = 'e2e-library.cjs'; songs = '' },
   @{ name = 'chosen music folders'; script = 'e2e-folders.cjs'; songs = ''; subdirs = '1' },
+  @{ name = 'phone fixes (tap, back, Now Playing, badge, resume)'; script = 'e2e-phone.cjs'; songs = ''; subdirs = '' },
   @{ name = 'downloads, tags, backup'; script = 'e2e-downloads.cjs'; songs = '' },
   @{ name = 'YouTube'; script = 'e2e-youtube.cjs'; songs = '' },
   @{ name = 'big list (3,000 songs)'; script = 'e2e-list.cjs'; songs = '3000' }

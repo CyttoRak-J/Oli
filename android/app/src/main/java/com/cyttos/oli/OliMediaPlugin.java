@@ -53,6 +53,11 @@ import java.util.List;
     })
 public class OliMediaPlugin extends Plugin {
   private final Handler main = new Handler(Looper.getMainLooper());
+  /**
+   * Reading covers and file details takes a while per song. Capacitor runs every plugin call on ONE shared thread, so a long
+   * read there would hold up the player's own commands (play, pause, seek): these run on their own threads.
+   */
+  private static final java.util.concurrent.ExecutorService BG = java.util.concurrent.Executors.newFixedThreadPool(3);
   private Runnable pendingNotify = null;
   private ContentObserver observer = null;
 
@@ -154,6 +159,64 @@ public class OliMediaPlugin extends Plugin {
     o.put("volume", scope.volume);
     o.put("path", scope.path);
     o.put("label", scope.label());
+    call.resolve(o);
+  }
+
+  /**
+   * "Reveal in Explorer": opens the phone's Files app at the folder of a song, when Android allows it. Resolves
+   * {opened, path}; when the folder cannot be opened (files inside the app's own folder are closed to file managers since
+   * Android 11) the app shows the path instead.
+   */
+  @PluginMethod
+  public void revealFile(PluginCall call) {
+    JSObject o = new JSObject();
+    o.put("opened", false);
+    String s = call.getString("uri", "");
+    try {
+      Uri u = Uri.parse(s);
+      String volume = "primary";
+      String folder = null;
+      if ("content".equals(u.getScheme())) {
+        ContentResolver cr = getContext().getContentResolver();
+        String[] cols = Build.VERSION.SDK_INT >= 29
+            ? new String[] {MediaStore.Audio.Media.RELATIVE_PATH, MediaStore.Audio.Media.VOLUME_NAME}
+            : new String[] {MediaStore.Audio.Media.DATA};
+        try (Cursor c = cr.query(u, cols, null, null, null)) {
+          if (c != null && c.moveToFirst()) {
+            if (Build.VERSION.SDK_INT >= 29) {
+              folder = FolderScope.clean(c.getString(0));
+              String v = c.getString(1);
+              volume = v == null || v.startsWith("external_primary") || v.equals("external") ? "primary" : v.toUpperCase(java.util.Locale.ROOT);
+            } else {
+              String data = c.getString(0);
+              String root = Environment.getExternalStorageDirectory().getPath();
+              if (data != null && data.startsWith(root + "/")) folder = FolderScope.clean(new File(data.substring(root.length() + 1)).getParent());
+            }
+          }
+        }
+      } else {
+        String path = u.getPath();
+        String root = Environment.getExternalStorageDirectory().getPath();
+        if (path != null && path.startsWith(root + "/")) folder = FolderScope.clean(new File(path.substring(root.length() + 1)).getParent());
+      }
+      if (folder == null) {
+        call.resolve(o);
+        return;
+      }
+      o.put("path", folder);
+      if (folder.startsWith("Android/data") || folder.startsWith("Android/obb")) {
+        call.resolve(o); // closed to file managers
+        return;
+      }
+      Uri dir = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", volume + ":" + folder);
+      Intent view = new Intent(Intent.ACTION_VIEW);
+      view.setDataAndType(dir, DocumentsContract.Document.MIME_TYPE_DIR);
+      view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      getContext().startActivity(view);
+      o.put("opened", true);
+    } catch (Exception ignored) {
+      // no app to show folders: the path is shown instead
+    }
     call.resolve(o);
   }
 
@@ -290,6 +353,10 @@ public class OliMediaPlugin extends Plugin {
   /** {uris:[...]} -> {results:[{uri, sampleRate, channels, bitDepth, container, trackGain, ...}]} */
   @PluginMethod
   public void probeFiles(PluginCall call) {
+    BG.execute(() -> probe(call));
+  }
+
+  private void probe(PluginCall call) {
     JSONArray uris = call.getArray("uris");
     if (uris == null) {
       call.reject("uris is required");
@@ -340,6 +407,10 @@ public class OliMediaPlugin extends Plugin {
   /** {uri, key, size?} -> {path} of a cached JPEG (the same file for every song with the same key), or {} when none. */
   @PluginMethod
   public void getArtwork(PluginCall call) {
+    BG.execute(() -> loadArtwork(call));
+  }
+
+  private void loadArtwork(PluginCall call) {
     final String uriStr = call.getString("uri");
     final String key = call.getString("key");
     final int size = Math.max(64, Math.min(1200, call.getInt("size", 600)));
@@ -379,6 +450,17 @@ public class OliMediaPlugin extends Plugin {
         mmr.release();
       } catch (Exception ignored) {
         // nothing to do
+      }
+    }
+    if (bmp == null) {
+      // Android's reader misses the picture in many FLAC files: read the FLAC picture block ourselves.
+      try (java.io.InputStream in = "file".equals(uri.getScheme())
+          ? new java.io.FileInputStream(uri.getPath())
+          : ctx.getContentResolver().openInputStream(uri)) {
+        byte[] pic = in == null ? null : FlacPicture.find(in);
+        if (pic != null) bmp = decodeScaled(pic, size);
+      } catch (Exception ignored) {
+        // not a FLAC file, or unreadable
       }
     }
     if (bmp == null && Build.VERSION.SDK_INT >= 29) {

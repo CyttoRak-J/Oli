@@ -221,6 +221,29 @@ function MainShell(): React.JSX.Element {
   useGlobalShortcuts(() => setShortcutsOpen(true))
   const mobile = isMobileShell()
 
+  // Phone: the Android back button / back gesture closes the open panel, else goes to the previous page, else home;
+  // only on the home page does it leave the app (MainActivity minimizes it when this returns false).
+  useEffect(() => {
+    if (!mobile) return
+    const w = window as unknown as { __oliBack?: () => boolean }
+    w.__oliBack = () => {
+      const panels = usePanels.getState()
+      if (panels.panel) {
+        panels.close()
+        return true
+      }
+      // the home page is the end of the road: leave the app from there
+      if (location.pathname === '/') return false
+      const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0
+      if (idx > 0) navigate(-1)
+      else navigate('/')
+      return true
+    }
+    return () => {
+      delete w.__oliBack
+    }
+  }, [mobile, navigate, location.pathname])
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-0 text-ink-0">
       {!mobile && <TitleBar />}

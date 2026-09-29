@@ -92,6 +92,8 @@ export interface OliMediaPlugin {
   requestPermission(): Promise<{ granted: boolean }>
   /** With a volume (and path) only the music inside that folder is listed. */
   queryAudio(o: { offset: number; limit: number; volume?: string; path?: string }): Promise<{ rows: MediaRow[]; total?: number }>
+  /** Opens the Files app at the song's folder; when that is not possible, `path` says where the file is. */
+  revealFile(o: { uri: string }): Promise<{ opened: boolean; path?: string }>
   /** Android's folder picker. */
   pickFolder(): Promise<{ cancelled?: boolean; volume?: string; path?: string; label?: string }>
   probeFiles(o: { uris: string[] }): Promise<{ results: ProbeResult[] }>
@@ -598,10 +600,10 @@ export class PhoneLibrary {
     if (pending) return pending
     const p = this.opts.plugin
       .getArtwork({ uri: loc.path, key, size: 600 })
-      .then((r) => (r.path ? toUrl(r.path) : null))
-      .catch(() => null)
-      .then((url) => {
-        this.artCache.set(key, url)
+      .then((r) => ({ url: r.path ? toUrl(r.path) : null, cache: true }))
+      .catch(() => ({ url: null, cache: false })) // a failed call is tried again next time, an answer of "no cover" is kept
+      .then(({ url, cache }) => {
+        if (cache) this.artCache.set(key, url)
         this.artInflight.delete(key)
         return url
       })

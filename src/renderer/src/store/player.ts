@@ -5,6 +5,7 @@ import {
   sendPlaybackState,
   saveQueue,
   getQueue,
+  getEmbeddedArtwork,
   getSettings,
   setSettings,
   getSongById,
@@ -289,7 +290,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     {
       const st = get()
       const upcoming: string[] = []
-      for (let k = 1; k <= 2; k++) {
+      for (let k = 1; k <= 3; k++) {
         const nt = st.queue[st.index + k]
         if (nt && !nt.path && nt.id.startsWith('youtube:')) upcoming.push(nt.id.slice('youtube:'.length))
       }
@@ -304,6 +305,22 @@ export const usePlayer = create<PlayerState>((set, get) => {
       artworkUri: track.artworkUrl && /^https?:/.test(track.artworkUrl) ? track.artworkUrl : '',
       bitDepth: track.bitDepth ?? undefined
     })
+    // A local song's cover for the notification / lock screen: the native side reads it from the cached file.
+    if (el.setMetadata && !track.artworkUrl && track.path) {
+      void getEmbeddedArtwork(track.id)
+        .then((url) => {
+          const m = url ? /_capacitor_file_(\/.+)$/.exec(url) : null
+          if (!m || get().current?.id !== track.id) return
+          el.setMetadata?.({
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            artworkUri: `file://${decodeURI(m[1])}`,
+            bitDepth: track.bitDepth ?? undefined
+          })
+        })
+        .catch(() => undefined)
+    }
     // Online tracks resolve their stream at play time (see freshResolveOnline).
     if (track.id.startsWith('youtube:') && !track.path) {
       freshResolveOnline(track)
@@ -1053,7 +1070,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       }
       // Decide on the element itself, not the status: while buffering the
       // status is 'loading' but the audio is running, and a press must pause.
-      if (!el.paused && (s.status === 'playing' || s.status === 'loading')) {
+      if (!el.paused && !el.error && (s.status === 'playing' || s.status === 'loading')) {
         el.pause()
         return
       }
@@ -1071,7 +1088,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         return
       }
       const el = getAudio()
-      if (!el.paused) return
+      // A player that failed (the phone's audio was taken by a call) reports an error and looks "not paused": pressing
+      // play must still try again, not do nothing.
+      if (!el.paused && !el.error) return
       if (s.status === 'paused' || s.status === 'loading') resumedAt = Date.now()
       if (s.status === 'ended' || s.status === 'idle') {
         // Finished / stopped track: play it again from the start.
@@ -1299,7 +1318,12 @@ export async function resumePlayback(): Promise<void> {
   try {
     const settings = await getSettings()
     if (!settings.resumeOnLaunch || !settings.lastSongId) return
-    const track = await getSongById(settings.lastSongId)
+    // A YouTube song is not in the library database: it comes back from the saved queue (which holds all its details), and
+    // only this one song is resolved again - the rest of the queue is not touched until it plays.
+    const track =
+      (await getSongById(settings.lastSongId).catch(() => null)) ??
+      usePlayer.getState().queue.find((t) => t.id === settings.lastSongId) ??
+      null
     if (!track) return
     const s = usePlayer.getState()
     if (s.current) return
@@ -1312,7 +1336,20 @@ export async function resumePlayback(): Promise<void> {
       s.playTracks([...s.queue, track], s.queue.length, { source: 'library', sourceId: null })
     }
     if (settings.lastPositionSeconds > 0) {
-      setTimeout(() => s.seek(settings.lastPositionSeconds), 300)
+      // A local song is ready at once; a YouTube song first needs its stream address (seconds): seek when the length is known.
+      const at = settings.lastPositionSeconds
+      const started = Date.now()
+      const timer = setInterval(() => {
+        const st = usePlayer.getState()
+        if (st.current?.id !== track.id || Date.now() - started > 30_000) {
+          clearInterval(timer)
+          return
+        }
+        if (st.duration > 0 || Date.now() - started > 600) {
+          clearInterval(timer)
+          st.seek(at)
+        }
+      }, 250)
     }
   } catch {
     // ignore

@@ -9,6 +9,7 @@ import { EmptyState } from '../components/EmptyState'
 import { formatDuration, relativeTime } from '../lib/format'
 import { cn } from '../components/cn'
 import { ListJumpButtons } from '../components/ListJumpButtons'
+import { tapToPlay } from '../lib/rowTap'
 
 export function History(): React.JSX.Element {
   const player = usePlayer(
@@ -129,6 +130,9 @@ export function History(): React.JSX.Element {
                 onDoubleClick={() => {
                   if (playable) playTrackEntry(entry)
                 }}
+                {...tapToPlay(() => {
+                  if (playable) playTrackEntry(entry)
+                })}
               >
                 <button
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-surface-4 bg-surface-2 text-ink-2 opacity-0 transition-opacity group-hover:border-accent group-hover:opacity-100 disabled:opacity-30"

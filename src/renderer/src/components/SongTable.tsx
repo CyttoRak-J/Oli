@@ -22,6 +22,7 @@ import type { Track } from '@shared/types'
 import { cn } from './cn'
 import { Artwork } from './Artwork'
 import { isMobileShell } from '../lib/platform'
+import { tapToPlay } from '../lib/rowTap'
 import { usePlayer, type PlaySource } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { toggleFavorite, revealInExplorer, refreshMetadata, editMetadata } from '../lib/ipc'
@@ -245,6 +246,7 @@ export function SongTable({
                 }
                 playAt(index)
               }}
+              {...tapToPlay(() => (active ? player.toggle() : playAt(index)))}
               onContextMenu={(e) => {
                 e.preventDefault()
                 setCtxMenu({ x: e.clientX, y: e.clientY, track })
@@ -291,10 +293,16 @@ export function SongTable({
                           active ? 'text-accent' : 'text-ink-0 hover:text-accent'
                         )}
                         onClick={() => {
+                          // phone: a tap plays (song info is in the row's ... menu); desktop: a click opens the info, a double click plays
+                          if (compact) {
+                            if (active) player.toggle()
+                            else playAt(index)
+                            return
+                          }
                           if (navTimerRef.current) clearTimeout(navTimerRef.current)
                           navTimerRef.current = setTimeout(() => navigate(`/song/${track.id}`), 250)
                         }}
-                        title="View song info"
+                        title={compact ? undefined : 'View song info'}
                       >
                         {track.title}
                       </button>

@@ -1,4 +1,9 @@
+import { useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { IPC } from '@shared/ipc'
+import type { DownloadItem } from '@shared/types'
+import { getDownloads, on } from '../lib/ipc'
 import { Archive, Download, Home, Music, Settings } from 'lucide-react'
 import { cn } from './cn'
 
@@ -12,6 +17,18 @@ const ITEMS = [
 
 /** Bottom navigation for the phone layout (replaces the desktop sidebar). */
 export function MobileNav(): React.JSX.Element {
+  // The red number on the Downloads icon: files waiting or downloading right now.
+  const queryClient = useQueryClient()
+  const downloads = useQuery({ queryKey: ['downloads'], queryFn: getDownloads })
+  useEffect(
+    () =>
+      on<DownloadItem[]>(IPC.onDownloadsChanged, (list) => {
+        if (Array.isArray(list)) queryClient.setQueryData(['downloads'], list)
+      }),
+    [queryClient]
+  )
+  const running = (downloads.data ?? []).filter((d) => d.state === 'queued' || d.state === 'downloading').length
+
   return (
     <nav className="flex shrink-0 items-stretch justify-around border-t border-edge bg-surface-1 pb-[env(safe-area-inset-bottom)]">
       {ITEMS.map(({ to, label, icon: Icon, end }) => (
@@ -26,7 +43,17 @@ export function MobileNav(): React.JSX.Element {
             )
           }
         >
-          <Icon size={19} />
+          <span className="relative">
+            <Icon size={19} />
+            {to === '/downloads' && running > 0 && (
+              <span
+                className="absolute -right-2.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9.5px] font-bold leading-none text-white"
+                aria-label={`${running} downloading`}
+              >
+                {running > 99 ? '99+' : running}
+              </span>
+            )}
+          </span>
           <span>{label}</span>
         </NavLink>
       ))}

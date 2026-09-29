@@ -43,6 +43,6 @@ export function playlistTarget(raw: string): PlaylistTarget | null {
   }
 }
 
-/** Songs to list for a playlist: a Mix never ends, so it is cut short. */
-export const PLAYLIST_LIMIT = 200
-export const MIX_LIMIT = 100
+/** Songs to list for a playlist: a Mix never ends, so it is cut short (listing 300 Mix songs takes about 14 s, 500 about 15 s). */
+export const PLAYLIST_LIMIT = 2000
+export const MIX_LIMIT = 500

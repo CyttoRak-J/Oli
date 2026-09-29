@@ -767,7 +767,7 @@ export class DownloadService extends EventEmitter {
         // Pick the oldest queued job that can run now: when the YouTube slot
         // is full, HTTP jobs behind a YT row must not starve (a `break` here
         // would stop the whole pump).
-        const ytLimit = Math.max(1, Math.min(3, this.opts.ytConcurrency?.() ?? 1))
+        const ytLimit = Math.max(1, Math.min(6, this.opts.ytConcurrency?.() ?? 1))
         const queued = this.db.all<{ id: string }>(
           "SELECT id FROM downloads WHERE state = 'queued' ORDER BY created_at ASC"
         )
@@ -802,7 +802,7 @@ export class DownloadService extends EventEmitter {
   private prefetchAhead(): void {
     if (this.prefetchRunning) return
     this.prefetchRunning = true
-    const depth = Math.max(0, Math.min(5, (this.opts.songsAhead?.() ?? 3) - 1))
+    const depth = Math.max(0, Math.min(9, (this.opts.songsAhead?.() ?? 3) - 1))
     if (depth === 0 || !this.hooks.resolveTrackMeta) {
       this.prefetchRunning = false
       return

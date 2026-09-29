@@ -1,7 +1,7 @@
 /**
  * Reading yt-dlp's JSON for the phone app: search results, playlists, stream addresses, and song tags for downloads.
  * The rules are the PC app's (main/services/provider.ts): MP4/AAC audio first, WebM only as a fallback, playlists
- * capped at 200 (a Mix at 100), a Mix only opens through one of its videos. Pure functions, tested on real yt-dlp output.
+ * capped at 2,000 (a Mix at 500), a Mix only opens through one of its videos. Pure functions, tested on real yt-dlp output.
  */
 import type { OnlineSearchResult } from '@shared/types'
 

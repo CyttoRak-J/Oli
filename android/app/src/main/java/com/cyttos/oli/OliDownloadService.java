@@ -29,6 +29,32 @@ public class OliDownloadService extends Service {
   private static final String CHANNEL = "oli_downloads";
   private static final int NOTIFICATION_ID = 4711;
   private static DownloadEngine engine;
+  /** How many YouTube downloads (run by yt-dlp in OliYouTubePlugin, not by the engine) are waiting or running. */
+  static volatile java.util.function.IntSupplier externalCount = () -> 0;
+  private static volatile OliDownloadService live;
+
+  /** Something outside the engine changed (a YouTube download started, finished or moved on): refresh the notification. */
+  static void externalState(String id, String state) {
+    OliDownloadService s = live;
+    if (s == null) return;
+    if (!"queued".equals(state) && !"downloading".equals(state)) s.progress.remove(id);
+    s.main.postDelayed(s::update, 300);
+  }
+
+  static void externalProgress(String id, long bytes, long total) {
+    OliDownloadService s = live;
+    if (s == null) return;
+    s.progress.put(id, new long[] {bytes, total});
+    long now = System.currentTimeMillis();
+    if (now - s.lastNotify > 1000) {
+      s.lastNotify = now;
+      s.main.post(s::update);
+    }
+  }
+
+  private static int totalActive() {
+    return engine().activeCount() + Math.max(0, externalCount.getAsInt());
+  }
 
   static synchronized DownloadEngine engine() {
     if (engine == null) engine = new DownloadEngine(2, 2);
@@ -54,6 +80,7 @@ public class OliDownloadService extends Service {
   @Override
   public void onCreate() {
     super.onCreate();
+    live = this;
     createChannel();
     listener = new DownloadEngine.Listener() {
       @Override
@@ -78,7 +105,7 @@ public class OliDownloadService extends Service {
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
     // must call startForeground quickly after startForegroundService()
-    ServiceCompat.startForeground(this, NOTIFICATION_ID, build(engine().activeCount(), 0), foregroundType());
+    ServiceCompat.startForeground(this, NOTIFICATION_ID, build(Math.max(1, totalActive()), 0), foregroundType());
     main.postDelayed(() -> update(), 500);
     return START_NOT_STICKY;
   }
@@ -88,7 +115,7 @@ public class OliDownloadService extends Service {
   }
 
   private void update() {
-    int active = engine().activeCount();
+    int active = totalActive();
     if (active == 0) {
       ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
       stopSelf();
@@ -116,6 +143,8 @@ public class OliDownloadService extends Service {
     int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
     NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL)
         .setSmallIcon(android.R.drawable.stat_sys_download)
+        .setNumber(active)
+        .setSubText(active + (active == 1 ? " file left" : " files left"))
         .setContentTitle(active == 1 ? "Downloading 1 file" : "Downloading " + active + " files")
         .setContentText(percent >= 0 ? percent + "%" : "Starting…")
         .setOngoing(true)
@@ -138,6 +167,7 @@ public class OliDownloadService extends Service {
 
   @Override
   public void onDestroy() {
+    if (live == this) live = null;
     if (listener != null) {
       engine().removeListener(listener);
       listener = null;

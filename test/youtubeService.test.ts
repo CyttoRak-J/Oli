@@ -110,7 +110,7 @@ describe('YouTubeService', () => {
     const rows = await svc.resolveUrl('https://www.youtube.com/playlist?list=PLabcdefghijk')
     expect(rows).toHaveLength(3)
     expect(rows[0].album).toBe('Harness playlist')
-    expect(fp.calls.find((c) => c.name === 'playlist')?.arg).toMatchObject({ url: 'https://www.youtube.com/playlist?list=PLabcdefghijk', limit: 200 })
+    expect(fp.calls.find((c) => c.name === 'playlist')?.arg).toMatchObject({ url: 'https://www.youtube.com/playlist?list=PLabcdefghijk', limit: 2000 })
     await svc.playlistEntries('https://www.youtube.com/playlist?list=PLabcdefghijk')
     expect(count('playlist')).toBe(1)
     const mix = await svc.playlistEntries('https://www.youtube.com/playlist?list=RDdQw4w9WgXcQ')
@@ -118,7 +118,7 @@ describe('YouTubeService', () => {
     expect(count('playlist')).toBe(1)
     const mix2 = await svc.playlistEntries('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ')
     expect(mix2.mix).toBe(true)
-    expect(fp.calls.filter((c) => c.name === 'playlist').pop()?.arg).toMatchObject({ limit: 100 })
+    expect(fp.calls.filter((c) => c.name === 'playlist').pop()?.arg).toMatchObject({ limit: 500 })
     expect((await svc.playlistEntries('https://example.com/x')).error).toMatch(/not a YouTube link/)
   })
 

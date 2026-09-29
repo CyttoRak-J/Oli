@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Disc3, ListMusic, Radio } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Disc3, ListMusic, Radio, Shuffle, Repeat, Repeat1, History, Mic2 } from 'lucide-react'
 import { usePlayer } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { Artwork } from '../components/Artwork'
@@ -7,6 +7,10 @@ import { EmptyState } from '../components/EmptyState'
 import { formatDuration } from '../lib/format'
 import { useTrackInfo } from '../lib/useTrackInfo'
 import { SleepTimer } from '../components/SleepTimer'
+import { usePanels } from '../store/panels'
+import { isMobileShell } from '../lib/platform'
+import { cn } from '../components/cn'
+import { tapToPlay } from '../lib/rowTap'
 import type { Track } from '@shared/types'
 
 /**
@@ -28,9 +32,15 @@ export function NowPlaying(): React.JSX.Element {
       seek: s.seek,
       toggle: s.toggle,
       radioMode: s.radioMode,
-      toggleRadioMode: s.toggleRadioMode
+      toggleRadioMode: s.toggleRadioMode,
+      shuffle: s.shuffle,
+      repeat: s.repeat,
+      toggleShuffle: s.toggleShuffle,
+      cycleRepeat: s.cycleRepeat
     }))
   )
+  const togglePanel = usePanels((s) => s.toggle)
+  const phone = isMobileShell()
   const openInfo = useTrackInfo()
   const [previewTime, setPreviewTime] = useState<number | null>(null)
 
@@ -68,8 +78,8 @@ export function NowPlaying(): React.JSX.Element {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5 p-6">
-      <div className="mx-auto w-full max-w-[260px]">
+    <div className={cn('mx-auto flex max-w-3xl flex-col', phone ? 'gap-3 p-4' : 'gap-5 p-6')}>
+      <div className={cn('mx-auto w-full', phone ? 'max-w-[min(260px,34vh)]' : 'max-w-[260px]')}>
         <Artwork
           songId={current.id}
           hasEmbedded={current.hasEmbeddedArtwork}
@@ -147,6 +157,36 @@ export function NowPlaying(): React.JSX.Element {
         </button>
       </div>
 
+      {phone && (
+        // The desktop has these in its player bar; the phone's small bar has only previous / play / next.
+        <div className="flex items-center justify-around">
+          <button
+            className={cn('rounded-full p-2.5', player.shuffle ? 'bg-accent/15 text-accent' : 'text-ink-2')}
+            onClick={player.toggleShuffle}
+            aria-label="Shuffle"
+            aria-pressed={player.shuffle}
+          >
+            <Shuffle size={19} />
+          </button>
+          <button
+            className={cn('rounded-full p-2.5', player.repeat !== 'off' ? 'bg-accent/15 text-accent' : 'text-ink-2')}
+            onClick={player.cycleRepeat}
+            aria-label={player.repeat === 'off' ? 'Repeat: off' : player.repeat === 'one' ? 'Repeat: one' : 'Repeat: all'}
+          >
+            {player.repeat === 'one' ? <Repeat1 size={19} /> : <Repeat size={19} />}
+          </button>
+          <button className="rounded-full p-2.5 text-ink-2" onClick={() => togglePanel('queue')} aria-label="Queue">
+            <ListMusic size={19} />
+          </button>
+          <button className="rounded-full p-2.5 text-ink-2" onClick={() => togglePanel('history')} aria-label="History">
+            <History size={19} />
+          </button>
+          <button className="rounded-full p-2.5 text-ink-2" onClick={() => togglePanel('lyrics')} aria-label="Lyrics">
+            <Mic2 size={19} />
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-t border-edge pt-4">
         <div className="flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-widest text-ink-3">
           <ListMusic size={13} /> Up Next
@@ -177,6 +217,7 @@ export function NowPlaying(): React.JSX.Element {
               key={track.id}
               className="group flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-surface-1"
               onDoubleClick={() => playAt(track)}
+              {...tapToPlay(() => playAt(track))}
             >
               <button
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-4 bg-surface-2 text-ink-2 opacity-0 transition-opacity group-hover:border-accent group-hover:opacity-100"

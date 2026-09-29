@@ -72,6 +72,9 @@ public class OliAudioService extends MediaSessionService {
     session = new MediaSession.Builder(this, engine.sessionPlayer)
         .setSessionActivity(PendingIntent.getActivity(this, 0, open, flags))
         .build();
+    // The app drives the player directly and never connects a MediaController, so Media3 would not know this session
+    // and never post the playback notification (controls on the lock screen / notification shade). Register it.
+    addSession(session);
     instance = this;
     starting = false;
     List<EngineTask> todo = new ArrayList<>(PENDING);

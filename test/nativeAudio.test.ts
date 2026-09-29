@@ -198,6 +198,27 @@ describe('NativeAudio', () => {
     expect(audio.error).toBeNull()
   })
 
+  it('play() after an error opens the same song again at the same place (the phone call took the audio device)', async () => {
+    const { audio, calls, fire, token, events } = setup()
+    audio.src = 'file:///a.flac'
+    await settle()
+    await audio.play()
+    fire('state', state(token()))
+    fire('time', { token: token(), positionMs: 83000, durationMs: 200000, bufferedMs: 0 })
+    fire('error', { token: token(), code: 3, codeName: 'ERROR_CODE_AUDIO_TRACK_INIT_FAILED', message: 'AudioTrack init failed' })
+    expect(audio.error).not.toBeNull()
+    calls.length = 0
+    events.length = 0
+    await audio.play()
+    await settle()
+    // not a plain play() to an idle player: the source is loaded again, from 83 s, playing
+    expect(calls.map((c) => c.name)).toEqual(['loadSource'])
+    expect(calls[0].arg).toMatchObject({ url: 'file:///a.flac', startPositionMs: 83000, autoplay: true, token: token() })
+    expect(audio.error).toBeNull()
+    fire('state', state(token(), { positionMs: 83000 }))
+    expect(audio.paused).toBe(false)
+  })
+
   it('reports an error when the native load itself fails', async () => {
     const { audio, events, failNext } = setup()
     failNext('loadSource')

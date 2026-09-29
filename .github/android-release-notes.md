@@ -4,7 +4,20 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.8.0: choose which folders to scan
+### What is new in 0.9.0: fixes from the first phone test
+- **A tap plays the song** (Songs, search results, playlists, history, Up next). Song info is in the row's ... menu.
+- **The back button / gesture goes back** a page (closes Now Playing first) and only leaves the app from the home page.
+- **Covers**: the cover inside FLAC files is now read by Oli itself (Android's reader misses many), on separate threads so the player is never held up. The notification and lock screen show the cover too.
+- **The player appears in the notification shade** and on the lock screen (the playback service was not registered before). Allow notifications when Android asks.
+- **After a call or other audio**, pressing play carries on from the same place instead of doing nothing; if Android ended the audio service, Oli loads the song again by itself.
+- **Now Playing fills the screen** and has shuffle, repeat, queue, history and lyrics.
+- **Downloads**: a red number on the Downloads tab shows how many files are waiting or downloading; the notification shows it too ("3 files left"), including YouTube downloads (before, the download notification could vanish while only YouTube songs downloaded).
+- **Reveal** opens your Files app at the song's folder when Android allows it; otherwise it tells you where the file is (files Oli downloads live in a folder Android hides from file managers).
+- **Bigger limits (PC and phone)**: playlists up to 2,000 songs, a Mix up to 500 (a Mix ends near 380 anyway); "Songs prepared ahead" 1-10 (PC), "Simultaneous YouTube downloads" 1-6 (PC and phone; the phone uses 2 until you change it). A queued playlist is never dropped from the Downloads list.
+- **YouTube starts faster**: looking up the song you tapped no longer waits behind running downloads, a failing lookup gives up after 30 s instead of 60 s, the next 3 songs are prepared two at a time, and the lookup method that worked last time is tried first.
+- **Your queue is remembered**: close the app with a 200-song YouTube queue and open it later: the queue is back and the song you were on resumes at the same place (only that one song is looked up again).
+
+### Already in 0.8.0: choose which folders to scan
 - **Settings > Library > "Choose folder"** opens Android's folder picker, like "Add folders" on the PC. Oli then scans only that folder (and the folders inside it). Add as many folders as you like, on the phone or on a memory card; each shows its song count and has its own remove button.
 - A folder inside one you already added is not added twice; a folder that contains folders you added takes them over (favorites, play counts and playlists stay).
 - **"All phone music"** is still there to scan everything Android knows about. Choosing a folder while it is on asks first, because songs outside the folder then leave the library (your files are never touched).

@@ -222,8 +222,12 @@ describe('DownloadQueue', () => {
     expect(q.list().find((d) => d.id === 'r6')).toMatchObject({ state: 'failed', error: 'Interrupted' })
   })
 
-  it('the list and the jobs are saved, and kept to the newest 200', async () => {
+  it('waiting downloads are never forgotten (a queued playlist stays whole); finished ones are kept to the newest 200', async () => {
     q.add(Array.from({ length: 210 }, (_, i) => ({ title: `S${i}`, job: job(i) })))
+    q.flush()
+    expect(store.items).toHaveLength(210)
+    expect(Object.keys(store.jobs)).toHaveLength(210)
+    for (const d of q.list()) q.cancel(d.id)
     q.flush()
     expect(store.items).toHaveLength(200)
     expect(Object.keys(store.jobs)).toHaveLength(200)

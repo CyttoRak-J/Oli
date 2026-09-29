@@ -5,7 +5,7 @@ first** for what was changed recently, what is verified, and what is still open.
 
 ## Commands
 - `npm run dev` runs the app (uses the user's REAL library in `%APPDATA%\Oli`, see "Data safety").
-- `npm run typecheck`, `npm run lint`, `npm test` (vitest, 233 tests in 31 files), `npm run build`. Keep all four green.
+- `npm run typecheck`, `npm run lint`, `npm test` (vitest, 237 tests in 32 files), `npm run build`. Keep all four green.
 - Git repo (`core.autocrlf=false`, files are LF). GitHub: https://github.com/CyttoRak-J/Oli (branch `main`; the pre-2026-09-29
   history there is an older, different code lineage that this project was committed on top of). Pushing a `v*` tag runs
   `.github/workflows/build.yml` (Windows installer + macOS dmg/zip, then a GitHub Release with SHA256SUMS). The pre-git code is in
@@ -21,7 +21,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `ANDROID_PLAN.md` first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.8.0), never run on a real phone.
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.0); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in `ANDROID_PLAN.md`.
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -60,13 +60,13 @@ first** for what was changed recently, what is verified, and what is still open.
   Quirk: some awaited evaluations return "Promise was collected": fire the action, then poll a window variable.
   Remove the debug-port launch entry afterwards.
 - Android: `scripts/android-harness` runs the phone build in a throwaway Electron window with Capacitor's real bridge and stand-ins for the plugins (see its README;
-  `powershell -File scripts\android-harness\run-all.ps1` runs all 114 checks). There is no Android SDK on the PC: push branch `android-dev` to compile-check the Java (read the run through
+  `powershell -File scripts\android-harness\run-all.ps1` runs all 133 checks). There is no Android SDK on the PC: push branch `android-dev` to compile-check the Java (read the run through
   the public GitHub API; failures are published as annotations), tag `android-vX.Y.Z` to release. Pure Java classes are compiled and tested with the PC's JDK (`scripts/android-tags`).
 - Never write repository files with PowerShell `Set-Content -Encoding utf8` (byte-order mark broke `build.gradle`); use the Write/Edit tools or scripts that keep LF.
 - Stop test windows by process id (their electron.exe), never by window title "Oli": a desktop Oli may be running.
 
 ## Android rules learned the hard way (do not undo)
-- The phone build must keep all phone code out of the desktop bundle (`__OLI_WEB__`, empty `webBackend` stand-in in `electron.vite.config.ts`); check with `grep nativecommand out/renderer/assets/*.js`.
+- The phone build must keep all phone code out of the desktop bundle (`__OLI_WEB__`, empty `webBackend` stand-in in `electron.vite.config.ts`); check that `grep -c "OliAudio\|OliMedia\|OliYouTube\|OliDownload" out/renderer/assets/*.js` finds nothing (the single word `nativecommand` is the shared player store's own listener and is expected).
 - Song rows are windowed (`lib/useRowWindow.ts`, rows exactly 46 px): do not add a variable-height row to `SongTable` without changing the maths; keep `overflow-anchor: none` on the list.
 - The player store talks to an `AudioLike`; `NativeAudio` tags every event with a token and drops events of an older source. Do not let the store touch `HTMLMediaElement` APIs other than through that interface.
 - Capacitor plugin proxies are thenables: never `await` or return one from an async function.

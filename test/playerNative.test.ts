@@ -58,7 +58,8 @@ vi.mock('../src/renderer/src/lib/ipc', () => ({
   resolveDownloadYouTubeAudio: vi.fn(async () => null),
   getSimilarTracks: vi.fn(async () => []),
   prefetchYouTubeStreams: vi.fn(),
-  getMediaBase: vi.fn(async () => '')
+  getMediaBase: vi.fn(async () => ''),
+  getEmbeddedArtwork: vi.fn(async () => null)
 }))
 
 const { usePlayer, applyAudioSettings } = await import('../src/renderer/src/store/player')
@@ -118,6 +119,16 @@ describe('player store on the native audio player', () => {
     const s = usePlayer.getState()
     expect(s.status).toBe('playing')
     expect(s.duration).toBe(200)
+  })
+
+  it('gives the notification the cached cover of a local song as a file URI', async () => {
+    const ipc = await import('../src/renderer/src/lib/ipc')
+    vi.mocked(ipc.getEmbeddedArtwork).mockResolvedValueOnce('https://localhost/_capacitor_file_/data/user/0/com.cyttos.oli/cache/art/al%20bum.jpg')
+    usePlayer.getState().playTracks([track('a'), track('b')], 0, { source: 'library', sourceId: null })
+    await settle()
+    const labels = calls.filter((c) => c.name === 'setMetadata').map((c) => c.arg)
+    expect(labels[0]).toMatchObject({ title: 'Title a', artworkUri: '' })
+    expect(labels.at(-1)).toMatchObject({ title: 'Title a', artworkUri: 'file:///data/user/0/com.cyttos.oli/cache/art/al bum.jpg' })
   })
 
   it('moves to the next song by itself when the native player reaches the end', async () => {

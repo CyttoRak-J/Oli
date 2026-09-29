@@ -193,7 +193,7 @@ app this does not matter; for the existing library it does (see the legacy migra
                         AlphabetFilter ListJumpButtons SearchBox ThemedSelect Tip EmptyState HistoryPanel YtEngineBanner
                         LibraryStatsTabs LinkDownloadForm AddToPlaylistDialog SleepTimer ShortcutsPanel cn.ts
            mini/MiniPlayer.tsx   bubble/Bubble.tsx
-  test/   31 files (+ test/fixtures/yt), see section 15
+  test/   32 files (+ test/fixtures/yt), see section 15
 ```
 Path aliases: `@shared/*` -> `src/shared/*` (main, preload, renderer, tests); `@renderer/*` -> `src/renderer/src/*`.
 Line endings: **LF everywhere**. Set `git config core.autocrlf false`.
@@ -4283,7 +4283,7 @@ Commit after each. Run `npm run typecheck && npm run lint && npm test` at every 
 ---
 
 ## 15. Tests (vitest, `test/*.test.ts`, node environment)
-Reference count: **233 tests in 31 files** (111 in 17 files for the desktop app alone, the rest for Android). Write these (names = files):
+Reference count: **237 tests in 32 files** (111 in 17 files for the desktop app alone, the rest for Android). Write these (names = files):
 - `identity.test.ts` and `legacyIds.test.ts`: fixed input -> exact 16-hex ids; artist/album/song id rules; hash unchanged.
 - `database.test.ts`: damaged file is kept aside; recovery from `backups/`; restore validates before swapping.
 - `migrations.test.ts`: fresh database ends at the latest version; migration 9 repairs an old schema; idempotent.
@@ -4305,7 +4305,7 @@ Android tests (section 20; the Java ones are skipped when no JDK is installed):
 - `nativeAudio.test.ts`, `playerNative.test.ts`: the audio-element look-alike (events, tokens, outside pause/resume, errors) and the real player store on top of it; wording of the output report.
 - `phoneLibrary.test.ts` (real sql.js database + fake plugin), `phoneEditBackup.test.ts` (tag editing rules, backup/restore round trip, refuses a non-Oli file), `downloadQueue.test.ts`, `downloadQueueYoutube.test.ts`, `androidUpdate.test.ts`, `rowWindow.test.ts`.
 - `youtubeCore.test.ts` (real yt-dlp output in `test/fixtures/yt`), `youtubeService.test.ts` (fake plugin).
-- Java compiled with `javac` and run: `androidTagWriter.test.ts` (FLAC/MP3 tag + cover writers, audio bytes identical, read back by an independent library), `androidDownload.test.ts` (resume, pause, checksum ... against a local server), `androidYtOutput.test.ts` (yt-dlp progress lines and metadata escaping), `androidFolderScope.test.ts` (a picked folder -> MediaStore filter).
+- Java compiled with `javac` and run: `androidTagWriter.test.ts` (FLAC/MP3 tag + cover writers, audio bytes identical, read back by an independent library), `androidDownload.test.ts` (resume, pause, checksum ... against a local server), `androidYtOutput.test.ts` (yt-dlp progress lines and metadata escaping), `androidFolderScope.test.ts` (a picked folder -> MediaStore filter), `androidFlacPicture.test.ts` (the cover inside a FLAC file).
 
 ---
 
@@ -4379,14 +4379,14 @@ Do this only after asking the user for the repository (`owner/repo`) and confirm
 5. **Verify the release**: `GET /repos/<owner>/<repo>/releases/tags/vX.Y.Z` lists the assets. Download the Windows installer and compare its SHA-256 with `SHA256SUMS.txt`.
 6. **Say plainly what is not verified**: macOS builds were only built and signature-checked (`codesign --verify`), never launched on a real Mac; nothing is notarized.
 
-## 20. Android (Capacitor app, phases 0.5 to 5 built plus the folder picker; version 0.8.0)
+## 20. Android (Capacitor app, phases 0.5 to 5 built plus the folder picker and the first-phone fixes; version 0.9.0)
 The desktop app is Electron, which does not run on Android. Options that were considered (ask the user which one; the reference took option A, see `ANDROID_PLAN.md`):
 - **A. Capacitor app reusing the React UI plus native Java plugins** (what the reference is): the screens and the desktop *services* (database, library queries, playlists, ...) run unchanged inside the web view; native Android code is used only where a phone requires it.
 - **B. Full native app (Kotlin, Jetpack Compose, Media3, Room, MediaStore)**: best experience, a complete rewrite. The owner's rule (Section 20.9): switch to B if the phone app lags, crashes or loses background playback.
 
 Either way Google Play policy rejects apps that download YouTube content, so the APK is distributed on GitHub Releases, not through Play. The APK is built by GitHub Actions (Temurin JDK 21, `./gradlew assembleRelease`, Android SDK on the runner).
 
-**Reference repository and status.** The exact source of everything below is in the repository at tag `android-v0.8.0`; this section is the specification and the reasons. **Built and CI-compiled, proven in a PC test window, and NOT yet run on a real phone or emulator** (there is no Android SDK on the development PC). Anything native (Java) is verified only by: it compiles and packages in CI, the pure-Java parts are compiled and tested with the PC's JDK, and the JavaScript side is exercised against stand-ins for the plugins (20.7).
+**Reference repository and status.** The exact source of everything below is in the repository at tag `android-v0.9.0`; this section is the specification and the reasons. **Built and CI-compiled, proven in a PC test window, and NOT yet run on a real phone or emulator** (there is no Android SDK on the development PC). Anything native (Java) is verified only by: it compiles and packages in CI, the pure-Java parts are compiled and tested with the PC's JDK, and the JavaScript side is exercised against stand-ins for the plugins (20.7).
 
 ### 20.1 Layers
 1. **Screens:** the same React code. `lib/platform.ts` `shellPlatform()` returns `desktop | android | web` (from `window.cytto.platform`); the phone shell shows `MobileNav` + `MobilePlayerBar`, hides the title bar and sidebar, and the song table shows one line per song.
@@ -4410,6 +4410,21 @@ Either way Google Play policy rejects apps that download YouTube content, so the
 - **JavaScript:** `platform/phoneLibrary.ts` (`PhoneLibrary`: permission, paging, diff against the database by file mtime, songs that vanished are marked `missing` and return when the file returns, details read in the background in batches of 20, lossy files marked as read without a probe, per-album cover lookup with in-flight sharing, `describeFile` for a fresh download), `platform/phoneStore.ts` (all SQL: location row `phone:mediastore`/"Phone music", bulk upsert in one transaction with a path-conflict rule for moved files, mark missing, patch details, `codecsOf`, `songLocation`), wiring in `webBackend.ts` (`addLibraryFolder` = "All phone music" or, with the folder mode, the folder picker (20.3a), `rescanLibrary`, `cancelScan`, `getScanState`, `getEmbeddedArtwork` (returns `Capacitor.convertFileSrc('file://'+path)`), ask once on the very first start, scan on launch when `scanOnLaunch`, rescan on `mediaChanged` at most every 30 s).
 - **Decisions:** song id = `songIdForPath("<RELATIVE_PATH><file name>")` (the desktop cyrb64 scheme; stable when Android renumbers its ids); the row's `path` is the `content://` URI ExoPlayer plays; `modified_at` = file mtime (unchanged files are skipped); `sample_rate` NULL = details never read, 0 = read (or lossy) with nothing to add; a changed file resets rate/bit depth/channels and is re-read; a moved file keeps its old row (missing) and gives up its `path` (`path || '#moved:' || id`) so playlists keep pointing at something. **Not built:** a Storage Access Framework file walk for folders MediaStore does not list, duplicate detection, ReplayGain/lyrics from MP3/M4A tags, bit depth of 24-bit ALAC.
 - **Tests:** `test/phoneLibrary.test.ts` runs the scanner against a fake plugin and a REAL sql.js database (it found a real bug: a wrong SQL placeholder count made every scan fail); ids equal the desktop scheme.
+
+### 20.3b First-phone fixes (0.9.0)
+Written after the owner's first real-phone test (the table with causes is in `ANDROID_PLAN.md`). What to build, in the order of the reports:
+- **Taps:** `lib/rowTap.ts` `tapToPlay(play)` returns an `onClick` only on a phone: a click that does not come from a button/link/input inside the row plays the row; the title button plays on a phone (it opens the info on the PC). Used by `SongTable`, `LocalRow`, `History`, `PlaylistDetail`, `NowPlaying` (Up next).
+- **Back:** `MainActivity` registers an `OnBackPressedCallback` that runs `window.__oliBack()` in the web view (`evaluateJavascript`); when it does not return `true` the task moves to the background (`moveTaskToBack`). `App.tsx` defines `__oliBack` on a phone: close the open panel; at `/` return false; else `navigate(-1)` when the router's history index is above 0, else `navigate('/')`.
+- **Covers:** `FlacPicture.find(InputStream)` (pure Java: skips an ID3v2 header, walks the metadata blocks, returns the PICTURE block's data, preferring type 3 = front cover) is tried after MediaMetadataRetriever and before `loadThumbnail`; `getArtwork` and `probeFiles` run on a 3-thread pool (`BG`) because Capacitor executes every plugin call on one shared thread; `PhoneLibrary.artworkFor` caches "no cover" answers but not failed calls.
+- **Notification:** `OliAudioService` calls `addSession(session)` right after building the `MediaSession` (the app never connects a `MediaController`, so Media3 otherwise never learns the session and never posts the notification). For a local song the store looks up the cached cover (`getEmbeddedArtwork`), turns the `/_capacitor_file_/...` URL back into `file://` and calls `setMetadata` again (the engine replaces the item's metadata in place).
+- **Resume after an interruption:** `OliAudioEngine.play()/seekTo()` call `revive()` (prepare again when the state is IDLE) and `reloadLast(...)`: a static `Last` record (url, headers, bit depth hint, token, position, labels) survives the service; when a new engine has no media item, play/seek load the remembered song at the remembered position. `NativeAudio.play()` after an `error` event reopens the same source (`loadSource` with `startPositionMs`, `autoplay: true`, same token); the store's `play()`/`toggle()` no longer return early when `audio.error` is set.
+- **Now Playing on a phone:** `RightPanel` is `absolute inset-0 z-30` on a phone (400 px column on the PC); `NowPlaying` adds a row with shuffle, repeat (off/all/one), queue, history, lyrics on a phone; cover at most 34 vh.
+- **Downloads count:** `MobileNav` shows a red badge (`aria-label="N downloading"`, 99+ cap) for `queued + downloading` items of the `['downloads']` query (kept live by `onDownloadsChanged`). `OliDownloadService` counts `engine.activeCount() + OliYouTubePlugin task count` (`externalCount`), shows `setNumber(n)` and "n files left", and is refreshed by `externalState/externalProgress` calls from the YouTube plugin.
+- **Reveal:** `OliMedia.revealFile {uri}` reads RELATIVE_PATH/VOLUME_NAME (API 29+) or DATA, builds the DocumentsUI folder address for `com.android.externalstorage.documents` and starts `ACTION_VIEW` with `vnd.android.document/directory`; folders under `Android/data|obb` are not opened; the answer `{opened, path}` lets the page show the path (`window.alert`) when nothing opened.
+- **Limits:** `PLAYLIST_LIMIT = 2000`, `MIX_LIMIT = 500`, `enqueueEntries` accepts 2,000; `songsAhead` 1-10 and `ytConcurrency` 1-6 (clamped in `main/index.ts`, `downloads.ts`, Settings); `OliYouTubePlugin.setConcurrency {count}` resizes a fair semaphore `SLOTS` (6 worker threads; the phone stores `ytConcurrency` 2 once when it was the PC default 1) and the setting is pushed on start and on `onSettingsChanged`; `DownloadQueue.flush` forgets only finished items beyond 200.
+- **Speed:** `ASK_SLOTS` (3) for searches, playlists and stream lookups, separate from the download `SLOTS`; a stream lookup tries `default, embed, vr` with the client that answered last first, 30 s per attempt; `YouTubeService.prefetch` runs two lookups at a time and the store prefetches the next 3 queue songs.
+- **Queue memory:** `resumePlayback()` takes the last song from the library database, else from the restored queue (YouTube songs are stored with their whole `Track` in `queue.track_json`), plays it, and seeks to `lastPositionSeconds` once the length is known (polling up to 30 s).
+- **Tests:** `test/androidFlacPicture.test.ts` (Java, byte-exact cover round trip), `test/nativeAudio.test.ts` (reopen after an error), `test/playerNative.test.ts` (cover for the notification), `scripts/android-harness/e2e-phone.cjs` (19 checks; the stand-in's `fail()`/`sticky` imitate the idle player).
 
 ### 20.3a Choosing which folders are scanned (0.8.0)
 The PC app has "Add folders"; the phone has **Settings > Library > Choose folder** (plus the older **All phone music**). Design: keep MediaStore as the source (so the music permission, `content://` playback and covers stay as they are) and only *filter* its list by the chosen folder.
@@ -4441,7 +4456,7 @@ The PC app has "Add folders"; the phone has **Settings > Library > Choose folder
 ### 20.7 Testing without a phone (all of it worked in the reference)
 - **PC test window** (`scripts/android-harness`, see its README): a throwaway Electron window with **no** desktop preload loads the built phone bundle (`OLI_TEST_HOOKS=1 OLI_OUT_DIR=out/renderer-android-test vite build -c vite.android.config.ts`; the hook exposes `window.__oliPlayer`, normal builds do not have it). The preload loads Capacitor's real `native-bridge.js` with `window.androidBridge`, so `Capacitor.getPlatform()` is `android` and plugin calls travel the real call/notify protocol; stand-ins answer `OliAudio` (plays real audio through an `<audio>` element), `OliMedia` (lists songs of the owner's music folder, reads real FLAC headers, `OLI_HARNESS_SONGS=N` makes N made-up songs), `OliDownload` (Node downloader with Range/pause/cancel/MD5), `OliYouTube` (real yt-dlp JSON from `test/fixtures/yt`), `Filesystem`, `Share`, and a fake archive.org item. Chromium blocks port 5060; the static server uses 8765. Suites: `e2e.cjs` (20 checks), `e2e-library.cjs` (19 + 3 for a refused permission), `e2e-downloads.cjs` (23), `e2e-youtube.cjs` (27), `e2e-list.cjs` (8), `perf.cjs` (speed numbers), `run-all.ps1` runs them all. Stop the window by process id, never by window title.
 - **Java without Android:** `javac` from the PC's JDK compiles the pure classes (`scripts/android-tags/*Cli.java` are the test entry points); everything else is compiled by the `android-dev` branch build in CI (push the branch; a tag would publish a release). Read a failed run through `https://api.github.com/repos/<owner>/<repo>/check-runs/<job id>/annotations`.
-- **Results at 0.8.0:** 233 unit tests in 31 files, 114 checks in the PC window (97 at the end of phase 5, plus the 17 of the folder suite), CI builds and `apksigner verify` for every tag.
+- **Results at 0.9.0:** 237 unit tests in 32 files, 133 checks in the PC window (97 at the end of phase 5, plus 17 for folders and 19 for the phone fixes), CI builds and `apksigner verify` for every tag.
 - Gotchas: newer npm skips install scripts, so `npm install <package>` can leave `node_modules/electron/dist` missing (`node node_modules/electron/install.js`); never write repository files with PowerShell `Set-Content -Encoding utf8` (it adds a byte-order mark that broke `build.gradle`); scripts must not match their own command line when they stop test windows.
 
 ### 20.8 Files worth reading first (contracts)
@@ -4590,7 +4605,20 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.8.0: choose which folders to scan
+### What is new in 0.9.0: fixes from the first phone test
+- **A tap plays the song** (Songs, search results, playlists, history, Up next). Song info is in the row's ... menu.
+- **The back button / gesture goes back** a page (closes Now Playing first) and only leaves the app from the home page.
+- **Covers**: the cover inside FLAC files is now read by Oli itself (Android's reader misses many), on separate threads so the player is never held up. The notification and lock screen show the cover too.
+- **The player appears in the notification shade** and on the lock screen (the playback service was not registered before). Allow notifications when Android asks.
+- **After a call or other audio**, pressing play carries on from the same place instead of doing nothing; if Android ended the audio service, Oli loads the song again by itself.
+- **Now Playing fills the screen** and has shuffle, repeat, queue, history and lyrics.
+- **Downloads**: a red number on the Downloads tab shows how many files are waiting or downloading; the notification shows it too ("3 files left"), including YouTube downloads (before, the download notification could vanish while only YouTube songs downloaded).
+- **Reveal** opens your Files app at the song's folder when Android allows it; otherwise it tells you where the file is (files Oli downloads live in a folder Android hides from file managers).
+- **Bigger limits (PC and phone)**: playlists up to 2,000 songs, a Mix up to 500 (a Mix ends near 380 anyway); "Songs prepared ahead" 1-10 (PC), "Simultaneous YouTube downloads" 1-6 (PC and phone; the phone uses 2 until you change it). A queued playlist is never dropped from the Downloads list.
+- **YouTube starts faster**: looking up the song you tapped no longer waits behind running downloads, a failing lookup gives up after 30 s instead of 60 s, the next 3 songs are prepared two at a time, and the lookup method that worked last time is tried first.
+- **Your queue is remembered**: close the app with a 200-song YouTube queue and open it later: the queue is back and the song you were on resumes at the same place (only that one song is looked up again).
+
+### Already in 0.8.0: choose which folders to scan
 - **Settings > Library > "Choose folder"** opens Android's folder picker, like "Add folders" on the PC. Oli then scans only that folder (and the folders inside it). Add as many folders as you like, on the phone or on a memory card; each shows its song count and has its own remove button.
 - A folder inside one you already added is not added twice; a folder that contains folders you added takes them over (favorites, play counts and playlists stay).
 - **"All phone music"** is still there to scan everything Android knows about. Choosing a folder while it is on asks first, because songs outside the folder then leave the library (your files are never touched).
@@ -4850,6 +4878,25 @@ async function archiveItem(identifier: string): Promise<ArchiveItem> {
   }
 }
 
+/** "Reveal in Explorer" on the phone: open the Files app at the folder, or say where the file is. */
+async function revealOnPhone(uri: string): Promise<boolean> {
+  const plugin = getMediaPlugin()
+  if (!plugin || !uri) return false
+  try {
+    const r = await plugin.revealFile({ uri })
+    if (!r.opened) {
+      window.alert(
+        r.path
+          ? `Android does not let a file app open this folder.\n\nThe file is in:\n${r.path}`
+          : 'Oli could not find where this file is.'
+      )
+    }
+    return r.opened
+  } catch {
+    return false
+  }
+}
+
 // ------------------------------------------------------------------ downloads (native queue, see downloadQueue.ts)
 const JOBS_KEY = 'oli.downloadJobs'
 let queue: DownloadQueue | null = null
@@ -4947,6 +4994,25 @@ async function downloadCompleted(_d: DownloadItem, job: DownloadJob, file: Compl
 async function startDownloads(): Promise<void> {
   const plugin = getDownloadPlugin()
   if (!plugin) return
+  // How many YouTube songs download at once is a setting; on the phone 2 is the default (it was fixed at 2 before).
+  const ytPlugin = getYouTubePlugin()
+  const applyConcurrency = (n: unknown): void => {
+    const count = Math.max(1, Math.min(6, Number(n) || 2))
+    void ytPlugin?.setConcurrency({ count }).catch(() => undefined)
+  }
+  try {
+    const s = (await core.handlers[IPC.getSettings]()) as { ytConcurrency?: number }
+    if (localStorage.getItem('oli.ytConcurrencySet') !== '1') {
+      localStorage.setItem('oli.ytConcurrencySet', '1')
+      if ((s.ytConcurrency ?? 1) <= 1) await core.handlers[IPC.setSettings]({ ytConcurrency: 2 } as never)
+    }
+    applyConcurrency(((await core.handlers[IPC.getSettings]()) as { ytConcurrency?: number }).ytConcurrency)
+  } catch {
+    // keep the native default
+  }
+  window.cytto.on(IPC.onSettingsChanged, (patch) => {
+    if (patch && typeof patch === 'object' && 'ytConcurrency' in patch) applyConcurrency((patch as { ytConcurrency?: number }).ytConcurrency)
+  })
   queue = new DownloadQueue({
     plugin,
     youtube: getYouTubePlugin() ?? undefined,
@@ -5119,7 +5185,7 @@ const youtubeHandlers: Record<string, Handler> = {
   }) as Handler,
   [IPC.enqueueEntries]: ((entries: Array<{ videoId: string; title: string; duration?: number; track?: { name: string; artists: string[]; album: string | null } }>, opts?: { mode?: string; audio?: string; height?: number }) => {
     if (!queue || !yt || !Array.isArray(entries)) return { found: 0, enqueued: 0 }
-    const clean = entries.filter((x) => x && typeof x.videoId === 'string' && typeof x.title === 'string').slice(0, 300)
+    const clean = entries.filter((x) => x && typeof x.videoId === 'string' && typeof x.title === 'string').slice(0, 2000)
     const mode = opts?.mode === 'video' ? 'video' : 'song'
     return { found: clean.length, enqueued: queue.add(youtubeEntries(clean, mode, audioChoice(opts?.audio), Number(opts?.height) || 0)) }
   }) as Handler,
@@ -5273,7 +5339,7 @@ const phoneHandlers: Record<string, Handler> = {
   [IPC.metaNeedsAttention]: empty,
   [IPC.getEmbeddedArtwork]: ((songId: string) =>
     phoneLib ? phoneLib.artworkFor(songId, (p) => deviceFileUrl(`file://${p}`)) : null) as Handler,
-  [IPC.revealInExplorer]: () => false,
+  [IPC.revealInExplorer]: (async (uri: string) => revealOnPhone(uri)) as Handler,
   [IPC.getMediaBase]: () => '',
   [IPC.probeDuration]: noop,
   [IPC.transcodeLocalFile]: noop,
@@ -5327,7 +5393,10 @@ const phoneHandlers: Record<string, Handler> = {
     queue?.retry(id)
     return null
   }) as Handler,
-  [IPC.revealDownload]: () => false,
+  [IPC.revealDownload]: (async (id: string) => {
+    const item = queue?.list().find((d) => d.id === id)
+    return item?.destPath ? revealOnPhone(item.destPath) : false
+  }) as Handler,
   [IPC.openDownloadsFolder]: noop,
   [IPC.videoPickFolder]: noop,
   // Internet Archive

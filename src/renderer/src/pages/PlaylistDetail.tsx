@@ -18,6 +18,7 @@ import { cn } from '../components/cn'
 import { Artwork } from '../components/Artwork'
 import { formatDuration } from '../lib/format'
 import { EmptyState } from '../components/EmptyState'
+import { tapToPlay } from '../lib/rowTap'
 
 export function PlaylistDetail(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -164,6 +165,7 @@ export function PlaylistDetail(): React.JSX.Element {
                 onDoubleClick={() =>
                   player.playTracks(tracks, index, { source: 'playlist', sourceId: p.id })
                 }
+                {...tapToPlay(() => player.playTracks(tracks, index, { source: 'playlist', sourceId: p.id }))}
               >
                 {editable && <GripVertical size={14} className="shrink-0 cursor-grab text-ink-3" />}
                 <span className="w-5 text-center text-[12px] tabular-nums text-ink-3">

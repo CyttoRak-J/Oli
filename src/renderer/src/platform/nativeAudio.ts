@@ -350,9 +350,38 @@ export class NativeAudio extends EventTarget implements AudioLike {
       return Promise.reject(new DOMException('The element has no supported sources.', 'NotSupportedError'))
     }
     const wasPaused = this._paused
+    // The player failed earlier (a phone call took the audio device, the network dropped) and sits idle: open the same
+    // source again at the same place instead of asking an idle player to play.
+    const reopen = this._error !== null
+    const resumeAt = this._currentTime
+    if (reopen) {
+      this._error = null
+      this._readyState = HAVE_NOTHING
+      this.waiting = false
+      this.playing = false
+    }
     this._paused = false
     this.awaiting = true
     this.awaitUntil = Date.now() + 1500
+    if (reopen) {
+      const rawUrl = this._src
+      const url = rawUrl.startsWith('/') ? `file://${encodeURI(rawUrl)}` : rawUrl
+      const token = this.token
+      const md = this.metadata
+      this.emit('play')
+      this.emit('waiting')
+      this.waiting = true
+      return this.send(async () => {
+        await this.plugin.loadSource({
+          url,
+          headers: streamHeaders.get(url),
+          startPositionMs: Math.max(0, Math.round(resumeAt * 1000)),
+          autoplay: true,
+          bitDepth: md?.bitDepth,
+          token
+        })
+      })
+    }
     if (wasPaused) this.emit('play')
     if (this._readyState < HAVE_ENOUGH_DATA && !this.waiting) {
       this.waiting = true

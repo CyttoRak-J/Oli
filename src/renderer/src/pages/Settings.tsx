@@ -232,33 +232,37 @@ export function Settings(): React.JSX.Element {
         </Section>
 
         <Section title="Downloads">
-          <Row label="Songs prepared ahead (1-5)">
-            <NumberInput
-              value={s.songsAhead}
-              min={1}
-              max={5}
-              step={1}
-              onChange={(v) => set({ songsAhead: v })}
-            />
-          </Row>
-          <div className="text-[12px] text-ink-3">
-            While one song downloads, the next songs' metadata (cover, artist, album, genre) is
-            resolved in advance so each one starts instantly. Needs the Spotify keys above for
-            best matches; falls back to the iTunes catalog when not configured.
-          </div>
-          <Row label="Simultaneous YouTube downloads (1-3)">
+          {!isMobileShell() && (
+            <>
+              <Row label="Songs prepared ahead (1-10)">
+                <NumberInput
+                  value={s.songsAhead}
+                  min={1}
+                  max={10}
+                  step={1}
+                  onChange={(v) => set({ songsAhead: v })}
+                />
+              </Row>
+              <div className="text-[12px] text-ink-3">
+                While one song downloads, the next songs' metadata (cover, artist, album, genre) is
+                resolved in advance so each one starts instantly. Needs the Spotify keys above for
+                best matches; falls back to the iTunes catalog when not configured.
+              </div>
+            </>
+          )}
+          <Row label="Simultaneous YouTube downloads (1-6)">
             <NumberInput
               value={s.ytConcurrency}
               min={1}
-              max={3}
+              max={6}
               step={1}
               onChange={(v) => set({ ytConcurrency: v })}
             />
           </Row>
           <div className="text-[12px] text-ink-3">
-            YouTube downloads normally run one at a time — running several yt-dlp processes at
-            once can trip YouTube's bot check and fail them all. Only raise this if you
-            regularly queue many songs and rarely see failures.
+            {isMobileShell()
+              ? 'How many YouTube songs the phone downloads at the same time. More is faster but uses more battery and data at once; if downloads start failing, lower it.'
+              : "YouTube downloads normally run one at a time — running several yt-dlp processes at once can trip YouTube's bot check and fail them all. Only raise this if you regularly queue many songs and rarely see failures."}
           </div>
         </Section>
 

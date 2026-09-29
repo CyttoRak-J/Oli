@@ -38,6 +38,8 @@ export interface OliYouTubePlugin {
   resume(o: { id: string }): Promise<void>
   cancel(o: { id: string }): Promise<void>
   getActive(): Promise<{ ids: string[] }>
+  /** How many YouTube downloads run at the same time (1 to 6). */
+  setConcurrency(o: { count: number }): Promise<void>
   addListener(event: string, cb: (data: never) => void): Promise<ListenerHandle> | ListenerHandle
 }
 
@@ -81,7 +83,7 @@ export class YouTubeService {
   private channels = new Map<string, string>()
   private inflight = new Map<string, Promise<unknown>>()
   private prefetchQueue: string[] = []
-  private prefetching = false
+  private prefetchWorkers = 0
   private readonly now: () => number
 
   constructor(private opts: YouTubeServiceOptions) {
@@ -295,18 +297,20 @@ export class YouTubeService {
     const fresh = videoIds.filter((id) => isVideoId(id) && !this.cachedStreams(id) && !this.prefetchQueue.includes(id))
     if (priority) this.prefetchQueue.unshift(...fresh)
     else this.prefetchQueue.push(...fresh)
-    if (this.prefetching) return
-    this.prefetching = true
-    void (async () => {
-      try {
-        while (this.prefetchQueue.length > 0) {
-          const id = this.prefetchQueue.shift() as string
-          await this.resolveStream(id)
+    // two songs at a time: each is a separate yt-dlp run, and a playing song's next ones are wanted soon
+    while (this.prefetchWorkers < 2 && this.prefetchQueue.length > 0) {
+      this.prefetchWorkers++
+      void (async () => {
+        try {
+          while (this.prefetchQueue.length > 0) {
+            const id = this.prefetchQueue.shift() as string
+            await this.resolveStream(id)
+          }
+        } finally {
+          this.prefetchWorkers--
         }
-      } finally {
-        this.prefetching = false
-      }
-    })()
+      })()
+    }
   }
 }
 

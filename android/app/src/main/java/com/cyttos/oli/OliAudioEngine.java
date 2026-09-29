@@ -301,13 +301,52 @@ final class OliAudioEngine {
     lastSinkError = "";
     applyBitPerfect();
 
+    Last l = new Last();
+    l.url = url;
+    l.headers = headers;
+    l.bitDepth = bitDepthHint;
+    l.token = token;
+    l.positionMs = Math.max(0, startMs);
+    last = l;
+
     MediaItem item = new MediaItem.Builder().setUri(uri).setMediaId(url).build();
     player.setMediaItem(item, startMs > 0 ? startMs : C.TIME_UNSET);
     player.prepare();
     player.setPlayWhenReady(autoplay);
   }
 
+  /** After an error (a phone call took the audio device, a network drop) the player sits idle: prepare again, same place. */
+  private void revive() {
+    if (player.getPlaybackState() == Player.STATE_IDLE && player.getMediaItemCount() > 0) player.prepare();
+  }
+
+  /** What is loaded, kept outside the engine: if Android ended the service and a new engine starts empty, play/seek load it again. */
+  private static final class Last {
+    String url;
+    Map<String, String> headers;
+    int bitDepth;
+    String token;
+    volatile long positionMs;
+    String title = "";
+    String artist = "";
+    String album = "";
+    String art = "";
+  }
+
+  private static volatile Last last = null;
+
+  /** True when this (new) engine has nothing loaded although the app loaded a song earlier; it is loaded again. */
+  private boolean reloadLast(long positionMs, boolean autoplay) {
+    Last l = last;
+    if (l == null || player.getMediaItemCount() > 0) return false;
+    load(l.url, l.headers, positionMs, autoplay, l.bitDepth, l.token);
+    setMetadata(l.title, l.artist, l.album, l.art);
+    return true;
+  }
+
   void play() {
+    if (reloadLast(last == null ? 0 : last.positionMs, true)) return;
+    revive();
     if (player.getPlaybackState() == Player.STATE_ENDED) player.seekTo(0);
     player.play();
   }
@@ -317,6 +356,7 @@ final class OliAudioEngine {
   }
 
   void stop() {
+    last = null;
     main.removeCallbacks(ticker);
     player.stop();
     player.clearMediaItems();
@@ -326,6 +366,8 @@ final class OliAudioEngine {
   }
 
   void seekTo(long positionMs) {
+    if (reloadLast(Math.max(0, positionMs), false)) return;
+    revive();
     player.seekTo(Math.max(0, positionMs));
   }
 
@@ -339,6 +381,13 @@ final class OliAudioEngine {
   }
 
   void setMetadata(String title, String artist, String album, String artworkUri) {
+    Last l = last;
+    if (l != null) {
+      l.title = title == null ? "" : title;
+      l.artist = artist == null ? "" : artist;
+      l.album = album == null ? "" : album;
+      l.art = artworkUri == null ? "" : artworkUri;
+    }
     if (player.getMediaItemCount() == 0) return;
     MediaMetadata.Builder md = new MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album);
     if (artworkUri != null && !artworkUri.isEmpty()) md.setArtworkUri(Uri.parse(artworkUri));
@@ -423,6 +472,8 @@ final class OliAudioEngine {
   }
 
   private void emitState(String reason) {
+    Last l = last;
+    if (l != null && player.getMediaItemCount() > 0) l.positionMs = Math.max(0, player.getCurrentPosition());
     JSObject o = base();
     o.put("state", stateName(player.getPlaybackState()));
     o.put("playWhenReady", player.getPlayWhenReady());
@@ -436,6 +487,8 @@ final class OliAudioEngine {
   }
 
   private void emitTime() {
+    Last l = last;
+    if (l != null && player.getMediaItemCount() > 0) l.positionMs = Math.max(0, player.getCurrentPosition());
     JSObject o = base();
     long dur = player.getDuration();
     o.put("positionMs", player.getCurrentPosition());

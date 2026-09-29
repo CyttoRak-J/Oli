@@ -4,6 +4,8 @@ import { Play } from 'lucide-react'
 import type { Track } from '@shared/types'
 import { Artwork } from './Artwork'
 import { formatDuration } from '../lib/format'
+import { isMobileShell } from '../lib/platform'
+import { tapToPlay } from '../lib/rowTap'
 
 export function LocalRow({ track, onPlay }: { track: Track; onPlay: () => void }): React.JSX.Element {
   const navigate = useNavigate()
@@ -11,6 +13,7 @@ export function LocalRow({ track, onPlay }: { track: Track; onPlay: () => void }
   return (
     <div
       className="group flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-surface-1"
+      {...tapToPlay(onPlay)}
       onDoubleClick={() => {
         if (navTimerRef.current) {
           clearTimeout(navTimerRef.current)
@@ -24,10 +27,14 @@ export function LocalRow({ track, onPlay }: { track: Track; onPlay: () => void }
         <button
           className="block w-full min-w-0 break-words text-left text-[13px] font-medium leading-snug text-ink-0 hover:text-accent"
           onClick={() => {
+            if (isMobileShell()) {
+              onPlay() // phone: a tap plays
+              return
+            }
             if (navTimerRef.current) clearTimeout(navTimerRef.current)
             navTimerRef.current = setTimeout(() => navigate(`/song/${track.id}`), 250)
           }}
-          title="View song info"
+          title={isMobileShell() ? undefined : 'View song info'}
         >
           {track.title}
         </button>

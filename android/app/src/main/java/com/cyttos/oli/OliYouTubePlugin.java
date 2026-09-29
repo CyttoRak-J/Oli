@@ -36,14 +36,51 @@ public class OliYouTubePlugin extends Plugin {
   private static final Pattern VIDEO_ID = Pattern.compile("^[\\w-]{11}$");
   private static final Pattern YT_URL = Pattern.compile("^https://(www\\.|m\\.|music\\.)?(youtube\\.com|youtu\\.be)/.+");
   private static final ExecutorService WORK = Executors.newCachedThreadPool();
-  private static final ExecutorService DOWNLOADS = Executors.newFixedThreadPool(2);
+  /** Six worker threads at most; how many may run yt-dlp at once is {@link #SLOTS} (the owner's setting, 1 to 6). */
+  private static final ExecutorService DOWNLOADS = Executors.newFixedThreadPool(6);
   private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor();
-  /** yt-dlp is a whole Python program: never more than three at once. */
-  private static final Semaphore SLOTS = new Semaphore(3);
+  /** yt-dlp is a whole Python program: the number that run at once is a setting (Settings > Downloads). */
+  private static final class Slots extends Semaphore {
+    Slots(int permits) {
+      super(permits, true);
+    }
+
+    void shrink(int by) {
+      reducePermits(by);
+    }
+  }
+
+  private static final Slots SLOTS = new Slots(2);
+  /**
+   * Questions (search, playlist, stream address of the song about to play) have their own slots: they used to share the
+   * download slots, so a running download queue made every tap on a YouTube song wait until a download finished.
+   */
+  private static final Semaphore ASK_SLOTS = new Semaphore(3, true);
+  /** The client that answered the last stream question: asked first next time (a client that keeps failing costs seconds per song). */
+  private static volatile String lastGoodStreamClient = "default";
+  private static int slotLimit = 2;
+
+  /** {count: 1..6} - how many YouTube downloads run at the same time. */
+  @PluginMethod
+  public void setConcurrency(PluginCall call) {
+    int n = Math.max(1, Math.min(6, call.getInt("count", 2)));
+    synchronized (SLOTS) {
+      if (n > slotLimit) SLOTS.release(n - slotLimit);
+      else if (n < slotLimit) SLOTS.shrink(slotLimit - n);
+      slotLimit = n;
+    }
+    call.resolve();
+  }
   private static boolean ready = false;
 
   private final Map<String, DownloadTask> tasks = new ConcurrentHashMap<>();
   private final Map<String, DownloadTask> known = new ConcurrentHashMap<>();
+
+  @Override
+  public void load() {
+    // the download notification counts these together with the engine's downloads
+    OliDownloadService.externalCount = tasks::size;
+  }
 
   private File root() {
     Context ctx = getContext();
@@ -132,7 +169,7 @@ public class OliYouTubePlugin extends Plugin {
       boolean acquired = false;
       try {
         ensureInit(ctx);
-        SLOTS.acquire();
+        ASK_SLOTS.acquire();
         acquired = true;
         for (String c : clients) {
           final String pid = "q-" + System.nanoTime();
@@ -148,6 +185,7 @@ public class OliYouTubePlugin extends Plugin {
               JSObject o = new JSObject();
               o.put("json", resp.getOut());
               o.put("client", c);
+              if (clients.length == 3) lastGoodStreamClient = c;
               call.resolve(o);
               return;
             }
@@ -161,7 +199,7 @@ public class OliYouTubePlugin extends Plugin {
       } catch (Exception e) {
         call.reject(String.valueOf(e.getMessage()));
       } finally {
-        if (acquired) SLOTS.release();
+        if (acquired) ASK_SLOTS.release();
       }
     });
   }
@@ -197,6 +235,15 @@ public class OliYouTubePlugin extends Plugin {
     });
   }
 
+  /** default, embed, vr - with the client that worked last time first. */
+  private static String[] streamClients() {
+    String first = lastGoodStreamClient;
+    java.util.List<String> order = new java.util.ArrayList<>();
+    order.add(first);
+    for (String c : new String[] {"default", "embed", "vr"}) if (!c.equals(first)) order.add(c);
+    return order.toArray(new String[0]);
+  }
+
   /** {videoId, streams?} -> {json} of one video's full description (all formats, with their addresses). */
   @PluginMethod
   public void info(PluginCall call) {
@@ -207,7 +254,7 @@ public class OliYouTubePlugin extends Plugin {
     }
     final boolean streams = Boolean.TRUE.equals(call.getBoolean("streams", false));
     ask(call, "https://www.youtube.com/watch?v=" + id,
-        streams ? new String[] {"default", "embed", "vr"} : new String[] {"default", "embed"}, 60000, (r) -> {
+        streams ? streamClients() : new String[] {"default", "embed"}, streams ? 30000 : 60000, (r) -> {
           r.addOption("--no-playlist");
           r.addOption("--skip-download");
           r.addOption("-j");
@@ -257,6 +304,7 @@ public class OliYouTubePlugin extends Plugin {
     o.put("tagNote", "");
     o.put("bytes", bytes);
     notifyListeners("dlState", o);
+    OliDownloadService.externalState(id, state);
   }
 
   /**
@@ -384,6 +432,7 @@ public class OliYouTubePlugin extends Plugin {
               o.put("total", p.totalBytes);
               o.put("speed", p.bytesPerSecond);
               notifyListeners("dlProgress", o);
+              OliDownloadService.externalProgress(t.id, p.downloadedBytes, p.totalBytes);
             }
             return kotlin.Unit.INSTANCE;
           });

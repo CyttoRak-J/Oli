@@ -202,8 +202,8 @@ if (!gotLock) {
           acoustidApiKey: settings.get('acoustidApiKey')
         })
     }, {
-      songsAhead: () => Math.min(5, Math.max(1, Number(settings.get('songsAhead')) || 3)),
-      ytConcurrency: () => Math.min(3, Math.max(1, Number(settings.get('ytConcurrency')) || 1))
+      songsAhead: () => Math.min(10, Math.max(1, Number(settings.get('songsAhead')) || 3)),
+      ytConcurrency: () => Math.min(6, Math.max(1, Number(settings.get('ytConcurrency')) || 1))
     })
     void downloads.start()
     const archive = new ArchiveService()

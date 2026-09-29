@@ -8,7 +8,7 @@
 - **Faster scan:** lossy files (MP3/AAC/Opus/Vorbis) are marked as read without asking the phone for details (Android already lists their length and bit rate).
 - **Update check** (`platform/androidUpdate.ts`, `test/androidUpdate.test.ts`): compares the installed version (`versionName` injected at build time as `__OLI_ANDROID_VERSION__`) with the newest `android-vX.Y.Z` GitHub release and opens the release page in Custom Tabs (`@capacitor/browser`); nothing is installed automatically.
 - **Signing hook** (`docs/ANDROID_SIGNING.md`): the workflow signs with the owner's key when the secrets `OLI_KEYSTORE_BASE64`, `OLI_KEYSTORE_PASSWORD`, `OLI_KEY_ALIAS`, `OLI_KEY_PASSWORD` exist, else with the public alpha key. **Not switched:** the owner has to decide (one uninstall is needed the first time).
-- **Tooling:** `run-all.ps1` runs the PC suites (97 checks at 0.7.0; 114 with the folder suite added in 0.8.0); `scripts/sync-build-spec.mjs` keeps the code blocks of `BUILD_FROM_SCRATCH.md` equal to the source.
+- **Tooling:** `run-all.ps1` runs the PC suites (97 checks at 0.7.0; 114 with the folder suite added in 0.8.0, 133 at 0.9.0); `scripts/sync-build-spec.mjs` keeps the code blocks of `BUILD_FROM_SCRATCH.md` equal to the source.
 
 ## What this does NOT prove
 The PC is not a phone: the numbers are estimates for the native-rewrite triggers (see `ANDROID_PLAN.md`). Real file reads during the first scan, the web view's own cost, yt-dlp start-up and whether Android keeps the foreground services alive can only be seen on the phone.
