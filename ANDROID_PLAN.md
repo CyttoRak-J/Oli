@@ -1,4 +1,11 @@
-# Android plan (status: waiting for the owner's decision, no Android code yet)
+# Android plan and status
+
+**Status (2026-09-29):** the owner repeated the Android request without answering the questions below, so the default was taken:
+**Capacitor app reusing the React UI** (option A). Done and tested in a phone-size window (not on a phone): phone layout (bottom nav, compact
+player and song list), a backend running inside the web view (`src/renderer/src/platform/webBackend.ts`: settings, Internet Archive search/listing/downloads,
+songs made of downloaded files), web build config (`vite.android.config.ts`), Capacitor project (`android/`), CI (`.github/workflows/android.yml`, tag `android-v*`).
+NOT verified: anything on a real phone or emulator; the first CI APK build. Not started: scanning the phone's music, background playback, playlists/queue
+persistence, YouTube, real signing key (the APK uses a public alpha key in `android/keystore`). The owner can still switch to a full native rewrite (option B).
 
 ## The question that was asked
 "Will a full native Android app have YouTube and Internet Archive download?"

@@ -1,0 +1,91 @@
+name: android
+
+# Builds the Android app (an installable APK) and, for an `android-v*` tag, publishes it as a GitHub pre-release.
+# The APK is signed with the ALPHA key in android/keystore (public on purpose, for testing only).
+# Before a real release: put your own keystore in GitHub secrets and change signingConfigs in android/app/build.gradle.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'android-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # Capacitor 8 needs JDK 21.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # The web build needs no Electron binary and no yt-dlp: skip their install scripts.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build the web UI and sync it into the Android project
+        run: npm run android:sync
+
+      - name: Build the APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Name the APK and write its checksum
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p out-apk
+          cp android/app/build/outputs/apk/release/*.apk "out-apk/Oli-${VERSION}-android.apk"
+          (cd out-apk && sha256sum *.apk | tee SHA256SUMS-android.txt)
+          ls -la out-apk
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: oli-android
+          path: out-apk/*
+          if-no-files-found: error
+
+  release:
+    name: Publish Android pre-release
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    needs: apk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: oli-android
+          path: artifacts
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* \
+              --prerelease \
+              --title "Oli Android ${TAG#android-v} (alpha)" \
+              --notes-file .github/android-release-notes.md
+          fi

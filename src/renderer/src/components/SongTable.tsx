@@ -21,6 +21,7 @@ import {
 import type { Track } from '@shared/types'
 import { cn } from './cn'
 import { Artwork } from './Artwork'
+import { isMobileShell } from '../lib/platform'
 import { usePlayer, type PlaySource } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { toggleFavorite, revealInExplorer, refreshMetadata, editMetadata } from '../lib/ipc'
@@ -105,14 +106,18 @@ export function SongTable({
     player.playTracks(rows, index, source)
   }
 
+  // Phone layout: one line per song (artist under the title), no artist/album/format columns.
+  const compact = isMobileShell()
+  const artistCol = showArtist && !compact
+  const albumCol = showAlbum && !compact
   const columns = [
     ...(selectable ? ['28px'] : []),
-    '36px',
+    compact ? '24px' : '36px',
     'minmax(0,1fr)',
-    ...(showArtist ? ['120px'] : []),
-    ...(showAlbum ? ['120px'] : []),
-    '48px',
-    '110px'
+    ...(artistCol ? ['120px'] : []),
+    ...(albumCol ? ['120px'] : []),
+    compact ? '28px' : '48px',
+    compact ? '68px' : '110px'
   ].join(' ')
 
   return (
@@ -177,8 +182,8 @@ export function SongTable({
         )}
         <span>#</span>
         <span>Title</span>
-        {showArtist && <span>Artist</span>}
-        {showAlbum && <span>Album</span>}
+        {artistCol && <span>Artist</span>}
+        {albumCol && <span>Album</span>}
         <span className="text-center">♥</span>
         <span className="text-right">Time</span>
       </div>
@@ -266,22 +271,25 @@ export function SongTable({
 
                   <div className="flex min-w-0 items-center gap-2.5">
                     <Artwork songId={track.id} hasEmbedded={track.hasEmbeddedArtwork} size={32} />
-                    <button
-                      className={cn(
-                        'min-w-0 truncate text-left text-[13px] font-medium leading-snug',
-                        active ? 'text-accent' : 'text-ink-0 hover:text-accent'
-                      )}
-                      onClick={() => {
-                        if (navTimerRef.current) clearTimeout(navTimerRef.current)
-                        navTimerRef.current = setTimeout(() => navigate(`/song/${track.id}`), 250)
-                      }}
-                      title="View song info"
-                    >
-                      {track.title}
-                    </button>
+                    <div className="flex min-w-0 flex-col items-start">
+                      <button
+                        className={cn(
+                          'max-w-full min-w-0 truncate text-left text-[13px] font-medium leading-snug',
+                          active ? 'text-accent' : 'text-ink-0 hover:text-accent'
+                        )}
+                        onClick={() => {
+                          if (navTimerRef.current) clearTimeout(navTimerRef.current)
+                          navTimerRef.current = setTimeout(() => navigate(`/song/${track.id}`), 250)
+                        }}
+                        title="View song info"
+                      >
+                        {track.title}
+                      </button>
+                      {compact && <span className="max-w-full truncate text-[11px] text-ink-3">{track.artist}</span>}
+                    </div>
                   </div>
 
-                  {showArtist && (
+                  {artistCol && (
                     <button
                       className="truncate text-left text-[12px] text-ink-2 hover:text-ink-0"
                       onClick={() => track.artistId && navigate(`/artists/${track.artistId}`)}
@@ -289,7 +297,7 @@ export function SongTable({
                       {track.artist}
                     </button>
                   )}
-                  {showAlbum && (
+                  {albumCol && (
                     <button
                       className="truncate text-left text-[12px] text-ink-2 hover:text-ink-0"
                       onClick={() => track.albumId && navigate(`/albums/${track.albumId}`)}
@@ -307,7 +315,7 @@ export function SongTable({
                   </button>
 
                   <div className="flex items-center justify-end gap-2">
-                    {track.format && (
+                    {track.format && !compact && (
                       <span
                         className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-3"
                         title={`Format: ${track.format}`}

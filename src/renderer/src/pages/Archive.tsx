@@ -13,6 +13,7 @@ import { archiveEnqueue, archiveItem, archiveSearch, pickVideoFolder } from '../
 import { formatDuration, formatFileSize } from '../lib/format'
 import { EmptyState } from '../components/EmptyState'
 import { cn } from '../components/cn'
+import { isMobileShell } from '../lib/platform'
 import type { ArchiveFile, ArchiveHit } from '@shared/types'
 
 const PAGE_SIZE = 25
@@ -328,7 +329,7 @@ function ItemPanel({ hit }: { hit: ArchiveHit }): React.JSX.Element {
           </div>
 
           <div className="flex flex-wrap items-end gap-2">
-            <label className="flex min-w-0 flex-1 flex-col gap-1 text-[11.5px] text-ink-3">
+            <label className={cn('flex min-w-0 flex-1 flex-col gap-1 text-[11.5px] text-ink-3', isMobileShell() && 'hidden')}>
               Folder
               <span className="flex gap-1.5">
                 <input

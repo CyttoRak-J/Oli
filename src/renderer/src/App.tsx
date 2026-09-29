@@ -12,6 +12,9 @@ import { useGlobalShortcuts } from './lib/useGlobalShortcuts'
 import { ShortcutsPanel } from './components/ShortcutsPanel'
 import { TitleBar } from './components/TitleBar'
 import { YtEngineBanner } from './components/YtEngineBanner'
+import { MobileNav } from './components/MobileNav'
+import { MobilePlayerBar } from './components/MobilePlayerBar'
+import { isMobileShell } from './lib/platform'
 import { Sidebar } from './components/Sidebar'
 import { PlayerBar } from './components/PlayerBar'
 import { RightPanel } from './components/RightPanel'
@@ -216,13 +219,14 @@ function MainShell(): React.JSX.Element {
   }, [audioSettings?.playbackSpeed, audioSettings?.preservePitch, audioSettings?.replayGainMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useGlobalShortcuts(() => setShortcutsOpen(true))
+  const mobile = isMobileShell()
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-0 text-ink-0">
-      <TitleBar />
+      {!mobile && <TitleBar />}
       <YtEngineBanner />
       <div className="relative flex min-h-0 flex-1">
-        <Sidebar />
+        {!mobile && <Sidebar />}
         <main className="min-w-0 flex-1 overflow-y-auto">
           <Routes>
             <Route path="/" element={<Home />} />
@@ -251,7 +255,8 @@ function MainShell(): React.JSX.Element {
         </main>
         <RightPanel />
       </div>
-      <PlayerBar />
+      {mobile ? <MobilePlayerBar /> : <PlayerBar />}
+      {mobile && <MobileNav />}
       {shortcutsOpen && <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />}
     </div>
   )
