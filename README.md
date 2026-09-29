@@ -47,6 +47,12 @@ Everything is stored locally on your machine.
 
 `SHA256SUMS.txt` on each release lists the checksum of every file.
 
+### Android (alpha)
+
+An early Android build lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`). It has the phone layout and the
+**Internet Archive** page (search, download, play what you download). It does not yet scan the music on your phone or do YouTube. It is signed with a public
+alpha key, so it is for testing. See [`ANDROID_PLAN.md`](ANDROID_PLAN.md) for the plan and status.
+
 ## Building from source
 
 Requirements: Node.js 20+ (22 recommended), npm.
@@ -62,7 +68,11 @@ npm run build:mac    # macOS disk images  -> dist/Oli-<version>-<arch>.dmg (run 
 ```
 
 Pushing a version tag (`git tag v1.2.3 && git push origin v1.2.3`) makes GitHub Actions build the
-Windows and macOS packages and publish a release (see `.github/workflows/build.yml`).
+Windows and macOS packages and publish a release (see `.github/workflows/build.yml`). A tag `android-v0.1.0`
+builds the Android APK the same way (`.github/workflows/android.yml`).
+
+Newer npm versions block install scripts by default. If `npm run dev` says Electron failed to install, run
+`node node_modules/electron/install.js` (and `node scripts/fetch-yt-dlp.mjs` for the YouTube engine) once.
 
 The installer bundles `yt-dlp`. Merging YouTube video and audio, and converting some formats
 (Opus, WavPack, APE) for playback, use an `ffmpeg` found on your system
