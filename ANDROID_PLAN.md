@@ -4,7 +4,7 @@
 "Want YouTube and Archive... need ALL features as the PC app has. It won't bother me what it is made of. My point is: all the same as PC."
 Plus a rule: **if the phone app shows lag, crashes or background-play problems, rewrite it natively for Android** and keep everything on GitHub.
 
-## Status at a glance (android-v0.7.0, 2026-09-30)
+## Status at a glance (android-v0.8.0, 2026-09-30)
 Every phase of the plan is built and released as a GitHub pre-release. **Nothing native has been run on a real phone yet**: the developer PC has no Android SDK, so the Java is compiled and packaged by CI (`apksigner verify` passes), its pure parts are compiled and tested with the PC's JDK, and the JavaScript side is exercised in a PC test window against stand-ins for the plugins. The next real step is the owner's phone test (checklists at the top of each `ANDROID_PHASE_*.md`, summarised in `ANDROID_PHASE_6.md`).
 
 | Version | Phase | What |
@@ -15,6 +15,7 @@ Every phase of the plan is built and released as a GitHub pre-release. **Nothing
 | 0.5.0 | 2 | Download queue (resumable, background), MD5 + tags + cover for downloads, tag editing, backup/restore |
 | 0.6.0 | 3 | YouTube (yt-dlp on the phone): search, links, playlists, playback, song/video/playlist downloads, engine updates |
 | 0.7.0 | 5 | Windowed song list, update check, faster scan, own-key signing hook |
+| 0.8.0 | 1c+ | Choose which folders to scan (Android folder picker, several folders, phone storage or card) |
 
 ## Architecture (decided by the assistant; the owner said any approach is fine)
 **Hybrid: same screens + same desktop logic inside the app, native Android code only where a phone requires it.**
@@ -64,7 +65,8 @@ State words: **built** = code exists, compiled in CI, proven in the PC test wind
 | Honest hi-res output report + bit-perfect switch (Android 14+ USB DAC) | `OliAudioEngine.outputInfo()`, Settings > Audio output, player note | 1b | built; phone-untested |
 | Hi-res badge (bit depth / sample rate) | `SourceProbe` via `OliMedia.probeFiles` | 1c | built; phone-untested |
 | Scan the phone's music, watch for changes, missing files | `OliMediaPlugin` + `phoneLibrary.ts` + `phoneStore.ts` | 1c | built (real database tests); phone-untested |
-| Folder picker for music outside MediaStore, duplicates | storage access framework | 1c | **not built** (MediaStore already lists phone storage and SD cards) |
+| Choose which folders are scanned ("Add folders") | `OliMedia.pickFolder` (Android folder picker) + folder-filtered MediaStore list, one library location per folder | 0.8.0 | built (PC-checked, 17 checks); limited to what MediaStore indexes (no `.nomedia` folders) |
+| Music outside MediaStore, duplicates | storage access framework file walk | 1c | **not built** |
 | Cover art (embedded + folder) | `OliMedia.getArtwork` (embedded picture, else Android's album art), cached per album | 1c | built; phone-untested; notification artwork for local songs **not wired** |
 | Downloads queue: pause/resume/retry/cancel, progress, persisted, background | `DownloadEngine` + `OliDownloadService` + `downloadQueue.ts` | 2 | built (Java tested against a misbehaving server); phone-untested |
 | Archive extras: md5 check, tags, cover embedding | `DownloadEngine` + `FlacTagWriter` / `Id3TagWriter` | 2 | built (tags read back by independent libraries, audio bytes identical); phone-untested |
@@ -89,13 +91,13 @@ State words: **built** = code exists, compiled in CI, proven in the PC test wind
 - Signed with the public **alpha** key `android/keystore/oli-alpha.jks` (password `oli-alpha-public`) unless the GitHub secrets for an own key exist (`docs/ANDROID_SIGNING.md`).
 
 ## Verified vs not verified
-- **Proven on the PC:** the JavaScript side end to end in a PC test window with Capacitor's real bridge protocol (97 checks in five suites, `scripts/android-harness/run-all.ps1`), 221 unit tests (real sql.js databases, real yt-dlp JSON, the Java tag writers and download engine compiled and run with the PC's JDK), CI compiles and packages every tag and verifies the signature, the desktop bundle contains no phone code, and the shared song list works on the desktop (checked on a copy of the real 1,137-song library in an isolated profile).
+- **Proven on the PC:** the JavaScript side end to end in a PC test window with Capacitor's real bridge protocol (114 checks in six suites, `scripts/android-harness/run-all.ps1`), 233 unit tests (real sql.js databases, real yt-dlp JSON, the Java tag writers and download engine compiled and run with the PC's JDK), CI compiles and packages every tag and verifies the signature, the desktop bundle contains no phone code, and the shared song list works on the desktop (checked on a copy of the real 1,137-song library in an isolated profile).
 - **NOT verified on any phone or emulator:** everything native at run time: Media3 decoding and float output reaching the AudioTrack, the foreground services, notification/lock screen, audio focus, headset/Bluetooth buttons, bit-perfect on a USB DAC, the real values in the output report, the MediaStore queries on different Android versions, the permission dialogs, cover files served from the cache folder, downloads in the background, yt-dlp running on the phone (Python unpack, bot checks, embedded thumbnails), scan speed on thousands of songs, start-up time, memory.
 
 ## Answers already given
 - Internet Archive on Android: yes, plain HTTPS. YouTube on Android: yes via `youtubedl-android`, but Google Play forbids YouTube downloaders, so the APK lives on GitHub Releases. YouTube's terms forbid downloading; the desktop app already has it, so it is the owner's call.
 
 ## Next steps
-1. **Owner: install `Oli-0.7.0-android.apk` on a phone and report** (checklists in `ANDROID_PHASE_1B.md`, `ANDROID_PHASE_1C.md`, `ANDROID_PHASE_6.md`). Fix what breaks first: the Java has only ever been compiled, never run.
+1. **Owner: install `Oli-0.8.0-android.apk` on a phone and report** (checklists in `ANDROID_PHASE_1B.md`, `ANDROID_PHASE_1C.md`, `ANDROID_PHASE_6.md`). Fix what breaks first: the Java has only ever been compiled, never run.
 2. Decide the signing key (`docs/ANDROID_SIGNING.md`) and whether the numbers from the phone trigger the native rewrite.
-3. Then the leftovers listed above as **not built** (folder picker, gapless playback, notification artwork for local songs, ReplayGain/lyrics from MP3/M4A, online metadata matching, an in-app APK installer).
+3. Then the leftovers listed above as **not built** (folders outside MediaStore, duplicates, gapless playback, notification artwork for local songs, ReplayGain/lyrics from MP3/M4A, online metadata matching, an in-app APK installer).

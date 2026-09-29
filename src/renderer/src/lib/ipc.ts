@@ -108,7 +108,9 @@ export const getStats = (): Promise<{
   totalSize: number
 }> => call(IPC.getStats)
 export const getLibraryFolders = (): Promise<LibraryFolder[]> => call(IPC.getLibrary)
-export const addLibraryFolder = (): Promise<LibraryFolder[] | null> => call(IPC.addLibraryFolder)
+/** Desktop: folder dialog. Phone: `mode` 'folder' = Android's folder picker, 'replace' = same after leaving "all music", 'all' = all the phone's music. */
+export const addLibraryFolder = (mode?: 'all' | 'folder' | 'replace'): Promise<LibraryFolder[] | 'needs-replace' | null> =>
+  call(IPC.addLibraryFolder, mode)
 export const removeLibraryFolder = (id: string): Promise<void> => call(IPC.removeLibraryFolder, id)
 export const rescanLibrary = (force = false): Promise<void> => call(IPC.rescanLibrary, force)
 export const cancelScan = (): Promise<void> => call(IPC.cancelScan)

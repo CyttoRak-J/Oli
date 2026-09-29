@@ -13,6 +13,7 @@ $env:OLI_TEST_HOOKS = $null; $env:OLI_OUT_DIR = $null
 $suites = @(
   @{ name = 'player (play, seek, pause, unplug, next, skip)'; script = 'e2e.cjs'; songs = '' },
   @{ name = 'phone music scan'; script = 'e2e-library.cjs'; songs = '' },
+  @{ name = 'chosen music folders'; script = 'e2e-folders.cjs'; songs = ''; subdirs = '1' },
   @{ name = 'downloads, tags, backup'; script = 'e2e-downloads.cjs'; songs = '' },
   @{ name = 'YouTube'; script = 'e2e-youtube.cjs'; songs = '' },
   @{ name = 'big list (3,000 songs)'; script = 'e2e-list.cjs'; songs = '3000' }
@@ -22,6 +23,7 @@ foreach ($s in $suites) {
   $i++
   foreach ($d in @("$env:TEMP\oli-harness-files", "$env:TEMP\oli-harness-cache")) { if (Test-Path $d) { [System.IO.Directory]::Delete($d, $true) } }
   $env:OLI_HARNESS_SONGS = $s.songs
+  $env:OLI_HARNESS_SUBDIRS = $s.subdirs
   & powershell -File "$PSScriptRoot\run-window.ps1" "$Root\$i"
   Start-Sleep 10
   $log = "$Root\suite-$i.log"
@@ -32,4 +34,4 @@ foreach ($s in $suites) {
   Stop-Window
   Start-Sleep 2
 }
-$env:OLI_HARNESS_SONGS = $null
+$env:OLI_HARNESS_SONGS = $null; $env:OLI_HARNESS_SUBDIRS = $null

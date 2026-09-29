@@ -4,7 +4,13 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.7.0: big libraries, updates, your own key
+### What is new in 0.8.0: choose which folders to scan
+- **Settings > Library > "Choose folder"** opens Android's folder picker, like "Add folders" on the PC. Oli then scans only that folder (and the folders inside it). Add as many folders as you like, on the phone or on a memory card; each shows its song count and has its own remove button.
+- A folder inside one you already added is not added twice; a folder that contains folders you added takes them over (favorites, play counts and playlists stay).
+- **"All phone music"** is still there to scan everything Android knows about. Choosing a folder while it is on asks first, because songs outside the folder then leave the library (your files are never touched).
+- Note: Oli reads Android's media library, so a folder with a `.nomedia` file, or files Android has not indexed yet, will not show up.
+
+### Already in 0.7.0: big libraries, updates, your own key
 - **Long lists stay smooth**: the song list only keeps the rows on screen, so a library of thousands of songs scrolls as easily as a short one (tested with 3,000 and 10,000 songs; memory dropped from 123 MB to 26 MB with 3,000). "Go to playing track" still finds a song far down the list.
 - **Update check**: Settings > About & updates > "Check for updates" looks for a newer Oli Android release on GitHub and opens its page (nothing is installed by itself). The app now shows its real version.
 - **Faster scanning**: MP3/AAC/Opus files are not read again for details Android already gives.
@@ -25,7 +31,7 @@ Allow notifications and access to your music when asked: the lock-screen control
 - The Downloads screen now fits a phone.
 
 ### Already in 0.4.0: the music that is already on your phone
-- **Oli finds the music on your phone** (Android's media library): the first start asks once for permission to read your music, then scans by itself. Songs, albums, artists, genres, stats and search work on them like on the PC. Settings > Library has "Scan phone music", "Rescan phone music" and removal.
+- **Oli finds the music on your phone** (Android's media library): the first start asks once for permission to read your music, then scans by itself. Songs, albums, artists, genres, stats and search work on them like on the PC. Settings > Library has "All phone music", "Rescan phone music" and removal (0.8.0 added "Choose folder").
 - It **keeps up with the phone**: new files appear, deleted files are marked missing (playlists keep them, like on the PC), changed files are re-read. Favorites, play counts and playlists stay.
 - **Real format details are read from the files** (sample rate, bit depth, channels, codec; for FLAC also ReplayGain, ISRC, lyrics), so the Hi-Res badge and the output report are true for your own music too. This runs in the background and shows progress in Settings.
 - **Cover art**: embedded covers and folder covers are extracted once per album and cached.

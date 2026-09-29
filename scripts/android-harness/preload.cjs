@@ -6,7 +6,7 @@ const fs = require('fs')
 const path = require('path')
 
 const BASE = 'http://127.0.0.1:8765'
-const MEDIA_METHODS = ['getPermission', 'requestPermission', 'queryAudio', 'probeFiles', 'getArtwork', 'clearArtworkCache']
+const MEDIA_METHODS = ['getPermission', 'requestPermission', 'queryAudio', 'pickFolder', 'probeFiles', 'getArtwork', 'clearArtworkCache']
 const FLAC_DIR = 'A:/Flac'
 const DL_METHODS = ['getRoot', 'enqueue', 'pause', 'resume', 'cancel', 'getActive', 'writeTags']
 const YT_METHODS = ['status', 'updateEngine', 'search', 'playlist', 'info', 'enqueue', 'pause', 'resume', 'cancel', 'getActive']
@@ -191,7 +191,10 @@ audio.addEventListener('loadedmetadata', () => {
 // ---------------------------------------------------------------- stand-in for the OliMedia plugin (MediaStore)
 // Lists the first songs of A:\Flac as if MediaStore knew them, reads the real FLAC header for probeFiles, and hands out
 // a generated cover for albums whose name starts with "A".
-const media = (window.__fakeMedia = { calls: [], granted: process.env.OLI_HARNESS_DENY !== '1', files: null, listeners: {} })
+// OLI_HARNESS_SUBDIRS=1 puts the first 30 real songs in "Music/Rock" and the rest in "Music/Jazz" (for the folder-picker checks).
+// media.pick is what Android's folder picker answers next ({volume, path, label}, or {cancelled:true}).
+const SUBDIRS = process.env.OLI_HARNESS_SUBDIRS === '1'
+const media = (window.__fakeMedia = { calls: [], granted: process.env.OLI_HARNESS_DENY !== '1', files: null, listeners: {}, pick: { cancelled: true } })
 // OLI_HARNESS_SONGS=N makes the stand-in list N made-up songs (for speed tests); they have no audio behind them.
 const SYNTH = Number(process.env.OLI_HARNESS_SONGS || 0)
 function synthetic(n) {
@@ -252,7 +255,7 @@ function listFiles() {
       displayName: name,
       mime: 'audio/flac',
       bitrate: 0,
-      key: 'Music/' + name
+      key: SUBDIRS ? 'Music/' + (i < 30 ? 'Rock' : 'Jazz') + '/' + name : 'Music/' + name
     }
   })
   return media.files
@@ -287,9 +290,12 @@ function handleMedia(m) {
       return mediaReply(m, { granted: media.granted })
     case 'queryAudio': {
       if (!media.granted) return mediaReply(m, undefined, false, 'permission')
-      const all = listFiles()
-      return mediaReply(m, { rows: all.slice(o.offset || 0, (o.offset || 0) + (o.limit || 500)), total: all.length })
+      const every = listFiles()
+      const inside = o.volume && o.path ? every.filter((r) => r.key.toLowerCase().startsWith(o.path.toLowerCase() + '/')) : every
+      return mediaReply(m, { rows: inside.slice(o.offset || 0, (o.offset || 0) + (o.limit || 500)), total: inside.length })
     }
+    case 'pickFolder':
+      return mediaReply(m, media.pick)
     case 'probeFiles':
       return mediaReply(m, {
         results: (o.uris || []).map((uri) => {

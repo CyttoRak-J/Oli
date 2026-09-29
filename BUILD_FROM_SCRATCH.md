@@ -193,7 +193,7 @@ app this does not matter; for the existing library it does (see the legacy migra
                         AlphabetFilter ListJumpButtons SearchBox ThemedSelect Tip EmptyState HistoryPanel YtEngineBanner
                         LibraryStatsTabs LinkDownloadForm AddToPlaylistDialog SleepTimer ShortcutsPanel cn.ts
            mini/MiniPlayer.tsx   bubble/Bubble.tsx
-  test/   30 files (+ test/fixtures/yt), see section 15
+  test/   31 files (+ test/fixtures/yt), see section 15
 ```
 Path aliases: `@shared/*` -> `src/shared/*` (main, preload, renderer, tests); `@renderer/*` -> `src/renderer/src/*`.
 Line endings: **LF everywhere**. Set `git config core.autocrlf false`.
@@ -4283,7 +4283,7 @@ Commit after each. Run `npm run typecheck && npm run lint && npm test` at every 
 ---
 
 ## 15. Tests (vitest, `test/*.test.ts`, node environment)
-Reference count: **221 tests in 30 files** (111 in 17 files for the desktop app alone, the rest for Android). Write these (names = files):
+Reference count: **233 tests in 31 files** (111 in 17 files for the desktop app alone, the rest for Android). Write these (names = files):
 - `identity.test.ts` and `legacyIds.test.ts`: fixed input -> exact 16-hex ids; artist/album/song id rules; hash unchanged.
 - `database.test.ts`: damaged file is kept aside; recovery from `backups/`; restore validates before swapping.
 - `migrations.test.ts`: fresh database ends at the latest version; migration 9 repairs an old schema; idempotent.
@@ -4301,11 +4301,11 @@ Reference count: **221 tests in 30 files** (111 in 17 files for the desktop app 
 - `audioTags.test.ts`: Vorbis comment round trip and merge-only-missing; FLAC written in padding (same size, audio bytes unchanged) and by rewrite (existing tags kept, second run no-op);
   cover embedded in FLAC (both paths) and MP3, never replaces an existing picture; non-FLAC and unsupported extensions ignored.
 
-Android tests (section 20; the four Java ones are skipped when no JDK is installed):
+Android tests (section 20; the Java ones are skipped when no JDK is installed):
 - `nativeAudio.test.ts`, `playerNative.test.ts`: the audio-element look-alike (events, tokens, outside pause/resume, errors) and the real player store on top of it; wording of the output report.
 - `phoneLibrary.test.ts` (real sql.js database + fake plugin), `phoneEditBackup.test.ts` (tag editing rules, backup/restore round trip, refuses a non-Oli file), `downloadQueue.test.ts`, `downloadQueueYoutube.test.ts`, `androidUpdate.test.ts`, `rowWindow.test.ts`.
 - `youtubeCore.test.ts` (real yt-dlp output in `test/fixtures/yt`), `youtubeService.test.ts` (fake plugin).
-- Java compiled with `javac` and run: `androidTagWriter.test.ts` (FLAC/MP3 tag + cover writers, audio bytes identical, read back by an independent library), `androidDownload.test.ts` (resume, pause, checksum ... against a local server), `androidYtOutput.test.ts` (yt-dlp progress lines and metadata escaping).
+- Java compiled with `javac` and run: `androidTagWriter.test.ts` (FLAC/MP3 tag + cover writers, audio bytes identical, read back by an independent library), `androidDownload.test.ts` (resume, pause, checksum ... against a local server), `androidYtOutput.test.ts` (yt-dlp progress lines and metadata escaping), `androidFolderScope.test.ts` (a picked folder -> MediaStore filter).
 
 ---
 
@@ -4361,7 +4361,7 @@ list of what is not verified.
 - Spotify playlists untested (needs keys); a full 100-item Mix download untested (multi-GB as video).
 - The app update checker (`updater.ts`) reads `https://api.github.com/repos/<owner>/<repo>/releases/latest`; the reference points at `CyttoRak-J/Oli`. It only informs, it never installs. Installers are unsigned (no certificate); macOS builds are ad-hoc signed and were **not** run on a real Mac; Android is a separate release line (section 20) with a public alpha signing key.
 - yt-dlp busy-retry was only unit-tested; offline behaviour of the engine manager was not tried in the real app.
-- **Android (section 20) has never run on a phone.** Not built: a folder picker for music outside the media library, duplicate detection, gapless playback, notification artwork for local songs, ReplayGain/lyrics from MP3/M4A tags, online metadata matching ("fix metadata"), an in-app APK installer, the desktop's video window. Open decisions: the real signing key (`docs/ANDROID_SIGNING.md`) and the native rewrite (section 20.9), which depends on the owner's phone reports.
+- **Android (section 20) has never run on a phone.** Not built: scanning folders the media library does not list (`.nomedia`, unindexed files; the folder picker itself is built), duplicate detection, gapless playback, notification artwork for local songs, ReplayGain/lyrics from MP3/M4A tags, online metadata matching ("fix metadata"), an in-app APK installer, the desktop's video window. Open decisions: the real signing key (`docs/ANDROID_SIGNING.md`) and the native rewrite (section 20.9), which depends on the owner's phone reports.
 - Optional next steps: repeat button on the mini player, bubble controls, more UI tests,
   a "Creative Commons / public domain only" Archive filter (it cannot detect false licence claims), adding the download folder as a library folder automatically.
 
@@ -4379,14 +4379,14 @@ Do this only after asking the user for the repository (`owner/repo`) and confirm
 5. **Verify the release**: `GET /repos/<owner>/<repo>/releases/tags/vX.Y.Z` lists the assets. Download the Windows installer and compare its SHA-256 with `SHA256SUMS.txt`.
 6. **Say plainly what is not verified**: macOS builds were only built and signature-checked (`codesign --verify`), never launched on a real Mac; nothing is notarized.
 
-## 20. Android (Capacitor app, phases 0.5 to 5 built; version 0.7.0)
+## 20. Android (Capacitor app, phases 0.5 to 5 built plus the folder picker; version 0.8.0)
 The desktop app is Electron, which does not run on Android. Options that were considered (ask the user which one; the reference took option A, see `ANDROID_PLAN.md`):
 - **A. Capacitor app reusing the React UI plus native Java plugins** (what the reference is): the screens and the desktop *services* (database, library queries, playlists, ...) run unchanged inside the web view; native Android code is used only where a phone requires it.
 - **B. Full native app (Kotlin, Jetpack Compose, Media3, Room, MediaStore)**: best experience, a complete rewrite. The owner's rule (Section 20.9): switch to B if the phone app lags, crashes or loses background playback.
 
 Either way Google Play policy rejects apps that download YouTube content, so the APK is distributed on GitHub Releases, not through Play. The APK is built by GitHub Actions (Temurin JDK 21, `./gradlew assembleRelease`, Android SDK on the runner).
 
-**Reference repository and status.** The exact source of everything below is in the repository at tag `android-v0.7.0`; this section is the specification and the reasons. **Built and CI-compiled, proven in a PC test window, and NOT yet run on a real phone or emulator** (there is no Android SDK on the development PC). Anything native (Java) is verified only by: it compiles and packages in CI, the pure-Java parts are compiled and tested with the PC's JDK, and the JavaScript side is exercised against stand-ins for the plugins (20.7).
+**Reference repository and status.** The exact source of everything below is in the repository at tag `android-v0.8.0`; this section is the specification and the reasons. **Built and CI-compiled, proven in a PC test window, and NOT yet run on a real phone or emulator** (there is no Android SDK on the development PC). Anything native (Java) is verified only by: it compiles and packages in CI, the pure-Java parts are compiled and tested with the PC's JDK, and the JavaScript side is exercised against stand-ins for the plugins (20.7).
 
 ### 20.1 Layers
 1. **Screens:** the same React code. `lib/platform.ts` `shellPlatform()` returns `desktop | android | web` (from `window.cytto.platform`); the phone shell shows `MobileNav` + `MobilePlayerBar`, hides the title bar and sidebar, and the song table shows one line per song.
@@ -4407,9 +4407,16 @@ Either way Google Play policy rejects apps that download YouTube content, so the
 
 ### 20.3 The phone's own music: `OliMedia` (phase 1c)
 - **Java:** `OliMediaPlugin` (`getPermission`, `requestPermission` (`READ_MEDIA_AUDIO` on Android 13+, `READ_EXTERNAL_STORAGE` with `maxSdkVersion=32` before; Capacitor permission aliases), `queryAudio {offset, limit}` (MediaStore.Audio, `IS_MUSIC != 0`, sorted by `_ID`, pages of 500 with `QUERY_ARG_LIMIT/OFFSET`, columns chosen by API level: `RELATIVE_PATH` from 29, `ALBUM_ARTIST/GENRE/BITRATE` from 30), `probeFiles {uris}` (rate/channels/bit depth via `SourceProbe`; for FLAC also `FlacTags`: ReplayGain, ISRC, lyrics, album artist, composer, genre, disc), `getArtwork {uri, key, size}` (embedded picture via `MediaMetadataRetriever`, else `ContentResolver.loadThumbnail` (API 29+, also finds folder covers); cached as `cacheDir/art/<key>.jpg`, `.none` marker when there is no cover), `clearArtworkCache`; event `mediaChanged` from a `ContentObserver` debounced 3 s).
-- **JavaScript:** `platform/phoneLibrary.ts` (`PhoneLibrary`: permission, paging, diff against the database by file mtime, songs that vanished are marked `missing` and return when the file returns, details read in the background in batches of 20, lossy files marked as read without a probe, per-album cover lookup with in-flight sharing, `describeFile` for a fresh download), `platform/phoneStore.ts` (all SQL: location row `phone:mediastore`/"Phone music", bulk upsert in one transaction with a path-conflict rule for moved files, mark missing, patch details, `codecsOf`, `songLocation`), wiring in `webBackend.ts` (`addLibraryFolder` = "Scan phone music", `rescanLibrary`, `cancelScan`, `getScanState`, `getEmbeddedArtwork` (returns `Capacitor.convertFileSrc('file://'+path)`), ask once on the very first start, scan on launch when `scanOnLaunch`, rescan on `mediaChanged` at most every 30 s).
-- **Decisions:** song id = `songIdForPath("<RELATIVE_PATH><file name>")` (the desktop cyrb64 scheme; stable when Android renumbers its ids); the row's `path` is the `content://` URI ExoPlayer plays; `modified_at` = file mtime (unchanged files are skipped); `sample_rate` NULL = details never read, 0 = read (or lossy) with nothing to add; a changed file resets rate/bit depth/channels and is re-read; a moved file keeps its old row (missing) and gives up its `path` (`path || '#moved:' || id`) so playlists keep pointing at something. **Not built:** a Storage Access Framework folder picker (MediaStore already lists phone storage and SD cards), duplicate detection, ReplayGain/lyrics from MP3/M4A tags, bit depth of 24-bit ALAC.
+- **JavaScript:** `platform/phoneLibrary.ts` (`PhoneLibrary`: permission, paging, diff against the database by file mtime, songs that vanished are marked `missing` and return when the file returns, details read in the background in batches of 20, lossy files marked as read without a probe, per-album cover lookup with in-flight sharing, `describeFile` for a fresh download), `platform/phoneStore.ts` (all SQL: location row `phone:mediastore`/"Phone music", bulk upsert in one transaction with a path-conflict rule for moved files, mark missing, patch details, `codecsOf`, `songLocation`), wiring in `webBackend.ts` (`addLibraryFolder` = "All phone music" or, with the folder mode, the folder picker (20.3a), `rescanLibrary`, `cancelScan`, `getScanState`, `getEmbeddedArtwork` (returns `Capacitor.convertFileSrc('file://'+path)`), ask once on the very first start, scan on launch when `scanOnLaunch`, rescan on `mediaChanged` at most every 30 s).
+- **Decisions:** song id = `songIdForPath("<RELATIVE_PATH><file name>")` (the desktop cyrb64 scheme; stable when Android renumbers its ids); the row's `path` is the `content://` URI ExoPlayer plays; `modified_at` = file mtime (unchanged files are skipped); `sample_rate` NULL = details never read, 0 = read (or lossy) with nothing to add; a changed file resets rate/bit depth/channels and is re-read; a moved file keeps its old row (missing) and gives up its `path` (`path || '#moved:' || id`) so playlists keep pointing at something. **Not built:** a Storage Access Framework file walk for folders MediaStore does not list, duplicate detection, ReplayGain/lyrics from MP3/M4A tags, bit depth of 24-bit ALAC.
 - **Tests:** `test/phoneLibrary.test.ts` runs the scanner against a fake plugin and a REAL sql.js database (it found a real bug: a wrong SQL placeholder count made every scan fail); ids equal the desktop scheme.
+
+### 20.3a Choosing which folders are scanned (0.8.0)
+The PC app has "Add folders"; the phone has **Settings > Library > Choose folder** (plus the older **All phone music**). Design: keep MediaStore as the source (so the music permission, `content://` playback and covers stay as they are) and only *filter* its list by the chosen folder.
+- **Java:** `OliMediaPlugin.pickFolder` opens `ACTION_OPEN_DOCUMENT_TREE` (`startActivityForResult` + `@ActivityCallback`); only the external-storage provider is accepted (`com.android.externalstorage.documents`); nothing is granted or stored, the tree's document id is turned into `{volume, path, label}` by `FolderScope.java` (pure Java: `primary:Music/Flac` -> volume `primary`, path `Music/Flac`; a memory card id looks like `1A2B-3C4D`; label `Card 1A2B-3C4D: Music`). `queryAudio {offset, limit, volume?, path?}` adds `VOLUME_NAME = ? AND RELATIVE_PATH LIKE ? ESCAPE '\'` (Android 10+; `FolderScope.mediaVolume` maps `primary` -> `external_primary`, a card id to its lower case; pattern `Music/Flac/%` with `%` and `_` escaped so `Flac2` is not matched) or `DATA LIKE '<root>/Music/Flac/%'` before Android 10.
+- **JavaScript:** one library location per chosen folder, id `phone:dir:<volume>|<path>` (so nothing else is stored), label = the path shown in Settings (unique per volume because cards get a `Card <id>:` prefix). `PhoneLibrary.addFolder(replaceAll)` returns `added | cancelled | denied | included | needs-replace | error`: a folder inside (or equal to) a scanned one is `included` (message "Already included in ..."), a folder that contains scanned folders takes over their songs (`PhoneStore.adoptSongs` changes `library_id`, so favorites, play counts, playlists and details survive, then the old locations are removed), choosing a folder while "All phone music" (`phone:mediastore`) is on returns `needs-replace` and Settings asks first (`window.confirm`), then calls again with `replace`: the songs inside the folder move over, the rest leave the library. `addAndScan()` ("All phone music") takes over the folders' songs the same way. `run()` walks every location (`syncLocation`: list pages with the scope, upsert new/changed, mark vanished ones missing), reads the details of all of them afterwards, and ends with "N songs in M folders" / "N songs on this phone"; with no location it does nothing. `removeLibraryFolder(id)` removes one location and its songs. The first start still asks once and scans everything; the owner can then switch to folders.
+- **Limits (say them plainly):** it lists what Android's media library knows, so a folder with a `.nomedia` file or files Android has not indexed yet do not show up; only phone storage and memory cards (not cloud providers); folder names are matched without regard to capitals (Android's LIKE).
+- **Tests:** `test/androidFolderScope.test.ts` (FolderScope compiled with `javac`), 8 folder tests in `test/phoneLibrary.test.ts` (real database, fake plugin, fake picker), `scripts/android-harness/e2e-folders.cjs` (17 checks in the PC window with the stand-in picker; run with `OLI_HARNESS_SUBDIRS=1`).
 
 ### 20.4 Downloads and tags: `OliDownload` (phase 2)
 - **Pure Java (no Android classes; compiled and tested with the PC's JDK):** `DownloadEngine` (2 files at a time; each goes to `name.part` and resumes with an HTTP `Range` request; pause keeps the part file; cancel deletes it; automatic retries for connection problems; a server that ignores `Range` restarts from 0; size and MD5 are checked and a damaged file is deleted and reported; then tags and the cover are written), `FlacTagWriter` (rebuilds the metadata blocks: keeps STREAMINFO/SEEKTABLE/APPLICATION/CUESHEET, merges Vorbis comments (an empty value removes a tag), replaces only the front cover, adds 2 KB of padding; the audio is copied unchanged into a temporary file that then replaces the original; `File.renameTo` with a delete fallback, because `java.nio.file` needs Android 8 and minSdk is 24), `Id3TagWriter` (ID3v2.3 with UTF-16 text for files without a tag; a file that already has ID3v2.4 stays v2.4/UTF-8; frames that are not being changed, including the cover, are kept verbatim; frames with compression/encryption flags are dropped), `TagFields`, `YtDlpOutput`.
@@ -4434,7 +4441,7 @@ Either way Google Play policy rejects apps that download YouTube content, so the
 ### 20.7 Testing without a phone (all of it worked in the reference)
 - **PC test window** (`scripts/android-harness`, see its README): a throwaway Electron window with **no** desktop preload loads the built phone bundle (`OLI_TEST_HOOKS=1 OLI_OUT_DIR=out/renderer-android-test vite build -c vite.android.config.ts`; the hook exposes `window.__oliPlayer`, normal builds do not have it). The preload loads Capacitor's real `native-bridge.js` with `window.androidBridge`, so `Capacitor.getPlatform()` is `android` and plugin calls travel the real call/notify protocol; stand-ins answer `OliAudio` (plays real audio through an `<audio>` element), `OliMedia` (lists songs of the owner's music folder, reads real FLAC headers, `OLI_HARNESS_SONGS=N` makes N made-up songs), `OliDownload` (Node downloader with Range/pause/cancel/MD5), `OliYouTube` (real yt-dlp JSON from `test/fixtures/yt`), `Filesystem`, `Share`, and a fake archive.org item. Chromium blocks port 5060; the static server uses 8765. Suites: `e2e.cjs` (20 checks), `e2e-library.cjs` (19 + 3 for a refused permission), `e2e-downloads.cjs` (23), `e2e-youtube.cjs` (27), `e2e-list.cjs` (8), `perf.cjs` (speed numbers), `run-all.ps1` runs them all. Stop the window by process id, never by window title.
 - **Java without Android:** `javac` from the PC's JDK compiles the pure classes (`scripts/android-tags/*Cli.java` are the test entry points); everything else is compiled by the `android-dev` branch build in CI (push the branch; a tag would publish a release). Read a failed run through `https://api.github.com/repos/<owner>/<repo>/check-runs/<job id>/annotations`.
-- **Results at the end of phase 5:** 221 unit tests in 30 files, 97 checks in the PC window, CI builds and `apksigner verify` for every tag.
+- **Results at 0.8.0:** 233 unit tests in 31 files, 114 checks in the PC window (97 at the end of phase 5, plus the 17 of the folder suite), CI builds and `apksigner verify` for every tag.
 - Gotchas: newer npm skips install scripts, so `npm install <package>` can leave `node_modules/electron/dist` missing (`node node_modules/electron/install.js`); never write repository files with PowerShell `Set-Content -Encoding utf8` (it adds a byte-order mark that broke `build.gradle`); scripts must not match their own command line when they stop test windows.
 
 ### 20.8 Files worth reading first (contracts)
@@ -4583,7 +4590,13 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.7.0: big libraries, updates, your own key
+### What is new in 0.8.0: choose which folders to scan
+- **Settings > Library > "Choose folder"** opens Android's folder picker, like "Add folders" on the PC. Oli then scans only that folder (and the folders inside it). Add as many folders as you like, on the phone or on a memory card; each shows its song count and has its own remove button.
+- A folder inside one you already added is not added twice; a folder that contains folders you added takes them over (favorites, play counts and playlists stay).
+- **"All phone music"** is still there to scan everything Android knows about. Choosing a folder while it is on asks first, because songs outside the folder then leave the library (your files are never touched).
+- Note: Oli reads Android's media library, so a folder with a `.nomedia` file, or files Android has not indexed yet, will not show up.
+
+### Already in 0.7.0: big libraries, updates, your own key
 - **Long lists stay smooth**: the song list only keeps the rows on screen, so a library of thousands of songs scrolls as easily as a short one (tested with 3,000 and 10,000 songs; memory dropped from 123 MB to 26 MB with 3,000). "Go to playing track" still finds a song far down the list.
 - **Update check**: Settings > About & updates > "Check for updates" looks for a newer Oli Android release on GitHub and opens its page (nothing is installed by itself). The app now shows its real version.
 - **Faster scanning**: MP3/AAC/Opus files are not read again for details Android already gives.
@@ -4604,7 +4617,7 @@ Allow notifications and access to your music when asked: the lock-screen control
 - The Downloads screen now fits a phone.
 
 ### Already in 0.4.0: the music that is already on your phone
-- **Oli finds the music on your phone** (Android's media library): the first start asks once for permission to read your music, then scans by itself. Songs, albums, artists, genres, stats and search work on them like on the PC. Settings > Library has "Scan phone music", "Rescan phone music" and removal.
+- **Oli finds the music on your phone** (Android's media library): the first start asks once for permission to read your music, then scans by itself. Songs, albums, artists, genres, stats and search work on them like on the PC. Settings > Library has "All phone music", "Rescan phone music" and removal (0.8.0 added "Choose folder").
 - It **keeps up with the phone**: new files appear, deleted files are marked missing (playlists keep them, like on the PC), changed files are re-read. Favorites, play counts and playlists stay.
 - **Real format details are read from the files** (sample rate, bit depth, channels, codec; for FLAC also ReplayGain, ISRC, lyrics), so the Hi-Res badge and the output report are true for your own music too. This runs in the background and shows progress in Settings.
 - **Cover art**: embedded covers and folder covers are extracted once per album and cached.
@@ -4677,7 +4690,7 @@ import { setStreamHeaders } from './nativeAudio'
 import { initAndroidCore, trackIds, type AndroidCore, type AndroidProviders } from './androidCore'
 import { YouTubeService, getYouTubePlugin } from './youtubeService'
 import { songTagsFor, videoIdFromUrl, isYouTubeUrl, type SongTags } from './youtubeCore'
-import { getMediaPlugin, PHONE_LIBRARY_ID, PhoneLibrary } from './phoneLibrary'
+import { getMediaPlugin, isPhoneLocation, PhoneLibrary } from './phoneLibrary'
 import { checkAndroidUpdate, type AndroidUpdateStatus } from './androidUpdate'
 import { PhoneBackup, base64ToBytes, bytesToBase64, pickFileBytes, type BackupStorage } from './phoneBackup'
 import {
@@ -5234,12 +5247,19 @@ const phoneHandlers: Record<string, Handler> = {
   }) as Handler,
   // the phone's own music (MediaStore through the native OliMedia plugin, see phoneLibrary.ts)
   [IPC.getScanState]: () => phoneLib?.getState() ?? null,
-  [IPC.addLibraryFolder]: (async () => {
-    if (!phoneLib || !(await phoneLib.addAndScan())) return null
+  // 'all' = every song MediaStore lists; otherwise Android's folder picker ('replace' = the owner agreed to leave "all music")
+  [IPC.addLibraryFolder]: (async (mode?: 'all' | 'folder' | 'replace') => {
+    if (!phoneLib) return null
+    if (mode === 'all') {
+      if (!(await phoneLib.addAndScan())) return null
+    } else {
+      const res = await phoneLib.addFolder(mode === 'replace')
+      if (res.status !== 'added') return res.status === 'needs-replace' ? 'needs-replace' : null
+    }
     return core.handlers[IPC.getLibrary]()
   }) as Handler,
   [IPC.removeLibraryFolder]: ((id: string) => {
-    if (id === PHONE_LIBRARY_ID) phoneLib?.remove()
+    if (isPhoneLocation(id)) phoneLib?.remove(id)
     return null
   }) as Handler,
   [IPC.rescanLibrary]: () => {
@@ -5377,7 +5397,7 @@ async function startPhoneLibrary(): Promise<void> {
     // no change notifications: rescans happen on launch and on request
   }
   const settings = (await core.handlers[IPC.getSettings]()) as { scanOnLaunch?: boolean }
-  const hasLocation = (core.handlers[IPC.getLibrary]() as Array<{ id: string }>).some((f) => f.id === PHONE_LIBRARY_ID)
+  const hasLocation = (core.handlers[IPC.getLibrary]() as Array<{ id: string }>).some((f) => isPhoneLocation(f.id))
   const granted = (await plugin.getPermission().catch(() => ({ granted: false }))).granted
   if (hasLocation && granted) {
     if (settings.scanOnLaunch !== false) void phoneLib.scan()

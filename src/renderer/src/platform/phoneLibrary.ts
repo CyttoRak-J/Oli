@@ -12,6 +12,36 @@ import type { ScanProgress, Track } from '@shared/types'
 export const PHONE_LIBRARY_ID = 'phone:mediastore'
 export const PHONE_LIBRARY_PATH = 'Phone music'
 
+// ------------------------------------------------------------------ chosen folders
+/** A folder on the phone's storage or a memory card (from Android's folder picker). "" = the whole volume. */
+export interface PhoneScope {
+  volume: string
+  path: string
+}
+
+const FOLDER_PREFIX = 'phone:dir:'
+
+/** One library location per chosen folder; the id carries the folder so nothing else has to be stored. */
+export const folderLocationId = (s: PhoneScope): string => `${FOLDER_PREFIX}${s.volume}|${s.path}`
+
+/** The folder a location stands for; null for "all the phone's music" (and for anything that is not a phone location). */
+export function scopeOfLocation(id: string): PhoneScope | null {
+  if (!id.startsWith(FOLDER_PREFIX)) return null
+  const rest = id.slice(FOLDER_PREFIX.length)
+  const bar = rest.indexOf('|')
+  return bar < 0 ? null : { volume: rest.slice(0, bar), path: rest.slice(bar + 1) }
+}
+
+export const isPhoneLocation = (id: string): boolean => id === PHONE_LIBRARY_ID || id.startsWith(FOLDER_PREFIX)
+
+/** Is folder `inner` the same as, or inside, folder `outer`? (Android's folder names ignore capitals.) */
+export function scopeContains(outer: PhoneScope, inner: PhoneScope): boolean {
+  if (outer.volume.toLowerCase() !== inner.volume.toLowerCase()) return false
+  const o = outer.path.toLowerCase()
+  const i = inner.path.toLowerCase()
+  return o === '' || i === o || i.startsWith(`${o}/`)
+}
+
 // ------------------------------------------------------------------ plugin (native side)
 export interface MediaRow {
   id: number
@@ -60,7 +90,10 @@ interface ListenerHandle {
 export interface OliMediaPlugin {
   getPermission(): Promise<{ granted: boolean }>
   requestPermission(): Promise<{ granted: boolean }>
-  queryAudio(o: { offset: number; limit: number }): Promise<{ rows: MediaRow[]; total?: number }>
+  /** With a volume (and path) only the music inside that folder is listed. */
+  queryAudio(o: { offset: number; limit: number; volume?: string; path?: string }): Promise<{ rows: MediaRow[]; total?: number }>
+  /** Android's folder picker. */
+  pickFolder(): Promise<{ cancelled?: boolean; volume?: string; path?: string; label?: string }>
   probeFiles(o: { uris: string[] }): Promise<{ results: ProbeResult[] }>
   getArtwork(o: { uri: string; key: string; size?: number }): Promise<{ path?: string }>
   clearArtworkCache(): Promise<void>
@@ -94,7 +127,12 @@ export interface SongPatch {
 /** What the scanner needs from the database (implemented in androidCore.ts). */
 export interface PhoneStore {
   ensureLocation(id: string, path: string, name: string): void
+  /** Removes a location together with its songs. */
   removeLocation(id: string): void
+  /** The phone-music locations (all the phone's music, or chosen folders), oldest first. */
+  locations(): Array<{ id: string; path: string }>
+  /** Moves songs into another location (they keep their favorites, play counts and details). */
+  adoptSongs(ids: string[], toId: string): void
   songsOf(libraryId: string): PhoneSongRow[]
   upsertTracks(tracks: Track[]): void
   markMissing(ids: string[]): void
@@ -287,15 +325,90 @@ export class PhoneLibrary {
       this.set({ ...idle(), phase: 'error', message: 'Oli needs permission to read your music. Allow it and try again.' })
       return false
     }
-    this.opts.store.ensureLocation(PHONE_LIBRARY_ID, PHONE_LIBRARY_PATH, 'Phone music')
+    const { store } = this.opts
+    const folders = store.locations().filter((l) => l.id !== PHONE_LIBRARY_ID)
+    store.ensureLocation(PHONE_LIBRARY_ID, PHONE_LIBRARY_PATH, 'Phone music')
+    if (folders.length > 0) {
+      // "all music" takes over the chosen folders' songs, so favorites and play counts survive
+      try {
+        store.adoptSongs(await this.songIdsIn(null), PHONE_LIBRARY_ID)
+      } catch {
+        // the scan below adds whatever is missing
+      }
+      for (const f of folders) store.removeLocation(f.id)
+    }
     void this.scan()
     return true
   }
 
-  remove(): void {
-    this.opts.store.removeLocation(PHONE_LIBRARY_ID)
+  /**
+   * Lets the owner pick a folder (Android's folder picker) and scans it, like "Add folders" on the PC. A folder inside one
+   * that is already scanned is not added twice; a folder that contains chosen folders takes them over.
+   */
+  async addFolder(replaceAll = false): Promise<AddFolderResult> {
+    if (!(await this.ensurePermission())) {
+      this.set({ ...idle(), phase: 'error', message: 'Oli needs permission to read your music. Allow it and try again.' })
+      return { status: 'denied' }
+    }
+    const { plugin, store } = this.opts
+    let picked: Awaited<ReturnType<OliMediaPlugin['pickFolder']>>
+    try {
+      picked = await plugin.pickFolder()
+    } catch (err) {
+      const message = String((err as Error)?.message ?? err)
+      this.set({ ...idle(), phase: 'error', message })
+      return { status: 'error', message }
+    }
+    if (picked.cancelled || !picked.volume) return { status: 'cancelled' }
+    const scope: PhoneScope = { volume: picked.volume, path: picked.path ?? '' }
+    const label = picked.label || scope.path || scope.volume
+    const locations = store.locations()
+    const all = locations.some((l) => l.id === PHONE_LIBRARY_ID)
+    if (all && !replaceAll) return { status: 'needs-replace' }
+    const folders = locations.filter((l) => l.id !== PHONE_LIBRARY_ID)
+    const covering = folders.find((l) => {
+      const other = scopeOfLocation(l.id)
+      return other !== null && scopeContains(other, scope)
+    })
+    if (covering) {
+      this.set({ ...idle(), phase: 'finished', message: `Already included in "${covering.path}"` })
+      return { status: 'included', label: covering.path }
+    }
+    const absorbed = folders.filter((l) => {
+      const other = scopeOfLocation(l.id)
+      return other !== null && scopeContains(scope, other)
+    })
+    const id = folderLocationId(scope)
+    store.ensureLocation(id, label, label)
+    if (all || absorbed.length > 0) {
+      // songs that are in the new folder move over (keeping favorites and play counts); the rest of the old locations goes
+      try {
+        store.adoptSongs(await this.songIdsIn(scope), id)
+      } catch {
+        // the scan below adds whatever is missing
+      }
+      if (all) store.removeLocation(PHONE_LIBRARY_ID)
+      for (const f of absorbed) store.removeLocation(f.id)
+    }
+    void this.scan()
+    return { status: 'added', label }
+  }
+
+  /** Removes one location (default: all the phone's music) and its songs. */
+  remove(id: string = PHONE_LIBRARY_ID): void {
+    this.opts.store.removeLocation(id)
     this.artCache.clear()
-    void this.opts.plugin.clearArtworkCache().catch(() => undefined)
+    if (this.opts.store.locations().length === 0) void this.opts.plugin.clearArtworkCache().catch(() => undefined)
+  }
+
+  /** The ids of the songs MediaStore lists inside a folder (null = everything). */
+  private async songIdsIn(scope: PhoneScope | null): Promise<string[]> {
+    const ids: string[] = []
+    for (let offset = 0; ; offset += PAGE) {
+      const page = await this.opts.plugin.queryAudio({ offset, limit: PAGE, ...(scope ? { volume: scope.volume, path: scope.path } : {}) })
+      for (const r of page.rows) ids.push(phoneSongId(r))
+      if (page.rows.length < PAGE) return ids
+    }
   }
 
   /** A scan at most every 30 s when Android reports changes (like the desktop folder watcher). */
@@ -349,64 +462,22 @@ export class PhoneLibrary {
         this.set({ phase: 'error', message: 'Oli needs permission to read your music.' })
         return
       }
-      store.ensureLocation(PHONE_LIBRARY_ID, PHONE_LIBRARY_PATH, 'Phone music')
-      const existing = new Map(store.songsOf(PHONE_LIBRARY_ID).map((r) => [r.id, r]))
-
-      // 1. list everything MediaStore has, page by page
-      const rows: MediaRow[] = []
-      for (let offset = 0; ; offset += PAGE) {
+      const locations = store.locations()
+      if (locations.length === 0) {
+        this.set({ phase: 'finished', message: 'No music folders yet. Add one in Settings.' })
+        return
+      }
+      // 1-3. for every location: list what MediaStore has, add new / changed songs, mark vanished ones missing
+      const totals = { found: 0, processed: 0, added: 0, updated: 0, removed: 0 }
+      for (const loc of locations) {
         if (this.canceled) return this.finishCanceled()
-        const page = await plugin.queryAudio({ offset, limit: PAGE })
-        rows.push(...page.rows)
-        this.set({ filesFound: rows.length })
-        if (page.rows.length < PAGE) break
+        if (!(await this.syncLocation(loc.id, scopeOfLocation(loc.id), totals))) return this.finishCanceled()
       }
-
-      // 2. new / changed songs go into the database; unchanged ones are left alone
-      this.set({ phase: 'reading', message: null })
-      const seen = new Set<string>()
-      let batch: Track[] = []
-      let added = 0
-      let updated = 0
-      let processed = 0
-      const flushBatch = (): void => {
-        if (batch.length === 0) return
-        store.upsertTracks(batch)
-        batch = []
-      }
-      for (const row of rows) {
-        if (this.canceled) {
-          flushBatch()
-          return this.finishCanceled()
-        }
-        const t = rowToTrack(row)
-        seen.add(t.id)
-        const old = existing.get(t.id)
-        if (!old) {
-          added++
-          batch.push(t)
-        } else if (old.modifiedAt !== t.modifiedAt || old.missing || old.path !== t.path) {
-          updated++
-          batch.push(t)
-        }
-        processed++
-        if (batch.length >= UPSERT_BATCH) {
-          flushBatch()
-          this.set({ filesProcessed: processed, filesAdded: added, filesUpdated: updated, currentFile: t.title })
-          await tick()
-        }
-      }
-      flushBatch()
-
-      // 3. songs that vanished from the phone are marked missing (playlists keep them, as on the desktop)
-      const gone: string[] = []
-      for (const [id, r] of existing) if (!seen.has(id) && !r.missing) gone.push(id)
-      if (gone.length > 0) store.markMissing(gone)
-      this.set({ filesProcessed: processed, filesAdded: added, filesUpdated: updated, filesRemoved: gone.length })
-      store.finish(PHONE_LIBRARY_ID) // the songs are visible now; details follow in the background
+      this.set({ filesProcessed: totals.processed, filesAdded: totals.added, filesUpdated: totals.updated, filesRemoved: totals.removed })
+      store.finish(locations[0].id) // the songs are visible now; details follow in the background
 
       // 4. read the real format / tags of songs whose details were never read
-      const unread = store.songsOf(PHONE_LIBRARY_ID).filter((r) => !r.missing && r.sampleRate === null)
+      const unread = locations.flatMap((l) => store.songsOf(l.id)).filter((r) => !r.missing && r.sampleRate === null)
       // Lossy files (MP3, AAC, Opus, Vorbis) have nothing a file read would add (Android already lists their length and
       // bit rate): they are marked as read at once, which keeps a big mixed library fast.
       const lossy = new Set(['mp3', 'aac', 'opus', 'vorbis', 'wma', 'amr'])
@@ -439,17 +510,78 @@ export class PhoneLibrary {
           this.set({ filesProcessed: done, itemsWithErrors: errors })
           await tick()
         }
-        store.finish(PHONE_LIBRARY_ID)
+        store.finish(locations[0].id)
       }
-      this.set({ phase: 'finished', message: `${rows.length} songs on this phone` })
+      this.set({ phase: 'finished', message: finishedMessage(totals.found, locations.length, locations.some((l) => l.id === PHONE_LIBRARY_ID)) })
     } catch (err) {
       const msg = String((err as Error)?.message ?? err)
       this.set({ phase: 'error', message: msg === 'permission' ? 'Oli needs permission to read your music.' : msg })
     }
   }
 
+  /** Steps 1-3 for one location. Returns false when the owner canceled. */
+  private async syncLocation(
+    locationId: string,
+    scope: PhoneScope | null,
+    totals: { found: number; processed: number; added: number; updated: number; removed: number }
+  ): Promise<boolean> {
+    const { plugin, store } = this.opts
+    const existing = new Map(store.songsOf(locationId).map((r) => [r.id, r]))
+
+    // 1. list what MediaStore has here, page by page
+    const rows: MediaRow[] = []
+    for (let offset = 0; ; offset += PAGE) {
+      if (this.canceled) return false
+      const page = await plugin.queryAudio({ offset, limit: PAGE, ...(scope ? { volume: scope.volume, path: scope.path } : {}) })
+      rows.push(...page.rows)
+      this.set({ filesFound: totals.found + rows.length })
+      if (page.rows.length < PAGE) break
+    }
+    totals.found += rows.length
+
+    // 2. new / changed songs go into the database; unchanged ones are left alone
+    this.set({ phase: 'reading', message: null })
+    const seen = new Set<string>()
+    let batch: Track[] = []
+    const flushBatch = (): void => {
+      if (batch.length === 0) return
+      store.upsertTracks(batch)
+      batch = []
+    }
+    for (const row of rows) {
+      if (this.canceled) {
+        flushBatch()
+        return false
+      }
+      const t = rowToTrack(row, locationId)
+      seen.add(t.id)
+      const old = existing.get(t.id)
+      if (!old) {
+        totals.added++
+        batch.push(t)
+      } else if (old.modifiedAt !== t.modifiedAt || old.missing || old.path !== t.path) {
+        totals.updated++
+        batch.push(t)
+      }
+      totals.processed++
+      if (batch.length >= UPSERT_BATCH) {
+        flushBatch()
+        this.set({ filesProcessed: totals.processed, filesAdded: totals.added, filesUpdated: totals.updated, currentFile: t.title })
+        await tick()
+      }
+    }
+    flushBatch()
+
+    // 3. songs that vanished from here are marked missing (playlists keep them, as on the desktop)
+    const gone: string[] = []
+    for (const [id, r] of existing) if (!seen.has(id) && !r.missing) gone.push(id)
+    if (gone.length > 0) store.markMissing(gone)
+    totals.removed += gone.length
+    return true
+  }
+
   private finishCanceled(): void {
-    this.opts.store.finish(PHONE_LIBRARY_ID)
+    this.opts.store.finish(this.opts.store.locations()[0]?.id ?? PHONE_LIBRARY_ID)
     this.set({ phase: 'finished', canceled: true, message: 'Scan stopped' })
   }
 
@@ -476,6 +608,21 @@ export class PhoneLibrary {
     this.artInflight.set(key, p)
     return p
   }
+}
+
+export type AddFolderResult =
+  | { status: 'added'; label: string }
+  | { status: 'cancelled' }
+  | { status: 'denied' }
+  /** The chosen folder is inside one that is already scanned. */
+  | { status: 'included'; label: string }
+  /** "All the phone's music" is scanned: choosing a folder replaces it (the caller asks the owner first). */
+  | { status: 'needs-replace' }
+  | { status: 'error'; message: string }
+
+function finishedMessage(songs: number, locations: number, all: boolean): string {
+  if (all) return `${songs} songs on this phone`
+  return `${songs} songs in ${locations} ${locations === 1 ? 'folder' : 'folders'}`
 }
 
 /** Lets the screen breathe between batches. */

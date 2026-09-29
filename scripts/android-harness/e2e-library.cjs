@@ -43,7 +43,7 @@ async function waitScan(c, ms = 90000) {
     await sleep(1200)
     await c.shot(path.join(SHOTS, 'shot-library-denied.png'))
     const txt = await c.ev(`return document.body.innerText`)
-    check('Settings tells the owner what to do', /Scan phone music/i.test(txt))
+    check('Settings tells the owner what to do', /Choose folder/i.test(txt) && /All phone music/i.test(txt))
     finish(c)
     return
   }

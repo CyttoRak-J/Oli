@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.Context;
+import android.content.Intent;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -13,7 +14,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Environment;
 import android.os.Looper;
+import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.util.Size;
 
@@ -23,6 +26,8 @@ import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import androidx.activity.result.ActivityResult;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
@@ -112,7 +117,48 @@ public class OliMediaPlugin extends Plugin {
     return s == null ? "" : s;
   }
 
-  /** {offset, limit} -> {rows, total?}. Rows are sorted by MediaStore id, so paging is stable. */
+  // ---------------------------------------------------------------------------------------------------------------
+  // Choosing a folder to scan (like "Add folders" on the PC)
+
+  /** Opens Android's folder picker. Resolves {volume, path, label}, or {cancelled:true}. Nothing is granted or stored: the
+   *  folder is only used to filter the music list (the music permission already allows reading the files). */
+  @PluginMethod
+  public void pickFolder(PluginCall call) {
+    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+    try {
+      startActivityForResult(call, intent, "pickFolderResult");
+    } catch (Exception e) {
+      call.reject("No folder picker on this phone");
+    }
+  }
+
+  @ActivityCallback
+  private void pickFolderResult(PluginCall call, ActivityResult result) {
+    JSObject o = new JSObject();
+    Intent data = result.getData();
+    Uri tree = data == null ? null : data.getData();
+    if (result.getResultCode() != android.app.Activity.RESULT_OK || tree == null) {
+      o.put("cancelled", true);
+      call.resolve(o);
+      return;
+    }
+    if (!"com.android.externalstorage.documents".equals(tree.getAuthority())) {
+      call.reject("That folder is not on the phone's storage or memory card");
+      return;
+    }
+    FolderScope scope = FolderScope.fromDocumentId(DocumentsContract.getTreeDocumentId(tree));
+    if (scope == null) {
+      call.reject("That folder is not on the phone's storage or memory card");
+      return;
+    }
+    o.put("volume", scope.volume);
+    o.put("path", scope.path);
+    o.put("label", scope.label());
+    call.resolve(o);
+  }
+
+  /** {offset, limit, volume?, path?} -> {rows, total?}. Rows are sorted by MediaStore id, so paging is stable. With a
+   *  volume (and path) only the music inside that folder is listed. */
   @PluginMethod
   public void queryAudio(PluginCall call) {
     if (!granted()) {
@@ -123,7 +169,23 @@ public class OliMediaPlugin extends Plugin {
     final int limit = Math.max(1, Math.min(1000, call.getInt("limit", 500)));
     final ContentResolver cr = getContext().getContentResolver();
     final Uri base = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
-    final String where = MediaStore.Audio.Media.IS_MUSIC + " != 0";
+    final String volume = call.getString("volume");
+    final String folder = call.getString("path", "");
+    String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
+    String[] selectionArgs = null;
+    if (volume != null && !volume.isEmpty()) {
+      if (Build.VERSION.SDK_INT >= 29) {
+        String like = FolderScope.relativeLike(folder);
+        selection += " AND " + MediaStore.Audio.Media.VOLUME_NAME + " = ? AND " + MediaStore.Audio.Media.RELATIVE_PATH + " LIKE ? ESCAPE '\\'";
+        selectionArgs = new String[] {FolderScope.mediaVolume(volume), like};
+      } else {
+        String root = "primary".equals(volume) ? Environment.getExternalStorageDirectory().getPath() : "/storage/" + volume;
+        selection += " AND " + MediaStore.Audio.Media.DATA + " LIKE ? ESCAPE '\\'";
+        selectionArgs = new String[] {FolderScope.dataLike(root, folder)};
+      }
+    }
+    final String where = selection;
+    final String[] whereArgs = selectionArgs;
     try {
       List<String> cols = new ArrayList<>();
       cols.add(MediaStore.Audio.Media._ID);
@@ -151,6 +213,7 @@ public class OliMediaPlugin extends Plugin {
       }
       Bundle args = new Bundle();
       args.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, where);
+      if (whereArgs != null) args.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, whereArgs);
       args.putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, MediaStore.Audio.Media._ID + " ASC");
       args.putInt(ContentResolver.QUERY_ARG_LIMIT, limit);
       args.putInt(ContentResolver.QUERY_ARG_OFFSET, offset);
@@ -209,7 +272,7 @@ public class OliMediaPlugin extends Plugin {
       }
       result.put("rows", rows);
       if (offset == 0) {
-        try (Cursor cnt = cr.query(base, new String[] {MediaStore.Audio.Media._ID}, where, null, null)) {
+        try (Cursor cnt = cr.query(base, new String[] {MediaStore.Audio.Media._ID}, where, whereArgs, null)) {
           result.put("total", cnt == null ? 0 : cnt.getCount());
         }
       }

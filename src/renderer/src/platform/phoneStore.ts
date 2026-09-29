@@ -22,6 +22,17 @@ export function createPhoneStore(db: Database, library: LibraryQueries, flush: (
       library.notifyChanged()
       flush()
     },
+    locations() {
+      return db.all<{ id: string; path: string }>(
+        "SELECT id, path FROM library_locations WHERE id = 'phone:mediastore' OR id LIKE 'phone:dir:%' ORDER BY added_at, rowid"
+      )
+    },
+    adoptSongs(ids, toId) {
+      for (let i = 0; i < ids.length; i += 400) {
+        const chunk = ids.slice(i, i + 400)
+        db.run(`UPDATE songs SET library_id = ? WHERE id IN (${chunk.map(() => '?').join(',')})`, [toId, ...chunk])
+      }
+    },
     songsOf(libraryId) {
       return db
         .all<{ id: string; modified_at: number; missing: number; sample_rate: number | null; path: string }>(

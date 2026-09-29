@@ -9,6 +9,10 @@ const [bundleDir, userData, debugPort] = process.argv.slice(2)
 app.setPath('userData', userData)
 app.commandLine.appendSwitch('remote-debugging-port', debugPort || '9333')
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+// A window that another window covers is treated as hidden (no drawing, no scroll updates): keep it running.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.flac': 'audio/flac', '.mp3': 'audio/mpeg' }
 const FLAC_ROOT = 'A:\\Flac\\'
@@ -62,7 +66,7 @@ app.whenReady().then(() => {
     const win = new BrowserWindow({
       width: 390,
       height: 800,
-      webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: false, nodeIntegration: false, sandbox: false }
+      webPreferences: { backgroundThrottling: false, preload: path.join(__dirname, 'preload.cjs'), contextIsolation: false, nodeIntegration: false, sandbox: false }
     })
     win.loadURL('http://127.0.0.1:8765/')
   })

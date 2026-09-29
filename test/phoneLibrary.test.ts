@@ -46,7 +46,13 @@ function row(n: number, over: Partial<MediaRow> = {}): MediaRow {
   }
 }
 
-function fakePlugin(state: { rows: MediaRow[]; granted: boolean; probes: Record<string, Partial<ProbeResult>> }): {
+function fakePlugin(state: {
+  rows: MediaRow[]
+  granted: boolean
+  probes: Record<string, Partial<ProbeResult>>
+  /** What the folder picker answers next. */
+  pick?: { cancelled?: boolean; volume?: string; path?: string; label?: string } | Error
+}): {
   plugin: OliMediaPlugin
   calls: string[]
 } {
@@ -57,9 +63,15 @@ function fakePlugin(state: { rows: MediaRow[]; granted: boolean; probes: Record<
       calls.push('requestPermission')
       return { granted: state.granted }
     },
-    queryAudio: async ({ offset, limit }: { offset: number; limit: number }) => {
-      calls.push(`queryAudio@${offset}`)
-      return { rows: state.rows.slice(offset, offset + limit) }
+    queryAudio: async ({ offset, limit, path }: { offset: number; limit: number; volume?: string; path?: string }) => {
+      calls.push(path === undefined ? `queryAudio@${offset}` : `queryAudio[${path}]@${offset}`)
+      const inside = path === undefined || path === '' ? state.rows : state.rows.filter((r) => r.key.toLowerCase().startsWith(`${path.toLowerCase()}/`))
+      return { rows: inside.slice(offset, offset + limit) }
+    },
+    pickFolder: async () => {
+      calls.push('pickFolder')
+      if (state.pick instanceof Error) throw state.pick
+      return state.pick ?? { cancelled: true }
     },
     probeFiles: async ({ uris }: { uris: string[] }) => {
       calls.push(`probe x${uris.length}`)
@@ -141,7 +153,12 @@ describe('scanning the phone', () => {
   let store: ReturnType<typeof createPhoneStore>
   let library: LibraryQueries
   let progress: ScanProgress[]
-  const state = { rows: [] as MediaRow[], granted: true, probes: {} as Record<string, Partial<ProbeResult>> }
+  const state = {
+    rows: [] as MediaRow[],
+    granted: true,
+    probes: {} as Record<string, Partial<ProbeResult>>,
+    pick: undefined as { cancelled?: boolean; volume?: string; path?: string; label?: string } | Error | undefined
+  }
 
   beforeEach(async () => {
     db = new Database({ file: `${os.tmpdir()}/oli-phone-${Date.now()}-${Math.random()}.sqlite` })
@@ -283,5 +300,136 @@ describe('scanning the phone', () => {
     expect(b).toBe(a)
     expect(calls.filter((c) => c.startsWith('art '))).toHaveLength(1)
     expect(await lib.artworkFor('nope', toUrl)).toBeNull()
+  })
+
+  describe('chosen folders', () => {
+    // Music/Flac has 2 songs, Music/Flac/Live 1 more (inside it), Podcasts 1
+    const folderRows = (): MediaRow[] => [
+      row(1, { key: 'Music/Flac/a.flac', displayName: 'a.flac' }),
+      row(2, { key: 'Music/Flac/b.flac', displayName: 'b.flac' }),
+      row(3, { key: 'Music/Flac/Live/c.flac', displayName: 'c.flac' }),
+      row(4, { key: 'Podcasts/d.flac', displayName: 'd.flac' })
+    ]
+    const pick = (path: string, volume = 'primary'): void => {
+      state.pick = { volume, path, label: (volume === 'primary' ? '' : `Card ${volume}: `) + (path || 'Phone storage') }
+    }
+    const songs = (): string[] => db.all<{ title: string }>('SELECT title FROM songs WHERE missing = 0 ORDER BY title').map((r) => r.title)
+
+    beforeEach(() => {
+      state.rows = folderRows()
+      state.pick = undefined
+    })
+
+    it('scans only the chosen folder (and what is inside it), as its own location', async () => {
+      const { lib, calls } = make()
+      pick('Music/Flac')
+      expect(await lib.addFolder()).toEqual({ status: 'added', label: 'Music/Flac' })
+      await lib.whenIdle()
+      expect(songs()).toEqual(['Song 1', 'Song 2', 'Song 3'])
+      expect(calls).toContain('queryAudio[Music/Flac]@0')
+      expect(calls).not.toContain('queryAudio@0')
+      const folders = library.getFolders()
+      expect(folders).toHaveLength(1)
+      expect(folders[0]).toMatchObject({ id: 'phone:dir:primary|Music/Flac', path: 'Music/Flac', trackCount: 3 })
+      expect(progress.at(-1)?.message).toBe('3 songs in 1 folder')
+    })
+
+    it('two folders scan together, and removing one removes only its songs', async () => {
+      const { lib } = make()
+      pick('Music/Flac')
+      await lib.addFolder()
+      await lib.whenIdle()
+      pick('Podcasts')
+      await lib.addFolder()
+      await lib.whenIdle()
+      expect(songs()).toHaveLength(4)
+      expect(progress.at(-1)?.message).toBe('4 songs in 2 folders')
+      lib.remove('phone:dir:primary|Podcasts')
+      expect(songs()).toEqual(['Song 1', 'Song 2', 'Song 3'])
+      expect(library.getFolders().map((f) => f.path)).toEqual(['Music/Flac'])
+    })
+
+    it('a folder inside one that is already scanned is not added again', async () => {
+      const { lib } = make()
+      pick('Music/Flac')
+      await lib.addFolder()
+      await lib.whenIdle()
+      pick('music/flac/Live')
+      expect(await lib.addFolder()).toEqual({ status: 'included', label: 'Music/Flac' })
+      expect(library.getFolders()).toHaveLength(1)
+      pick('Music/Flac')
+      expect((await lib.addFolder()).status).toBe('included') // the same folder twice
+    })
+
+    it('a folder that contains scanned folders takes them over and keeps favorites and play counts', async () => {
+      const { lib } = make()
+      pick('Music/Flac/Live')
+      await lib.addFolder()
+      await lib.whenIdle()
+      db.run("UPDATE songs SET favorite = 1, play_count = 5 WHERE title = 'Song 3'")
+      pick('Music')
+      expect(await lib.addFolder()).toEqual({ status: 'added', label: 'Music' })
+      await lib.whenIdle()
+      expect(library.getFolders().map((f) => f.id)).toEqual(['phone:dir:primary|Music'])
+      expect(songs()).toEqual(['Song 1', 'Song 2', 'Song 3'])
+      expect(db.get('SELECT favorite, play_count FROM songs WHERE title = ?', ['Song 3'])).toEqual({ favorite: 1, play_count: 5 })
+      expect(db.count("SELECT id FROM songs WHERE library_id IS NULL OR library_id != 'phone:dir:primary|Music'")).toBe(0)
+    })
+
+    it('a memory card folder is a separate folder from the same name on the phone storage', async () => {
+      const { lib } = make()
+      pick('Music/Flac')
+      await lib.addFolder()
+      await lib.whenIdle()
+      pick('Music/Flac', '1A2B-3C4D')
+      expect((await lib.addFolder()).status).toBe('added')
+      expect(library.getFolders().map((f) => f.id)).toEqual(['phone:dir:primary|Music/Flac', 'phone:dir:1A2B-3C4D|Music/Flac'])
+    })
+
+    it('all the phone music can replace the folders (songs and favorites kept) and needs a yes to be replaced by a folder', async () => {
+      const { lib } = make()
+      pick('Podcasts')
+      await lib.addFolder()
+      await lib.whenIdle()
+      db.run("UPDATE songs SET favorite = 1 WHERE title = 'Song 4'")
+      expect(await lib.addAndScan()).toBe(true)
+      await lib.whenIdle()
+      expect(library.getFolders().map((f) => f.id)).toEqual([PHONE_LIBRARY_ID])
+      expect(songs()).toHaveLength(4)
+      expect(db.get<{ favorite: number }>("SELECT favorite FROM songs WHERE title = 'Song 4'")!.favorite).toBe(1)
+      // now choosing a folder needs the owner to say yes
+      pick('Music/Flac')
+      expect(await lib.addFolder()).toEqual({ status: 'needs-replace' })
+      expect(library.getFolders().map((f) => f.id)).toEqual([PHONE_LIBRARY_ID])
+      expect(await lib.addFolder(true)).toEqual({ status: 'added', label: 'Music/Flac' })
+      await lib.whenIdle()
+      expect(library.getFolders().map((f) => f.id)).toEqual(['phone:dir:primary|Music/Flac'])
+      expect(songs()).toEqual(['Song 1', 'Song 2', 'Song 3']) // the podcast left the library
+    })
+
+    it('a canceled picker changes nothing; a picker error is reported', async () => {
+      const { lib } = make()
+      state.pick = { cancelled: true }
+      expect(await lib.addFolder()).toEqual({ status: 'cancelled' })
+      expect(library.getFolders()).toHaveLength(0)
+      state.pick = new Error('No folder picker on this phone')
+      expect(await lib.addFolder()).toEqual({ status: 'error', message: 'No folder picker on this phone' })
+      expect(progress.at(-1)?.phase).toBe('error')
+      state.granted = false
+      expect((await lib.addFolder()).status).toBe('denied')
+    })
+
+    it('a song that leaves a chosen folder is marked missing; a scan with no locations does nothing', async () => {
+      const { lib, calls } = make()
+      await lib.scan()
+      expect(progress.at(-1)?.message).toMatch(/No music folders/)
+      expect(calls.some((c) => c.startsWith('queryAudio'))).toBe(false)
+      pick('Music/Flac')
+      await lib.addFolder()
+      await lib.whenIdle()
+      state.rows = folderRows().slice(1)
+      await lib.scan()
+      expect(songs()).toEqual(['Song 2', 'Song 3'])
+    })
   })
 })

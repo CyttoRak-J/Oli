@@ -36,7 +36,7 @@ import { setStreamHeaders } from './nativeAudio'
 import { initAndroidCore, trackIds, type AndroidCore, type AndroidProviders } from './androidCore'
 import { YouTubeService, getYouTubePlugin } from './youtubeService'
 import { songTagsFor, videoIdFromUrl, isYouTubeUrl, type SongTags } from './youtubeCore'
-import { getMediaPlugin, PHONE_LIBRARY_ID, PhoneLibrary } from './phoneLibrary'
+import { getMediaPlugin, isPhoneLocation, PhoneLibrary } from './phoneLibrary'
 import { checkAndroidUpdate, type AndroidUpdateStatus } from './androidUpdate'
 import { PhoneBackup, base64ToBytes, bytesToBase64, pickFileBytes, type BackupStorage } from './phoneBackup'
 import {
@@ -593,12 +593,19 @@ const phoneHandlers: Record<string, Handler> = {
   }) as Handler,
   // the phone's own music (MediaStore through the native OliMedia plugin, see phoneLibrary.ts)
   [IPC.getScanState]: () => phoneLib?.getState() ?? null,
-  [IPC.addLibraryFolder]: (async () => {
-    if (!phoneLib || !(await phoneLib.addAndScan())) return null
+  // 'all' = every song MediaStore lists; otherwise Android's folder picker ('replace' = the owner agreed to leave "all music")
+  [IPC.addLibraryFolder]: (async (mode?: 'all' | 'folder' | 'replace') => {
+    if (!phoneLib) return null
+    if (mode === 'all') {
+      if (!(await phoneLib.addAndScan())) return null
+    } else {
+      const res = await phoneLib.addFolder(mode === 'replace')
+      if (res.status !== 'added') return res.status === 'needs-replace' ? 'needs-replace' : null
+    }
     return core.handlers[IPC.getLibrary]()
   }) as Handler,
   [IPC.removeLibraryFolder]: ((id: string) => {
-    if (id === PHONE_LIBRARY_ID) phoneLib?.remove()
+    if (isPhoneLocation(id)) phoneLib?.remove(id)
     return null
   }) as Handler,
   [IPC.rescanLibrary]: () => {
@@ -736,7 +743,7 @@ async function startPhoneLibrary(): Promise<void> {
     // no change notifications: rescans happen on launch and on request
   }
   const settings = (await core.handlers[IPC.getSettings]()) as { scanOnLaunch?: boolean }
-  const hasLocation = (core.handlers[IPC.getLibrary]() as Array<{ id: string }>).some((f) => f.id === PHONE_LIBRARY_ID)
+  const hasLocation = (core.handlers[IPC.getLibrary]() as Array<{ id: string }>).some((f) => isPhoneLocation(f.id))
   const granted = (await plugin.getPermission().catch(() => ({ granted: false }))).granted
   if (hasLocation && granted) {
     if (settings.scanOnLaunch !== false) void phoneLib.scan()

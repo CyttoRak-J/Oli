@@ -49,11 +49,11 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.7.0, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.8.0, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
-- **Your music**: finds the songs already on the phone, reads their real format and tags, shows covers, follows changes.
+- **Your music**: scan all the music on the phone or choose the folders to scan (like the PC's "Add folders"), reads their real format and tags, shows covers, follows changes.
 - **Internet Archive** and **YouTube**: search, paste links, playlists, play in the app, download songs/videos/playlists through a resumable background
   download queue; downloaded FLAC/MP3 files get their tags and cover written in; tag editing; backup and restore; update check.
 - It is signed with a public alpha key, so it is for testing (`docs/ANDROID_SIGNING.md` explains how to use your own key).

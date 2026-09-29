@@ -339,11 +339,20 @@ function LibrarySection(): React.JSX.Element {
     setTimeout(() => setMsg(''), 3000)
   }
 
-  const doAdd = async (): Promise<void> => {
+  const doAdd = async (phoneMode?: 'all' | 'folder'): Promise<void> => {
+    let mode: 'all' | 'folder' | 'replace' | undefined = phoneMode
+    if (mode === 'folder' && foldersQuery.data?.some((f) => f.id === 'phone:mediastore')) {
+      // the phone's whole music is scanned now: a chosen folder replaces that
+      const ok = window.confirm(
+        'Oli now scans all the music on this phone.\n\nScan only the folder you pick instead? Songs outside it leave the library (your files are not touched).'
+      )
+      if (!ok) return
+      mode = 'replace'
+    }
     setBusy('add')
     try {
-      const added = await addLibraryFolder()
-      if (added && added.length > 0) showMsg(`Added ${added.length} folder${added.length === 1 ? '' : 's'}`)
+      const added = await addLibraryFolder(mode)
+      if (Array.isArray(added) && added.length > 0) showMsg(phoneApp ? 'Scanning…' : `Added ${added.length} folder${added.length === 1 ? '' : 's'}`)
     } finally {
       setBusy(null)
       void queryClient.invalidateQueries({ queryKey: ['library-folders'] })
@@ -374,14 +383,25 @@ function LibrarySection(): React.JSX.Element {
   return (
     <>
       <Row label={phoneApp ? 'Music on this phone' : 'Music folders'}>
-        <button
-          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          disabled={busy !== null}
-          onClick={() => void doAdd()}
-        >
-          {busy === 'add' ? <Loader2 size={13} className="animate-spin" /> : <FolderPlus size={13} />}
-          {phoneApp ? 'Scan phone music' : 'Add folders'}
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            disabled={busy !== null}
+            onClick={() => void doAdd(phoneApp ? 'folder' : undefined)}
+          >
+            {busy === 'add' ? <Loader2 size={13} className="animate-spin" /> : <FolderPlus size={13} />}
+            {phoneApp ? 'Choose folder' : 'Add folders'}
+          </button>
+          {phoneApp && (
+            <button
+              className="flex items-center gap-1.5 rounded-lg border border-surface-4 px-3 py-1.5 text-[12px] text-ink-2 hover:border-accent disabled:opacity-50"
+              disabled={busy !== null}
+              onClick={() => void doAdd('all')}
+            >
+              All phone music
+            </button>
+          )}
+        </div>
       </Row>
 
       {foldersQuery.isLoading ? (
@@ -390,7 +410,7 @@ function LibrarySection(): React.JSX.Element {
         <div className="flex items-center gap-2 text-[12.5px] text-ink-3">
           <FolderOpen size={14} />
           {phoneApp
-            ? 'Not scanned yet. Tap "Scan phone music" and allow Oli to read your music.'
+            ? 'Nothing scanned yet. Tap "Choose folder" to pick the folder with your music, or "All phone music" to scan everything (Oli asks to read your music).'
             : 'No folders added yet. Click "Add folders" and pick your music directory.'}
         </div>
       ) : (
