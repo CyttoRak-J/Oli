@@ -72,7 +72,7 @@ Checks at the end of the bug-fix session: typecheck, lint and build clean; **76 
 - Published to https://github.com/CyttoRak-J/Oli as a new commit on top of the existing `main` (old history and tags `v1.0.1`, `v1.0.2`,
   `Music` kept). The user's own icons, README, LICENSE and docs site were kept and updated. Version is now **1.1.0**.
 - `.github/workflows/build.yml`: tag `v*` builds Windows (nsis) + macOS (dmg/zip, x64 + arm64, ad-hoc signed by `scripts/adhoc-sign.cjs`) and
-  publishes a release with `SHA256SUMS.txt` (notes in `.github/release-notes.md`). See the end of this section for the run result.
+  publishes a release with `SHA256SUMS.txt` (notes in `.github/release-notes.md`). First run (tag v1.1.0, 2026-09-29) succeeded: Windows lint+tests+installer, macOS x64+arm64 dmg/zip with `codesign --verify` OK, release published with 5 files + SHA256SUMS. Windows installer hash not re-checked after upload; macOS never launched on a real Mac.
 - Android: not built. The user asked whether a full native app can have YouTube and Internet Archive; answer given in chat (see
   `ANDROID_PLAN.md`). Waiting for the user's choice of approach before any Android code.
 - To continue in a new chat, paste the block in `CONTINUE_PROMPT.md`.
