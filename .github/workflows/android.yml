@@ -46,9 +46,19 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
 
+      # Android's own verifier (from the SDK build-tools on the runner): fails the job if the signature is invalid.
+      - name: Verify the APK signature
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 24 android/app/build/outputs/apk/release/*.apk
+
       - name: Name the APK and write its checksum
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          # Android has its own version: the tag (android-v0.1.0) or, for a manual run, versionName in build.gradle.
+          VERSION="${GITHUB_REF_NAME#android-v}"
+          if [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            VERSION=$(grep -oP 'versionName "\K[^"]+' android/app/build.gradle)
+          fi
           mkdir -p out-apk
           cp android/app/build/outputs/apk/release/*.apk "out-apk/Oli-${VERSION}-android.apk"
           (cd out-apk && sha256sum *.apk | tee SHA256SUMS-android.txt)
@@ -81,11 +91,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          # Re-running a tag replaces the release (and its old files); the tag itself stays.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" artifacts/* --clobber
-          else
-            gh release create "$TAG" artifacts/* \
-              --prerelease \
-              --title "Oli Android ${TAG#android-v} (alpha)" \
-              --notes-file .github/android-release-notes.md
+            gh release delete "$TAG" --yes
           fi
+          gh release create "$TAG" artifacts/* \
+            --prerelease \
+            --title "Oli Android ${TAG#android-v} (alpha)" \
+            --notes-file .github/android-release-notes.md
