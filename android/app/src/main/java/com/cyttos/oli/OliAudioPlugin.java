@@ -14,6 +14,15 @@ import java.util.Map;
  */
 @CapacitorPlugin(name = "OliAudio")
 public class OliAudioPlugin extends Plugin {
+  /**
+   * A whole number from the call. Capacitor's own getLong() returns the default unless the JSON value is a Long, but
+   * small numbers arrive as Integer (and big ones may be Double), so every seek and resume position became 0.
+   */
+  static long longOf(PluginCall call, String name, long fallback) {
+    Object v = call.getData().opt(name);
+    return v instanceof Number ? ((Number) v).longValue() : fallback;
+  }
+
   @Override
   public void load() {
     OliAudioService.setEventSink((name, data) -> notifyListeners(name, data));
@@ -39,7 +48,7 @@ public class OliAudioPlugin extends Plugin {
       return;
     }
     final Map<String, String> headers = OliAudioEngine.toHeaders(call.getObject("headers"));
-    final long start = call.getLong("startPositionMs", 0L);
+    final long start = longOf(call, "startPositionMs", 0L);
     final boolean autoplay = Boolean.TRUE.equals(call.getBoolean("autoplay", false));
     final int bitDepth = call.getInt("bitDepth", 0);
     final String token = call.getString("token", "");
@@ -63,7 +72,7 @@ public class OliAudioPlugin extends Plugin {
 
   @PluginMethod
   public void seekTo(PluginCall call) {
-    final long ms = call.getLong("positionMs", 0L);
+    final long ms = longOf(call, "positionMs", 0L);
     run(call, e -> e.seekTo(ms));
   }
 
