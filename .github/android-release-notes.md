@@ -4,9 +4,11 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.2: watch videos
-- **Watch video** button on every online search result (Home and Search), like the PC's video window: a full-screen player with picture and sound. A **Quality** button (top right) switches between the heights YouTube offers (up to 1080p and more); if a quality will not play, Oli steps down to the next one. The song that was playing stops while the video plays.
-- Downloading a video (the download button on the result) is unchanged.
+### What is new in 0.9.3: the PC's video player on the phone
+- **Watch video** now opens the same player page as the PC: quality list (up to 1080p and more), Repeat, speed, volume, and a Download button (video or tagged song). Close it with the X or the back gesture. The song that was playing stops.
+- **Video downloads** ask YouTube in 10 MB pieces (a long request was cut off mid-way on big files), prefer MP4 pictures and try a third YouTube client before giving up.
+
+### Already in 0.9.2 (replaced): a first, native video player that did not play; the page above took its place.
 
 ### Already in 0.9.1: Now Playing and the tabs
 - **The tabs below now work while Now Playing, Queue, History or Lyrics is open**: tapping Home, Songs, Archive, Downloads or Settings closes the panel and shows that page (before, the page changed behind the panel).

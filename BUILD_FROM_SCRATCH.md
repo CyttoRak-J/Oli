@@ -176,6 +176,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `src/shared/constants.ts`  (5 KB)
 - `src/shared/ipc.ts`  (6 KB)
 - `src/shared/types.ts`  (11 KB)
+- `src/shared/videoPage.ts`  (16 KB)
 - `src/main/appState.ts`  (0 KB)
 - `src/main/electron-augment.d.ts`  (0 KB)
 - `src/main/index.ts`  (16 KB)
@@ -204,7 +205,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `src/main/services/notifications.ts`  (1 KB)
 - `src/main/services/playerState.ts`  (7 KB)
 - `src/main/services/playlists.ts`  (16 KB)
-- `src/main/services/provider.ts`  (127 KB)
+- `src/main/services/provider.ts`  (123 KB)
 - `src/main/services/scanner.ts`  (18 KB)
 - `src/main/services/search.ts`  (8 KB)
 - `src/main/services/settingsStore.ts`  (3 KB)
@@ -219,7 +220,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `src/main/util/identity.ts`  (2 KB)
 - `src/main/util/longPath.ts`  (2 KB)
 - `src/main/util/playlistUrl.ts`  (2 KB)
-- `src/main/windows.ts`  (38 KB)
+- `src/main/windows.ts`  (25 KB)
 - `src/preload/index.ts`  (2 KB)
 - `src/renderer/index.html`  (1 KB)
 - `src/renderer/src/App.tsx`  (12 KB)
@@ -247,6 +248,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `src/renderer/src/components/ThemedSelect.tsx`  (2 KB)
 - `src/renderer/src/components/Tip.tsx`  (1 KB)
 - `src/renderer/src/components/TitleBar.tsx`  (2 KB)
+- `src/renderer/src/components/VideoOverlay.tsx`  (2 KB)
 - `src/renderer/src/components/YtEngineBanner.tsx`  (5 KB)
 - `src/renderer/src/components/cn.ts`  (0 KB)
 - `src/renderer/src/lib/artwork.ts`  (1 KB)
@@ -307,7 +309,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `src/renderer/src/platform/shims/path.ts`  (2 KB)
 - `src/renderer/src/platform/songEdits.ts`  (5 KB)
 - `src/renderer/src/platform/webBackend.ts`  (32 KB)
-- `src/renderer/src/platform/youtubeCore.ts`  (13 KB)
+- `src/renderer/src/platform/youtubeCore.ts`  (10 KB)
 - `src/renderer/src/platform/youtubeService.ts`  (14 KB)
 - `src/renderer/src/store/panels.ts`  (1 KB)
 - `src/renderer/src/store/player.ts`  (50 KB)
@@ -347,7 +349,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `test/scanner.test.ts`  (2 KB)
 - `test/shuffle.test.ts`  (1 KB)
 - `test/text.test.ts`  (3 KB)
-- `test/youtubeCore.test.ts`  (9 KB)
+- `test/youtubeCore.test.ts`  (7 KB)
 - `test/youtubeService.test.ts`  (8 KB)
 - `test/ytdlpEngine.test.ts`  (10 KB)
 - `docs/.nojekyll`  (0 KB)
@@ -378,8 +380,6 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadPlugin.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadService.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliMediaPlugin.java`  (20 KB)
-- `android/app/src/main/java/com/cyttos/oli/OliVideoActivity.java`  (7 KB)
-- `android/app/src/main/java/com/cyttos/oli/OliVideoPlugin.java`  (1 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (19 KB)
 - `android/app/src/main/java/com/cyttos/oli/SourceProbe.java`  (5 KB)
 - `android/app/src/main/java/com/cyttos/oli/TagFields.java`  (1 KB)
@@ -923,7 +923,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.2); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.3); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -1062,7 +1062,7 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.2, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.3, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
@@ -1140,9 +1140,11 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.2: watch videos
-- **Watch video** button on every online search result (Home and Search), like the PC's video window: a full-screen player with picture and sound. A **Quality** button (top right) switches between the heights YouTube offers (up to 1080p and more); if a quality will not play, Oli steps down to the next one. The song that was playing stops while the video plays.
-- Downloading a video (the download button on the result) is unchanged.
+### What is new in 0.9.3: the PC's video player on the phone
+- **Watch video** now opens the same player page as the PC: quality list (up to 1080p and more), Repeat, speed, volume, and a Download button (video or tagged song). Close it with the X or the back gesture. The song that was playing stops.
+- **Video downloads** ask YouTube in 10 MB pieces (a long request was cut off mid-way on big files), prefer MP4 pictures and try a third YouTube client before giving up.
+
+### Already in 0.9.2 (replaced): a first, native video player that did not play; the page above took its place.
 
 ### Already in 0.9.1: Now Playing and the tabs
 - **The tabs below now work while Now Playing, Queue, History or Lyrics is open**: tapping Home, Songs, Archive, Downloads or Settings closes the panel and shows that page (before, the page changed behind the panel).
@@ -6133,6 +6135,222 @@ export interface ProviderConfig {
   youtubeApiKey: string
   /** Free AcoustID API key (acoustid.org) enabling audio-fingerprint matching. */
   acoustidApiKey: string
+}
+```
+
+#### FILE: src/shared/videoPage.ts
+```typescript
+/** The internal video page (bare <video>, quality list, repeat, speed, volume, download panel), shared by the PC and the phone. */
+
+/** A single video stream for the internal video window. */
+export interface VideoQualityStream {
+  height: number;
+  url: string;
+  /** HLS manifest (played with hls.js) vs a direct media URL. */
+  hls: boolean;
+  /** True when the stream is video-only DASH and needs the paired audio URL. */
+  videoOnly: boolean;
+}
+
+/** Per-video quality set: video streams by height + the best audio stream. */
+export interface VideoQualitySet {
+  streams: VideoQualityStream[];
+  /** Best audio stream (m4a/AAC) to pair with video-only DASH; null when all streams are muxed. */
+  audioUrl: string | null;
+  /** True when this set was produced by a live yt-dlp run (not the cache). */
+  fresh?: boolean;
+}
+
+/** Reads yt-dlp's `-j` output into the qualities the video page offers; null when it cannot be read. */
+export function parseVideoQualities(stdout: string): VideoQualitySet | null {
+  try {
+    const info = JSON.parse(stdout) as {
+      formats?: Array<{
+        height?: number;
+        url?: string;
+        vcodec?: string;
+        acodec?: string;
+        ext?: string;
+        protocol?: string;
+      }>;
+    };
+    const formats = Array.isArray(info.formats) ? info.formats : [];
+    const bestVideo = new Map<
+      number,
+      {
+        height: number;
+        url: string;
+        score: number;
+        hls: boolean;
+        videoOnly: boolean;
+      }
+    >();
+    let audioUrl: string | null = null;
+    let audioScore = -1;
+    for (const fmt of formats) {
+      const url = fmt.url;
+      if (!url) continue;
+      const isVideo = Boolean(fmt.vcodec && fmt.vcodec !== "none");
+      const hasAudio = Boolean(fmt.acodec && fmt.acodec !== "none");
+      const hls =
+        (fmt.protocol && fmt.protocol.startsWith("m3u8")) ||
+        /hls_playlist|\.m3u8(?:\?|$)/.test(url);
+      if (isVideo && fmt.height) {
+        // Video streams: muxed (with audio) or video-only DASH.
+        const isDirect = !hls;
+        const score =
+          (isDirect ? 16 : 4) +
+          (fmt.ext === "mp4" ? 4 : 0) +
+          (fmt.vcodec && fmt.vcodec.startsWith("avc1") ? 2 : 0);
+        const prev = bestVideo.get(fmt.height);
+        if (!prev || score > prev.score) {
+          bestVideo.set(fmt.height, {
+            height: fmt.height,
+            url,
+            score,
+            hls,
+            videoOnly: !hasAudio,
+          });
+        }
+      } else if (!isVideo && hasAudio) {
+        // Audio-only streams: the pairing audio for video-only DASH.
+        // MP4/AAC is what Chromium actually plays (WebM/Opus URLs from
+        // the web_embedded player are rejected with NotSupportedError).
+        const isDirect = !hls;
+        const score =
+          (isDirect ? 16 : 4) +
+          (fmt.ext === "m4a" ? 6 : fmt.ext === "webm" ? 3 : 1) +
+          (fmt.acodec === "aac" ? 4 : fmt.acodec === "opus" ? 2 : 0);
+        if (score > audioScore) {
+          audioScore = score;
+          audioUrl = url;
+        }
+      }
+    }
+    return {
+      streams: [...bestVideo.values()]
+        .sort((a, b) => b.height - a.height)
+        .map(({ height, url, hls, videoOnly }) => ({
+          height,
+          url,
+          hls,
+          videoOnly,
+        })),
+      audioUrl,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Builds a self-contained page with a bare <video>, quality selector and repeat.
+ * Video-only DASH streams are paired with the best audio stream in a hidden
+ * <audio> element so 1080p+ videos actually have sound. A download panel
+ * starts a merged video+audio download (shown in the app's Downloads list). */
+export function buildVideoPage(
+  set: VideoQualitySet,
+  videoId: string,
+  hlsTag: string,
+): string {
+  const labeled = set.streams.map((s) => ({
+    url: s.url,
+    hls: s.hls,
+    audio: s.videoOnly ? set.audioUrl : null,
+    label: s.height > 0 ? `${s.height}p` : "Best",
+    height: s.height,
+  }));
+  const json = JSON.stringify(labeled).replace(/</g, "\\u003c");
+  const html =
+    `<!doctype html><html><head><meta charset="utf-8">` +
+    hlsTag +
+    `<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}` +
+    `video{width:100vw;height:100vh;display:block;object-fit:contain;background:#000}` +
+    `#qbar{position:fixed;top:10px;right:10px;z-index:10;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:4px 6px;font:12px system-ui;color:#fff}` +
+    `#qbar select{background:rgba(0,0,0,.7);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:2px 4px;font-size:12px;outline:none}` +
+    `#curq{min-width:34px;text-align:center;font-variant-numeric:tabular-nums;color:#ffd54a;font-weight:600}` +
+    `#repeat{background:transparent;border:1px solid rgba(255,255,255,.3);border-radius:6px;color:#fff;padding:2px 8px;font-size:12px;cursor:pointer}` +
+    `#repeat.active{background:rgba(255,255,255,.28);border-color:#fff}` +
+    `#dlbtn{cursor:pointer;background:transparent;border:1px solid rgba(255,255,255,.3);border-radius:6px;color:#fff;padding:2px 9px;font-size:13px;line-height:1.3}` +
+    `#dlbtn:hover{background:rgba(255,255,255,.18)}` +
+    `#vol{width:80px;accent-color:#ffd54a;cursor:pointer}` +
+    `#dlp{display:none;position:fixed;inset:0;z-index:20;align-items:center;justify-content:center;background:rgba(0,0,0,.55)}` +
+    `#dlbox{width:min(400px,90vw);background:#181818;border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:16px;font:13px system-ui;color:#eee;display:flex;flex-direction:column;gap:10px}` +
+    `#dlbox h3{margin:0 0 2px;font-size:14px;color:#fff}` +
+    `#dlbox label{display:flex;justify-content:space-between;align-items:center;gap:10px;color:#bbb}` +
+    `#dlbox select,#dlbox input{background:#111;color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:4px 6px;font-size:12px;outline:none;min-width:0}` +
+    `#dlf{flex:1}` +
+    `#dlbox .row{display:flex;gap:6px}` +
+    `#dlbox button{background:#ffd54a;color:#111;font-weight:700;border:0;border-radius:8px;padding:8px 10px;cursor:pointer;font-size:13px}` +
+    `#dlbox button.sec{background:transparent;color:#ccc;border:1px solid rgba(255,255,255,.35);padding:4px 8px;font-weight:500}` +
+    `#dlstatus{font-size:12px;color:#ffd54a;min-height:16px}` +
+    `#errbox{display:none;position:fixed;inset:0;z-index:30;align-items:center;justify-content:center;background:rgba(0,0,0,.65);color:#fff;font:14px system-ui}` +
+    `#errbox .eb2{background:#181818;border:1px solid rgba(255,255,255,.25);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;text-align:center;min-width:260px}` +
+    `#errbox button{background:#ffd54a;color:#111;font-weight:700;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px}` +
+    `#errbox button.sec{background:transparent;color:#ccc;border:1px solid rgba(255,255,255,.35);font-weight:500}` +
+    `</style></head><body>` +
+    `<video id="v" controls playsinline autoplay></video>` +
+    `<audio id="a" style="display:none" preload="auto"></audio>` +
+    `<div id="qbar"><span id="curq">-</span> Quality <select id="q"></select><input id="vol" type="range" min="0" max="100" value="100" title="Volume"><select id="spd" title="Playback speed"></select><button id="dlbtn" title="Download video">⤓</button><button id="repeat" title="Repeat video">Repeat</button></div>` +
+    `<div id="dlp"><div id="dlbox"><h3>Download video</h3>` +
+    `<label>Video quality<select id="dlv"></select></label>` +
+    `<label>Audio<select id="dla"><option value="best">Best audio</option><option value="m4a">MP4 (AAC)</option><option value="opus">Opus (WebM)</option></select></label>` +
+    `<label>Folder<div class="row"><input id="dlf" placeholder="Default downloads folder"><button class="sec" id="dlpick">Choose…</button></div></label>` +
+    `<div class="row"><button id="dlstart">Download video</button><span id="dlstatus"></span></div>` +
+    `<div class="row"><button id="dlsong">Download song (tagged)</button><span id="dlsstatus" style="color:#8fe388"></span></div>` +
+    `<div id="dlsng" style="font-size:11.5px;color:#bbb">Best audio only, with cover art + title/artist/album tags embedded.</div>` +
+    `</div></div>` +
+    `<div id="errbox"><div class="eb2"><div>Video playback failed</div><div id="errmsg" style="font-size:12px;color:#bbb">The stream could not be played.</div><div style="display:flex;gap:8px;justify-content:center"><button id="errretry">Retry</button><button id="errfallback" class="sec">Try backup stream</button></div></div></div>` +
+    `<script>` +
+    `const VID=${JSON.stringify(videoId)};` +
+    `const ST=${json};const v=document.getElementById('v');const a=document.getElementById('a');const sel=document.getElementById('q');const curq=document.getElementById('curq');` +
+    `const vol=document.getElementById('vol');const spd=document.getElementById('spd');` +
+    `const dlbtn=document.getElementById('dlbtn');const dlp=document.getElementById('dlp');const dlv=document.getElementById('dlv');const dla=document.getElementById('dla');const dlf=document.getElementById('dlf');const dlstart=document.getElementById('dlstart');const dlstatus=document.getElementById('dlstatus');const dlsong=document.getElementById('dlsong');const dlsstatus=document.getElementById('dlsstatus');dlp.style.display='none';` +
+    `const HLS=typeof self.Hls!=='undefined';let hls=null;` +
+    `sel.style.display=ST.length>1?'':'none';` +
+    `if(ST.length>1){ST.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=s.label;sel.appendChild(o)});}` +
+    `[0.5,0.75,1,1.25,1.5,2].forEach(r=>{const o=document.createElement('option');o.value=String(r);o.textContent=r+'x';spd.appendChild(o)});spd.value='1';` +
+    `let pos=0;let repeat=false;let switching=false;let firstPlay=true;let seq=0;` +
+    `let autoRetried=false;let arTimer=null;` +
+    `let stallIv=null;function clearStall(){if(stallIv){clearInterval(stallIv);stallIv=null}}` +
+    `function armStall(){clearStall();const t0=Date.now();stallIv=setInterval(()=>{if(v.readyState>=3||(v.currentTime>0.2&&!v.paused)){clearStall();return}if(Date.now()-t0>8000){clearStall();stepDown()}},2000)}` +
+    `function tearDown(){clearStall();if(hls){hls.destroy();hls=null}}` +
+    `function whenHls(cb){if(typeof self.Hls!=='undefined'){cb()}else{let t=0;const iv=setInterval(()=>{t+=50;if(typeof self.Hls!=='undefined'||t>3000){clearInterval(iv);cb()}},50)}}` +
+    `function setAudio(s){if(!s||!s.audio){a.removeAttribute('src');a.load();return}a.src=s.audio;a.load();a.volume=v.volume;a.muted=v.muted;a.playbackRate=v.playbackRate;if(!v.paused||v.autoplay)a.play().catch(()=>{})}` +
+    `function setStream(i){const s=ST[i];if(!s)return;switching=true;setTimeout(()=>{switching=false},700);pos=v.currentTime||0;tearDown();curq.textContent=s.label;setAudio(s);` +
+    `if(s.hls&&HLS&&!v.canPlayType('application/vnd.apple.mpegurl')){` +
+    `let h=hls=new Hls({maxBufferLength:20});const buf=pos;h.loadSource(s.url);h.attachMedia(v);` +
+    `h.on(Hls.Events.MANIFEST_PARSED,()=>{if(buf>0)v.currentTime=buf;v.play().catch(()=>{});armStall()});` +
+    `h.on(Hls.Events.ERROR,(_e,d)=>{if(d&&d.fatal){tearDown();stepDown()}});` +
+    `}else{` +
+    `v.src=s.url;v.play().catch(()=>{});armStall();` +
+    `}}` +
+    `function stepDown(){const i=Number(sel.value);if(i<ST.length-1){sel.value=i+1;setStream(i+1)}else{showErr()}}` +
+    `function showErr(){if(!autoRetried&&ST.length>0){autoRetried=true;arTimer=setTimeout(function(){if(v.readyState>=3||(v.currentTime>0.2&&!v.paused))return;setStream(0)},3000);return}document.getElementById('errbox').style.display='flex'}` +
+    `function hideErr(){document.getElementById('errbox').style.display='none'}` +
+    `dlbtn.addEventListener('click',()=>{const open=getComputedStyle(dlp).display!=='none';dlp.style.display=open?'none':'flex';if(dlv.options.length===0){const hs=[];ST.forEach(s=>{const h=Number(s.height);if(h>0&&hs.indexOf(h)<0)hs.push(h)});hs.sort((a,b)=>b-a);hs.forEach(h=>{const o=document.createElement('option');o.value=h;o.textContent=h+'p';dlv.appendChild(o)});const b=document.createElement('option');b.value='0';b.textContent='Best';dlv.insertBefore(b,dlv.firstChild);}});` +
+    `dlp.addEventListener('click',(ev)=>{if(ev.target===dlp)dlp.style.display='none'});` +
+    `document.getElementById('dlpick').addEventListener('click',async()=>{if(!window.cytto)return;const dir=await window.cytto.invoke('video:pick-folder');if(dir)dlf.value=dir;});` +
+    `dlstart.addEventListener('click',async()=>{if(!window.cytto){dlstatus.textContent='Unavailable';return}const f=dlf.value.trim();const args=['video:download',VID,Number(dlv.value)||0,dla.value,f?f:null];dlstatus.textContent='Starting…';dlstart.disabled=true;try{const ok=await window.cytto.invoke.apply(null,args);dlstatus.textContent=ok?'Download started — see the Downloads page':"Couldn't start";}catch(e){dlstatus.textContent='Failed to start'}dlstart.disabled=false;setTimeout(()=>{dlstatus.textContent=''},5000)});` +
+    `dlsong.addEventListener('click',async()=>{if(!window.cytto){dlsstatus.textContent='Unavailable';return}const f=dlf.value.trim();dlsstatus.textContent='Starting…';dlsong.disabled=true;try{const ok=await window.cytto.invoke.apply(null,['video:download-song',VID,dla.value,f?f:null]);dlsstatus.textContent=ok?'Song started — see the Downloads page':"Couldn't start";}catch(e){dlsstatus.textContent='Failed to start'}dlsong.disabled=false;setTimeout(()=>{dlsstatus.textContent=''},5000)});` +
+    `vol.addEventListener('input',()=>{const x=Number(vol.value)/100;v.volume=x;if(a.src)a.volume=x;if(v.muted){v.muted=false}});` +
+    `spd.addEventListener('change',()=>{const r=Number(spd.value);v.playbackRate=r;if(a.src)a.playbackRate=r});` +
+    `v.addEventListener('loadedmetadata',()=>{if(pos>0){v.currentTime=pos}});` +
+    `a.addEventListener('loadedmetadata',()=>{if(pos>0)a.currentTime=pos});` +
+    `sel.addEventListener('change',()=>setStream(Number(sel.value)));` +
+    `v.addEventListener('play',()=>{if(firstPlay){firstPlay=false;return}if(switching||v.muted)return;a.play().catch(()=>{});location.hash='#cyttos-video-play-'+(++seq)});` +
+    `v.addEventListener('pause',()=>{if(!switching)a.pause()});` +
+    `v.addEventListener('volumechange',()=>{vol.value=Math.round(v.volume*100);a.volume=v.volume;a.muted=v.muted;location.hash=(v.muted?'#cyttos-video-muted':'#cyttos-video-unmuted')+'-'+(++seq)});` +
+    `v.addEventListener('ratechange',()=>{if(a.src)a.playbackRate=v.playbackRate});` +
+    `v.addEventListener('seeked',()=>{if(a.src&&a.currentTime!==v.currentTime)a.currentTime=v.currentTime});` +
+    `document.getElementById('repeat').addEventListener('click',()=>{repeat=!repeat;document.getElementById('repeat').classList.toggle('active',repeat);});` +
+    `v.addEventListener('ended',()=>{a.pause();if(repeat){v.currentTime=0;v.play().catch(()=>{})}else{location.hash='#cyttos-video-ended-'+(++seq)}});` +
+    `a.addEventListener('ended',()=>{if(!a.src)return;if(repeat){a.currentTime=0;a.play().catch(()=>{});if(v.ended||v.currentTime>=v.duration-0.3){v.currentTime=0;v.play().catch(()=>{})}}else{v.pause();if(!v.ended)location.hash='#cyttos-video-ended-'+(++seq)}});` +
+    `v.addEventListener('error',stepDown);v.addEventListener('playing',function(){clearStall();if(arTimer){clearTimeout(arTimer);arTimer=null}});` +
+    `if(ST.length>0){whenHls(function(){setStream(0)})}else{document.getElementById('errmsg').textContent='This video could not be loaded. Retry, or use the backup stream.';showErr()}` +
+    `document.getElementById('errretry').addEventListener('click',()=>{hideErr();if(ST.length>0){setStream(0)}else if(window.cytto){window.cytto.invoke('video:retry',VID)}});` +
+    `document.getElementById('errfallback').addEventListener('click',async()=>{if(!window.cytto)return;hideErr();let u=null;try{u=await window.cytto.invoke('video:fallback-url',VID)}catch(e){}if(!u){showErr();return}ST[ST.length]={url:u,hls:false,audio:null,label:'Best',height:0};sel.style.display=ST.length>1?'':'none';if(sel.value===''&&sel.options.length<ST.length-1){sel.options.length=0;ST.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=s.label;sel.appendChild(o)});sel.value=String(ST.length-1)}setStream(ST.length-1)});` +
+    `</script></body></html>`;
+  return html;
 }
 ```
 
@@ -14109,24 +14327,8 @@ export interface ProviderStatus {
   youtubeConfigured: boolean
 }
 
-/** A single video stream for the internal video window. */
-export interface VideoQualityStream {
-  height: number
-  url: string
-  /** HLS manifest (played with hls.js) vs a direct media URL. */
-  hls: boolean
-  /** True when the stream is video-only DASH and needs the paired audio URL. */
-  videoOnly: boolean
-}
-
-/** Per-video quality set: video streams by height + the best audio stream. */
-export interface VideoQualitySet {
-  streams: VideoQualityStream[]
-  /** Best audio stream (m4a/AAC) to pair with video-only DASH; null when all streams are muxed. */
-  audioUrl: string | null
-  /** True when this set was produced by a live yt-dlp run (not the cache). */
-  fresh?: boolean
-}
+import { parseVideoQualities, type VideoQualitySet } from '@shared/videoPage'
+export type { VideoQualityStream, VideoQualitySet } from '@shared/videoPage'
 
 interface CacheRow {
   payload: string
@@ -16818,76 +17020,7 @@ export class ProviderService {
     ])
     if (!stdout) return { streams: [], audioUrl: null }
 
-    const set: VideoQualitySet | null = (() => {
-      try {
-        const info = JSON.parse(stdout) as {
-          formats?: Array<{
-            height?: number
-            url?: string
-            vcodec?: string
-            acodec?: string
-            ext?: string
-            protocol?: string
-          }>
-        }
-        const formats = Array.isArray(info.formats) ? info.formats : []
-        const bestVideo = new Map<
-          number,
-          { height: number; url: string; score: number; hls: boolean; videoOnly: boolean }
-        >()
-        let audioUrl: string | null = null
-        let audioScore = -1
-        for (const fmt of formats) {
-          const url = fmt.url
-          if (!url) continue
-          const isVideo = Boolean(fmt.vcodec && fmt.vcodec !== 'none')
-          const hasAudio = Boolean(fmt.acodec && fmt.acodec !== 'none')
-          const hls =
-            (fmt.protocol && fmt.protocol.startsWith('m3u8')) ||
-            /hls_playlist|\.m3u8(?:\?|$)/.test(url)
-          if (isVideo && fmt.height) {
-            // Video streams: muxed (with audio) or video-only DASH.
-            const isDirect = !hls
-            const score =
-              (isDirect ? 16 : 4) +
-              (fmt.ext === 'mp4' ? 4 : 0) +
-              (fmt.vcodec && fmt.vcodec.startsWith('avc1') ? 2 : 0)
-            const prev = bestVideo.get(fmt.height)
-            if (!prev || score > prev.score) {
-              bestVideo.set(fmt.height, {
-                height: fmt.height,
-                url,
-                score,
-                hls,
-                videoOnly: !hasAudio
-              })
-            }
-          } else if (!isVideo && hasAudio) {
-            // Audio-only streams: the pairing audio for video-only DASH.
-            // MP4/AAC is what Chromium actually plays (WebM/Opus URLs from
-            // the web_embedded player are rejected with NotSupportedError).
-            const isDirect = !hls
-            const score =
-              (isDirect ? 16 : 4) +
-              (fmt.ext === 'm4a' ? 6 : fmt.ext === 'webm' ? 3 : 1) +
-              (fmt.acodec === 'aac' ? 4 : fmt.acodec === 'opus' ? 2 : 0)
-            if (score > audioScore) {
-              audioScore = score
-              audioUrl = url
-            }
-          }
-        }
-        return {
-          streams: [...bestVideo.values()]
-            .sort((a, b) => b.height - a.height)
-            .map(({ height, url, hls, videoOnly }) => ({ height, url, hls, videoOnly })),
-          audioUrl
-        }
-      } catch (parseErr) {
-        getLogger().info(`yt-dlp quality parse failed for ${videoId}`, parseErr)
-        return null
-      }
-    })()
+    const set = parseVideoQualities(stdout)
 
     if (!set) return { streams: [], audioUrl: null }
     set.fresh = true
@@ -19560,7 +19693,8 @@ import { getLogger } from './services/logger'
 import { isQuitting } from './appState'
 import { IPC } from '@shared/ipc'
 import type { SettingsStore } from './services/settingsStore'
-import type { ProviderService, VideoQualitySet } from './services/provider'
+import type { ProviderService } from './services/provider'
+import { buildVideoPage, type VideoQualitySet } from '@shared/videoPage'
 
 const MAIN_W = 1280
 const MAIN_H = 800
@@ -20189,109 +20323,8 @@ export class WindowManager {
     win.webContents.send(IPC.onPlaybackCommand, 'resume')
   }
 
-  /** Builds a self-contained page with a bare <video>, quality selector and repeat.
-   * Video-only DASH streams are paired with the best audio stream in a hidden
-   * <audio> element so 1080p+ videos actually have sound. A download panel
-   * starts a merged video+audio download (shown in the app's Downloads list). */
   private videoPageHtml(set: VideoQualitySet, videoId: string): string {
-    const labeled = set.streams.map((s) => ({
-      url: s.url,
-      hls: s.hls,
-      audio: s.videoOnly ? set.audioUrl : null,
-      label: s.height > 0 ? `${s.height}p` : 'Best',
-      height: s.height
-    }))
-    const json = JSON.stringify(labeled).replace(/</g, '\\u003c')
-    const html =
-      `<!doctype html><html><head><meta charset="utf-8">` +
-      `<script src="cyttos-vendor://hls/hls.min.js"></script>` +
-      `<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}` +
-      `video{width:100vw;height:100vh;display:block;object-fit:contain;background:#000}` +
-      `#qbar{position:fixed;top:10px;right:10px;z-index:10;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:4px 6px;font:12px system-ui;color:#fff}` +
-      `#qbar select{background:rgba(0,0,0,.7);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:2px 4px;font-size:12px;outline:none}` +
-      `#curq{min-width:34px;text-align:center;font-variant-numeric:tabular-nums;color:#ffd54a;font-weight:600}` +
-      `#repeat{background:transparent;border:1px solid rgba(255,255,255,.3);border-radius:6px;color:#fff;padding:2px 8px;font-size:12px;cursor:pointer}` +
-      `#repeat.active{background:rgba(255,255,255,.28);border-color:#fff}` +
-      `#dlbtn{cursor:pointer;background:transparent;border:1px solid rgba(255,255,255,.3);border-radius:6px;color:#fff;padding:2px 9px;font-size:13px;line-height:1.3}` +
-      `#dlbtn:hover{background:rgba(255,255,255,.18)}` +
-      `#vol{width:80px;accent-color:#ffd54a;cursor:pointer}` +
-      `#dlp{display:none;position:fixed;inset:0;z-index:20;align-items:center;justify-content:center;background:rgba(0,0,0,.55)}` +
-      `#dlbox{width:min(400px,90vw);background:#181818;border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:16px;font:13px system-ui;color:#eee;display:flex;flex-direction:column;gap:10px}` +
-      `#dlbox h3{margin:0 0 2px;font-size:14px;color:#fff}` +
-      `#dlbox label{display:flex;justify-content:space-between;align-items:center;gap:10px;color:#bbb}` +
-      `#dlbox select,#dlbox input{background:#111;color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:4px 6px;font-size:12px;outline:none;min-width:0}` +
-      `#dlf{flex:1}` +
-      `#dlbox .row{display:flex;gap:6px}` +
-      `#dlbox button{background:#ffd54a;color:#111;font-weight:700;border:0;border-radius:8px;padding:8px 10px;cursor:pointer;font-size:13px}` +
-      `#dlbox button.sec{background:transparent;color:#ccc;border:1px solid rgba(255,255,255,.35);padding:4px 8px;font-weight:500}` +
-      `#dlstatus{font-size:12px;color:#ffd54a;min-height:16px}` +
-      `#errbox{display:none;position:fixed;inset:0;z-index:30;align-items:center;justify-content:center;background:rgba(0,0,0,.65);color:#fff;font:14px system-ui}` +
-      `#errbox .eb2{background:#181818;border:1px solid rgba(255,255,255,.25);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;text-align:center;min-width:260px}` +
-      `#errbox button{background:#ffd54a;color:#111;font-weight:700;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px}` +
-      `#errbox button.sec{background:transparent;color:#ccc;border:1px solid rgba(255,255,255,.35);font-weight:500}` +
-      `</style></head><body>` +
-      `<video id="v" controls playsinline autoplay></video>` +
-      `<audio id="a" style="display:none" preload="auto"></audio>` +
-      `<div id="qbar"><span id="curq">-</span> Quality <select id="q"></select><input id="vol" type="range" min="0" max="100" value="100" title="Volume"><select id="spd" title="Playback speed"></select><button id="dlbtn" title="Download video">⤓</button><button id="repeat" title="Repeat video">Repeat</button></div>` +
-      `<div id="dlp"><div id="dlbox"><h3>Download video</h3>` +
-      `<label>Video quality<select id="dlv"></select></label>` +
-      `<label>Audio<select id="dla"><option value="best">Best audio</option><option value="m4a">MP4 (AAC)</option><option value="opus">Opus (WebM)</option></select></label>` +
-      `<label>Folder<div class="row"><input id="dlf" placeholder="Default downloads folder"><button class="sec" id="dlpick">Choose…</button></div></label>` +
-      `<div class="row"><button id="dlstart">Download video</button><span id="dlstatus"></span></div>` +
-      `<div class="row"><button id="dlsong">Download song (tagged)</button><span id="dlsstatus" style="color:#8fe388"></span></div>` +
-      `<div id="dlsng" style="font-size:11.5px;color:#bbb">Best audio only, with cover art + title/artist/album tags embedded.</div>` +
-      `</div></div>` +
-      `<div id="errbox"><div class="eb2"><div>Video playback failed</div><div id="errmsg" style="font-size:12px;color:#bbb">The stream could not be played.</div><div style="display:flex;gap:8px;justify-content:center"><button id="errretry">Retry</button><button id="errfallback" class="sec">Try backup stream</button></div></div></div>` +
-      `<script>` +
-      `const VID=${JSON.stringify(videoId)};` +
-      `const ST=${json};const v=document.getElementById('v');const a=document.getElementById('a');const sel=document.getElementById('q');const curq=document.getElementById('curq');` +
-      `const vol=document.getElementById('vol');const spd=document.getElementById('spd');` +
-      `const dlbtn=document.getElementById('dlbtn');const dlp=document.getElementById('dlp');const dlv=document.getElementById('dlv');const dla=document.getElementById('dla');const dlf=document.getElementById('dlf');const dlstart=document.getElementById('dlstart');const dlstatus=document.getElementById('dlstatus');const dlsong=document.getElementById('dlsong');const dlsstatus=document.getElementById('dlsstatus');dlp.style.display='none';` +
-      `const HLS=typeof self.Hls!=='undefined';let hls=null;` +
-      `sel.style.display=ST.length>1?'':'none';` +
-      `if(ST.length>1){ST.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=s.label;sel.appendChild(o)});}` +
-      `[0.5,0.75,1,1.25,1.5,2].forEach(r=>{const o=document.createElement('option');o.value=String(r);o.textContent=r+'x';spd.appendChild(o)});spd.value='1';` +
-      `let pos=0;let repeat=false;let switching=false;let firstPlay=true;let seq=0;` +
-      `let autoRetried=false;let arTimer=null;` +
-      `let stallIv=null;function clearStall(){if(stallIv){clearInterval(stallIv);stallIv=null}}` +
-      `function armStall(){clearStall();const t0=Date.now();stallIv=setInterval(()=>{if(v.readyState>=3||(v.currentTime>0.2&&!v.paused)){clearStall();return}if(Date.now()-t0>8000){clearStall();stepDown()}},2000)}` +
-      `function tearDown(){clearStall();if(hls){hls.destroy();hls=null}}` +
-      `function whenHls(cb){if(typeof self.Hls!=='undefined'){cb()}else{let t=0;const iv=setInterval(()=>{t+=50;if(typeof self.Hls!=='undefined'||t>3000){clearInterval(iv);cb()}},50)}}` +
-      `function setAudio(s){if(!s||!s.audio){a.removeAttribute('src');a.load();return}a.src=s.audio;a.load();a.volume=v.volume;a.muted=v.muted;a.playbackRate=v.playbackRate;if(!v.paused||v.autoplay)a.play().catch(()=>{})}` +
-      `function setStream(i){const s=ST[i];if(!s)return;switching=true;setTimeout(()=>{switching=false},700);pos=v.currentTime||0;tearDown();curq.textContent=s.label;setAudio(s);` +
-      `if(s.hls&&HLS&&!v.canPlayType('application/vnd.apple.mpegurl')){` +
-      `let h=hls=new Hls({maxBufferLength:20});const buf=pos;h.loadSource(s.url);h.attachMedia(v);` +
-      `h.on(Hls.Events.MANIFEST_PARSED,()=>{if(buf>0)v.currentTime=buf;v.play().catch(()=>{});armStall()});` +
-      `h.on(Hls.Events.ERROR,(_e,d)=>{if(d&&d.fatal){tearDown();stepDown()}});` +
-      `}else{` +
-      `v.src=s.url;v.play().catch(()=>{});armStall();` +
-      `}}` +
-      `function stepDown(){const i=Number(sel.value);if(i<ST.length-1){sel.value=i+1;setStream(i+1)}else{showErr()}}` +
-      `function showErr(){if(!autoRetried&&ST.length>0){autoRetried=true;arTimer=setTimeout(function(){if(v.readyState>=3||(v.currentTime>0.2&&!v.paused))return;setStream(0)},3000);return}document.getElementById('errbox').style.display='flex'}` +
-      `function hideErr(){document.getElementById('errbox').style.display='none'}` +
-      `dlbtn.addEventListener('click',()=>{const open=getComputedStyle(dlp).display!=='none';dlp.style.display=open?'none':'flex';if(dlv.options.length===0){const hs=[];ST.forEach(s=>{const h=Number(s.height);if(h>0&&hs.indexOf(h)<0)hs.push(h)});hs.sort((a,b)=>b-a);hs.forEach(h=>{const o=document.createElement('option');o.value=h;o.textContent=h+'p';dlv.appendChild(o)});const b=document.createElement('option');b.value='0';b.textContent='Best';dlv.insertBefore(b,dlv.firstChild);}});` +
-      `dlp.addEventListener('click',(ev)=>{if(ev.target===dlp)dlp.style.display='none'});` +
-      `document.getElementById('dlpick').addEventListener('click',async()=>{if(!window.cytto)return;const dir=await window.cytto.invoke('video:pick-folder');if(dir)dlf.value=dir;});` +
-      `dlstart.addEventListener('click',async()=>{if(!window.cytto){dlstatus.textContent='Unavailable';return}const f=dlf.value.trim();const args=['video:download',VID,Number(dlv.value)||0,dla.value,f?f:null];dlstatus.textContent='Starting…';dlstart.disabled=true;try{const ok=await window.cytto.invoke.apply(null,args);dlstatus.textContent=ok?'Download started — see the Downloads page':"Couldn't start";}catch(e){dlstatus.textContent='Failed to start'}dlstart.disabled=false;setTimeout(()=>{dlstatus.textContent=''},5000)});` +
-      `dlsong.addEventListener('click',async()=>{if(!window.cytto){dlsstatus.textContent='Unavailable';return}const f=dlf.value.trim();dlsstatus.textContent='Starting…';dlsong.disabled=true;try{const ok=await window.cytto.invoke.apply(null,['video:download-song',VID,dla.value,f?f:null]);dlsstatus.textContent=ok?'Song started — see the Downloads page':"Couldn't start";}catch(e){dlsstatus.textContent='Failed to start'}dlsong.disabled=false;setTimeout(()=>{dlsstatus.textContent=''},5000)});` +
-      `vol.addEventListener('input',()=>{const x=Number(vol.value)/100;v.volume=x;if(a.src)a.volume=x;if(v.muted){v.muted=false}});` +
-      `spd.addEventListener('change',()=>{const r=Number(spd.value);v.playbackRate=r;if(a.src)a.playbackRate=r});` +
-      `v.addEventListener('loadedmetadata',()=>{if(pos>0){v.currentTime=pos}});` +
-      `a.addEventListener('loadedmetadata',()=>{if(pos>0)a.currentTime=pos});` +
-      `sel.addEventListener('change',()=>setStream(Number(sel.value)));` +
-      `v.addEventListener('play',()=>{if(firstPlay){firstPlay=false;return}if(switching||v.muted)return;a.play().catch(()=>{});location.hash='#cyttos-video-play-'+(++seq)});` +
-      `v.addEventListener('pause',()=>{if(!switching)a.pause()});` +
-      `v.addEventListener('volumechange',()=>{vol.value=Math.round(v.volume*100);a.volume=v.volume;a.muted=v.muted;location.hash=(v.muted?'#cyttos-video-muted':'#cyttos-video-unmuted')+'-'+(++seq)});` +
-      `v.addEventListener('ratechange',()=>{if(a.src)a.playbackRate=v.playbackRate});` +
-      `v.addEventListener('seeked',()=>{if(a.src&&a.currentTime!==v.currentTime)a.currentTime=v.currentTime});` +
-      `document.getElementById('repeat').addEventListener('click',()=>{repeat=!repeat;document.getElementById('repeat').classList.toggle('active',repeat);});` +
-      `v.addEventListener('ended',()=>{a.pause();if(repeat){v.currentTime=0;v.play().catch(()=>{})}else{location.hash='#cyttos-video-ended-'+(++seq)}});` +
-      `a.addEventListener('ended',()=>{if(!a.src)return;if(repeat){a.currentTime=0;a.play().catch(()=>{});if(v.ended||v.currentTime>=v.duration-0.3){v.currentTime=0;v.play().catch(()=>{})}}else{v.pause();if(!v.ended)location.hash='#cyttos-video-ended-'+(++seq)}});` +
-      `v.addEventListener('error',stepDown);v.addEventListener('playing',function(){clearStall();if(arTimer){clearTimeout(arTimer);arTimer=null}});` +
-      `if(ST.length>0){whenHls(function(){setStream(0)})}else{document.getElementById('errmsg').textContent='This video could not be loaded. Retry, or use the backup stream.';showErr()}` +
-      `document.getElementById('errretry').addEventListener('click',()=>{hideErr();if(ST.length>0){setStream(0)}else if(window.cytto){window.cytto.invoke('video:retry',VID)}});` +
-      `document.getElementById('errfallback').addEventListener('click',async()=>{if(!window.cytto)return;hideErr();let u=null;try{u=await window.cytto.invoke('video:fallback-url',VID)}catch(e){}if(!u){showErr();return}ST[ST.length]={url:u,hls:false,audio:null,label:'Best',height:0};sel.style.display=ST.length>1?'':'none';if(sel.value===''&&sel.options.length<ST.length-1){sel.options.length=0;ST.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=s.label;sel.appendChild(o)});sel.value=String(ST.length-1)}setStream(ST.length-1)});` +
-      `</script></body></html>`
+    const html = buildVideoPage(set, videoId, '<script src="cyttos-vendor://hls/hls.min.js"></script>')
     return 'data:text/html;charset=utf-8,' + encodeURIComponent(html)
   }
 
@@ -20479,6 +20512,7 @@ import { ShortcutsPanel } from './components/ShortcutsPanel'
 import { TitleBar } from './components/TitleBar'
 import { YtEngineBanner } from './components/YtEngineBanner'
 import { MobileNav } from './components/MobileNav'
+import { VideoOverlay } from './components/VideoOverlay'
 import { MobilePlayerBar } from './components/MobilePlayerBar'
 import { isMobileShell } from './lib/platform'
 import { Sidebar } from './components/Sidebar'
@@ -20699,6 +20733,10 @@ function MainShell(): React.JSX.Element {
     if (!mobile) return
     const w = window as unknown as { __oliBack?: () => boolean }
     w.__oliBack = () => {
+      if (__OLI_WEB__ && (window as unknown as { __oliVideoOpen?: boolean }).__oliVideoOpen) {
+        window.dispatchEvent(new Event('oli:video-close'))
+        return true
+      }
       const panels = usePanels.getState()
       if (panels.panel) {
         panels.close()
@@ -20752,6 +20790,7 @@ function MainShell(): React.JSX.Element {
       </div>
       {mobile ? <MobilePlayerBar /> : <PlayerBar />}
       {mobile && <MobileNav />}
+      {__OLI_WEB__ && mobile && <VideoOverlay />}
       {shortcutsOpen && <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />}
     </div>
   )
@@ -24467,6 +24506,74 @@ export function TitleBar(): React.JSX.Element {
           <X size={16} />
         </button>
       </div>
+    </div>
+  )
+}
+```
+
+#### FILE: src/renderer/src/components/VideoOverlay.tsx
+```tsx
+import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
+import { buildVideoPage, type VideoQualitySet } from '@shared/videoPage'
+
+interface VideoEvent {
+  videoId: string
+  set: VideoQualitySet
+}
+
+/**
+ * Phone: the PC's video window as a full-screen layer. It is the same page (picture + sound, quality list, repeat, speed,
+ * volume, download panel), shown in an iframe that shares the app's bridge so its Download buttons use the phone's queue.
+ */
+export function VideoOverlay(): React.JSX.Element | null {
+  const [page, setPage] = useState<string | null>(null)
+
+  useEffect(() => {
+    const open = (e: Event): void => {
+      void (async () => {
+        const { videoId, set } = (e as CustomEvent<VideoEvent>).detail
+        // hls.js is only loaded when a stream of this video needs it
+        let hls = ''
+        if (set.streams.some((s) => s.hls)) {
+          try {
+            const src = (await import('hls.js/dist/hls.min.js?raw')).default
+            hls = `<script>${src.split('</script').join('<' + String.fromCharCode(92) + '/script')}</script>`
+          } catch {
+            hls = ''
+          }
+        }
+        setPage(buildVideoPage(set, videoId, `<script>window.cytto=parent.cytto</script>${hls}`))
+      })()
+    }
+    const close = (): void => setPage(null)
+    window.addEventListener('oli:video', open)
+    window.addEventListener('oli:video-close', close)
+    return () => {
+      window.removeEventListener('oli:video', open)
+      window.removeEventListener('oli:video-close', close)
+    }
+  }, [])
+
+  useEffect(() => {
+    const w = window as unknown as { __oliVideoOpen?: boolean }
+    w.__oliVideoOpen = page !== null
+    return () => {
+      w.__oliVideoOpen = false
+    }
+  }, [page])
+
+  if (page === null) return null
+  return (
+    <div className="fixed inset-0 z-[200] bg-black">
+      <iframe title="Video" srcDoc={page} allow="autoplay; fullscreen" allowFullScreen className="h-full w-full border-0" />
+      <button
+        aria-label="Close video"
+        className="absolute left-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white"
+        onClick={() => setPage(null)}
+      >
+        <X size={20} />
+      </button>
     </div>
   )
 }
@@ -33368,7 +33475,7 @@ import { Browser } from '@capacitor/browser'
 import { deviceFileUrl } from '../lib/platform'
 import { setStreamHeaders } from './nativeAudio'
 import { initAndroidCore, trackIds, type AndroidCore, type AndroidProviders } from './androidCore'
-import { YouTubeService, getYouTubePlugin, getVideoPlugin } from './youtubeService'
+import { YouTubeService, getYouTubePlugin } from './youtubeService'
 import { songTagsFor, videoIdFromUrl, isYouTubeUrl, type SongTags } from './youtubeCore'
 import { getMediaPlugin, isPhoneLocation, PhoneLibrary } from './phoneLibrary'
 import { checkAndroidUpdate, type AndroidUpdateStatus } from './androidUpdate'
@@ -33810,16 +33917,14 @@ const youtubeHandlers: Record<string, Handler> = {
   // the PC plays the audio of a video that refuses to stream by downloading it first; here the stream is all there is
   [IPC.downloadYouTubeAudio]: (() => null) as Handler,
   [IPC.videoFallbackUrl]: (() => null) as Handler,
+  // the PC opens a window; the phone shows the same video page over the app (components/VideoOverlay.tsx)
   [IPC.openVideoWindow]: (async (videoId: string) => {
-    const player = getVideoPlugin()
-    if (!yt || !player || !videoId) return false
-    const [options, meta] = await Promise.all([yt.resolveVideo(String(videoId)), yt.meta(String(videoId))])
-    if (options.length === 0) return false
-    const title = meta?.title ?? 'YouTube video'
-    await player.open({ title, options: JSON.stringify(options) })
-    return true
+    if (!yt || typeof videoId !== 'string' || !videoId) return false
+    const set = await yt.resolveVideoSet(videoId)
+    window.dispatchEvent(new CustomEvent('oli:video', { detail: { videoId, set } }))
+    return set.streams.length > 0
   }) as Handler,
-  [IPC.videoRetry]: (() => false) as Handler,
+  [IPC.videoRetry]: ((videoId: string) => (core.handlers[IPC.openVideoWindow] as (id: string) => unknown)(videoId)) as Handler,
   [IPC.videoDownloadSong]: (async (videoId: string, audio?: string) => {
     if (!queue || !yt || !videoId) return null
     const title = 'YouTube song'
@@ -34329,8 +34434,6 @@ interface YtFormat {
   abr?: number
   tbr?: number
   mimeType?: string
-  height?: number
-  protocol?: string
   http_headers?: Record<string, string>
 }
 
@@ -34375,57 +34478,6 @@ export function extractStreams(stdout: string): StreamSet {
     return { urls: [...seen], headers }
   } catch {
     return { urls: [], headers: {} }
-  }
-}
-
-/** One way to watch a video: a picture stream (with its own sound when audioUrl is empty) at one height. */
-export interface VideoOption {
-  height: number
-  label: string
-  videoUrl: string
-  /** Separate audio stream to play along with videoUrl (empty when the picture stream already has sound). */
-  audioUrl: string
-  headers: Record<string, string>
-}
-
-/**
- * The qualities a video can be watched in, best first. YouTube serves sharp pictures (720p and up) without sound, so
- * each of those is paired with the best audio-only stream; muxed streams (picture + sound, usually 360p) are the fallback.
- */
-export function extractVideoOptions(stdout: string): VideoOption[] {
-  try {
-    const data = JSON.parse(stdout) as { formats?: YtFormat[]; http_headers?: Record<string, string> }
-    const formats = (Array.isArray(data.formats) ? data.formats : []).filter(
-      (f) => f.url && /^https?:\/\//.test(f.url) && !/\.m3u8|\.mpd/i.test(f.url) && !(f.protocol ?? '').startsWith('m3u8')
-    )
-    const hasVideo = (f: YtFormat): boolean => !!f.vcodec && f.vcodec !== 'none' && (f.height ?? 0) > 0
-    const hasAudio = (f: YtFormat): boolean => !!f.acodec && f.acodec !== 'none'
-    const rate = (f: YtFormat): number => f.tbr ?? f.abr ?? 0
-    const hdr = (f: YtFormat): Record<string, string> => safeHeaders(f.http_headers ?? data.http_headers)
-    const isAvc = (f: YtFormat): boolean => /^avc1/i.test(f.vcodec ?? '')
-    const isM4a = (f: YtFormat): boolean => f.ext === 'm4a' || /audio\/mp4/i.test(f.mimeType ?? '')
-    const bestAudio = formats
-      .filter((f) => !hasVideo(f) && hasAudio(f))
-      .sort((a, b) => (isM4a(a) !== isM4a(b) ? (isM4a(a) ? -1 : 1) : rate(b) - rate(a)))[0]
-    // h264 plays on every phone; a sharper codec is only chosen when nothing else has that height
-    const better = (a: YtFormat, b: YtFormat | undefined): boolean => !b || (isAvc(a) !== isAvc(b) ? isAvc(a) : rate(a) > rate(b))
-    const pick = (list: YtFormat[]): Map<number, YtFormat> => {
-      const m = new Map<number, YtFormat>()
-      for (const f of list) if (better(f, m.get(f.height as number))) m.set(f.height as number, f)
-      return m
-    }
-    const out = new Map<number, VideoOption>()
-    if (bestAudio) {
-      for (const [h, f] of pick(formats.filter((x) => hasVideo(x) && !hasAudio(x)))) {
-        out.set(h, { height: h, label: h + 'p', videoUrl: f.url as string, audioUrl: bestAudio.url as string, headers: hdr(f) })
-      }
-    }
-    for (const [h, f] of pick(formats.filter((x) => hasVideo(x) && hasAudio(x)))) {
-      if (!out.has(h)) out.set(h, { height: h, label: h + 'p', videoUrl: f.url as string, audioUrl: '', headers: hdr(f) })
-    }
-    return [...out.values()].sort((a, b) => b.height - a.height)
-  } catch {
-    return []
   }
 }
 
@@ -34506,7 +34558,6 @@ import {
   MIX_LIMIT,
   PLAYLIST_LIMIT,
   extractStreams,
-  extractVideoOptions,
   isVideoId,
   isYouTubeUrl,
   parsePlaylist,
@@ -34517,9 +34568,9 @@ import {
   streamExpiry,
   videoIdFromUrl,
   type PlaylistResult,
-  type VideoOption,
   type VideoMeta
 } from './youtubeCore'
+import { parseVideoQualities, type VideoQualitySet } from '@shared/videoPage'
 
 interface ListenerHandle {
   remove(): Promise<void> | void
@@ -34531,7 +34582,7 @@ export interface OliYouTubePlugin {
   updateEngine(o: { channel?: string }): Promise<{ status: string; version: string }>
   search(o: { query: string; count?: number }): Promise<{ json: string; client?: string }>
   playlist(o: { url: string; limit?: number }): Promise<{ json: string; client?: string }>
-  info(o: { videoId: string; streams?: boolean }): Promise<{ json: string; client?: string }>
+  info(o: { videoId: string; streams?: boolean; video?: boolean }): Promise<{ json: string; client?: string }>
   enqueue(o: YouTubeDownloadSpec & { id: string }): Promise<void>
   pause(o: { id: string }): Promise<void>
   resume(o: { id: string }): Promise<void>
@@ -34785,14 +34836,15 @@ export class YouTubeService {
     })
   }
 
-  /** Every quality this video can be watched in (picture + sound), best first; empty when YouTube gives nothing. */
-  async resolveVideo(videoId: string): Promise<VideoOption[]> {
-    if (!isVideoId(videoId)) return []
+  /** Every quality this video can be watched in (same reading rules as the PC's video window); empty when YouTube gives nothing. */
+  async resolveVideoSet(videoId: string): Promise<VideoQualitySet> {
+    const none: VideoQualitySet = { streams: [], audioUrl: null }
+    if (!isVideoId(videoId)) return none
     return this.share(`v:${videoId}`, async () => {
       try {
-        return extractVideoOptions((await this.opts.plugin.info({ videoId, streams: true })).json)
+        return parseVideoQualities((await this.opts.plugin.info({ videoId, streams: true, video: true })).json) ?? none
       } catch {
-        return []
+        return none
       }
     })
   }
@@ -34823,22 +34875,6 @@ export class YouTubeService {
       })()
     }
   }
-}
-
-/** The native full-screen video player (Media3). */
-export interface OliVideoPlugin {
-  open(o: { title: string; options: string; startHeight?: number }): Promise<void>
-}
-let videoProxy: OliVideoPlugin | null = null
-
-export function getVideoPlugin(): OliVideoPlugin | null {
-  if (videoProxy) return videoProxy
-  if (typeof window === 'undefined') return null
-  const cap = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor
-  if (!cap || cap.getPlatform?.() !== 'android' || !cap.registerPlugin) return null
-  if (Array.isArray(cap.PluginHeaders) && !cap.PluginHeaders.some((h) => h.name === 'OliVideo')) return null
-  videoProxy = cap.registerPlugin<OliVideoPlugin>('OliVideo')
-  return videoProxy
 }
 
 interface CapacitorGlobal {
@@ -40759,7 +40795,6 @@ import * as path from 'node:path'
 import {
   cleanTrackTitle,
   extractStreams,
-  extractVideoOptions,
   isVideoId,
   isYouTubeUrl,
   parsePlaylist,
@@ -40905,33 +40940,6 @@ describe('tags for downloaded songs', () => {
   })
 })
 
-describe('extractVideoOptions', () => {
-  const fmt = (o: Record<string, unknown>): Record<string, unknown> => ({ url: `https://v.example/${Math.random()}`, ...o })
-  const json = JSON.stringify({
-    http_headers: { 'User-Agent': 'UA', Cookie: 'secret' },
-    formats: [
-      fmt({ vcodec: 'none', acodec: 'opus', ext: 'webm', abr: 160 }),
-      fmt({ vcodec: 'none', acodec: 'mp4a.40.2', ext: 'm4a', abr: 128, url: 'https://v.example/audio-m4a' }),
-      fmt({ vcodec: 'vp09', acodec: 'none', height: 1080, tbr: 2000, url: 'https://v.example/vp9-1080' }),
-      fmt({ vcodec: 'avc1.640028', acodec: 'none', height: 1080, tbr: 1500, url: 'https://v.example/avc-1080' }),
-      fmt({ vcodec: 'avc1.4d401f', acodec: 'none', height: 720, tbr: 900, url: 'https://v.example/avc-720' }),
-      fmt({ vcodec: 'avc1.42001e', acodec: 'mp4a.40.2', height: 360, tbr: 500, url: 'https://v.example/muxed-360' }),
-      fmt({ vcodec: 'avc1.4d401f', acodec: 'none', height: 720, url: 'https://v.example/x.m3u8' })
-    ]
-  })
-
-  it('pairs each sharp picture with the best m4a audio, prefers h264, and keeps muxed as the low fallback', () => {
-    const o = extractVideoOptions(json)
-    expect(o.map((x) => x.label)).toEqual(['1080p', '720p', '360p'])
-    expect(o[0]).toMatchObject({ videoUrl: 'https://v.example/avc-1080', audioUrl: 'https://v.example/audio-m4a' })
-    expect(o[2]).toMatchObject({ videoUrl: 'https://v.example/muxed-360', audioUrl: '' })
-    expect(o[0].headers).toEqual({ 'User-Agent': 'UA' })
-  })
-
-  it('returns nothing for garbage', () => {
-    expect(extractVideoOptions('nope')).toEqual([])
-  })
-})
 ```
 
 #### FILE: test/youtubeService.test.ts
@@ -42629,7 +42637,7 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 11
+        versionCode 12
         versionName "0.9.2"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
@@ -42678,7 +42686,6 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-session:$media3Version"
     implementation "androidx.media3:media3-common:$media3Version"
-    implementation "androidx.media3:media3-ui:$media3Version"
     // YouTube (phase 3): yt-dlp in Python plus ffmpeg, packaged for Android. Big (about 100 MB of native code).
     implementation "io.github.junkfood02.youtubedl-android:library:$youtubedlVersion"
     implementation "io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlVersion"
@@ -42807,13 +42814,6 @@ public class ExampleInstrumentedTest {
             </intent-filter>
 
         </activity>
-
-        <!-- Full-screen video player (YouTube videos: picture + sound, choose the quality). -->
-        <activity
-            android:name=".OliVideoActivity"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|navigation|density"
-            android:theme="@style/Theme.AppCompat.NoActionBar"
-            android:exported="false" />
 
         <!-- Native player: keeps music playing with the screen off and draws the notification / lock-screen controls. -->
         <service
@@ -44249,7 +44249,6 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(OliMediaPlugin.class);
     registerPlugin(OliDownloadPlugin.class);
     registerPlugin(OliYouTubePlugin.class);
-    registerPlugin(OliVideoPlugin.class);
     super.onCreate(savedInstanceState);
     // Back button / back gesture: the app decides (close a panel, previous page, home); only at the home page the app is
     // sent to the background instead of being closed.
@@ -46253,245 +46252,6 @@ public class OliMediaPlugin extends Plugin {
 }
 ```
 
-#### FILE: android/app/src/main/java/com/cyttos/oli/OliVideoActivity.java
-```java
-package com.cyttos.oli;
-
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.pm.ActivityInfo;
-import android.graphics.Color;
-import android.os.Bundle;
-import android.view.Gravity;
-import android.view.View;
-import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.widget.FrameLayout;
-import android.widget.TextView;
-import android.widget.Toast;
-
-import androidx.core.view.WindowCompat;
-import androidx.core.view.WindowInsetsCompat;
-import androidx.core.view.WindowInsetsControllerCompat;
-import androidx.media3.common.AudioAttributes;
-import androidx.media3.common.C;
-import androidx.media3.common.MediaItem;
-import androidx.media3.common.PlaybackException;
-import androidx.media3.common.Player;
-import androidx.media3.datasource.DefaultDataSource;
-import androidx.media3.datasource.DefaultHttpDataSource;
-import androidx.media3.exoplayer.ExoPlayer;
-import androidx.media3.exoplayer.source.MediaSource;
-import androidx.media3.exoplayer.source.MergingMediaSource;
-import androidx.media3.exoplayer.source.ProgressiveMediaSource;
-import androidx.media3.ui.PlayerView;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-
-/**
- * Full-screen YouTube video player. The sharp pictures (720p and up) come without sound, so the picture and the audio
- * stream are played together as one merged source; a "Quality" button switches between the heights that exist.
- */
-public class OliVideoActivity extends Activity {
-  static final String EXTRA_TITLE = "title";
-  static final String EXTRA_OPTIONS = "options";
-
-  private static class Option {
-    String label;
-    String videoUrl;
-    String audioUrl;
-    Map<String, String> headers = new HashMap<>();
-  }
-
-  private final List<Option> options = new ArrayList<>();
-  private ExoPlayer player;
-  private PlayerView view;
-  private TextView quality;
-  private int current = 0;
-  private int failures = 0;
-
-  @Override
-  protected void onCreate(Bundle b) {
-    super.onCreate(b);
-    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
-    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-    WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-    try {
-      JSONArray arr = new JSONArray(getIntent().getStringExtra(EXTRA_OPTIONS));
-      for (int i = 0; i < arr.length(); i++) {
-        JSONObject o = arr.getJSONObject(i);
-        Option op = new Option();
-        op.label = o.optString("label", "");
-        op.videoUrl = o.getString("videoUrl");
-        op.audioUrl = o.optString("audioUrl", "");
-        JSONObject h = o.optJSONObject("headers");
-        if (h != null) {
-          Iterator<String> keys = h.keys();
-          while (keys.hasNext()) {
-            String k = keys.next();
-            op.headers.put(k, h.optString(k));
-          }
-        }
-        options.add(op);
-      }
-    } catch (Exception e) {
-      options.clear();
-    }
-    if (options.isEmpty()) {
-      Toast.makeText(this, "This video could not be opened.", Toast.LENGTH_LONG).show();
-      finish();
-      return;
-    }
-
-    FrameLayout root = new FrameLayout(this);
-    root.setBackgroundColor(Color.BLACK);
-    view = new PlayerView(this);
-    root.addView(view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-    TextView title = new TextView(this);
-    title.setText(getIntent().getStringExtra(EXTRA_TITLE));
-    title.setTextColor(Color.WHITE);
-    title.setTextSize(15);
-    title.setSingleLine(true);
-    title.setPadding(dp(16), dp(14), dp(110), dp(8));
-    root.addView(title, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
-
-    quality = new TextView(this);
-    quality.setTextColor(Color.WHITE);
-    quality.setTextSize(14);
-    quality.setPadding(dp(14), dp(8), dp(14), dp(8));
-    quality.setBackgroundColor(0x99000000);
-    quality.setOnClickListener(v -> chooseQuality());
-    FrameLayout.LayoutParams qp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-    qp.setMargins(0, dp(10), dp(12), 0);
-    root.addView(quality, qp);
-    // the title and the quality button follow the playback controls: shown together, hidden together
-    view.setControllerVisibilityListener((PlayerView.ControllerVisibilityListener) vis -> {
-      title.setVisibility(vis);
-      quality.setVisibility(options.size() > 1 ? vis : View.GONE);
-    });
-    setContentView(root);
-
-    player = new ExoPlayer.Builder(this).build();
-    player.setAudioAttributes(
-        new AudioAttributes.Builder().setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).setUsage(C.USAGE_MEDIA).build(), true);
-    player.addListener(new Player.Listener() {
-      @Override
-      public void onPlayerError(PlaybackException error) {
-        // a stream that will not play: try the next lower quality, then give up
-        if (current + 1 < options.size() && failures < 3) {
-          failures++;
-          Toast.makeText(OliVideoActivity.this, "Trying " + options.get(current + 1).label + "…", Toast.LENGTH_SHORT).show();
-          play(current + 1, player.getCurrentPosition());
-        } else {
-          Toast.makeText(OliVideoActivity.this, "This video could not be played.", Toast.LENGTH_LONG).show();
-        }
-      }
-    });
-    view.setPlayer(player);
-    play(0, 0);
-  }
-
-  private int dp(int v) {
-    return Math.round(v * getResources().getDisplayMetrics().density);
-  }
-
-  private MediaSource source(String url, Map<String, String> headers) {
-    DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true);
-    if (!headers.isEmpty()) http.setDefaultRequestProperties(headers);
-    return new ProgressiveMediaSource.Factory(new DefaultDataSource.Factory(this, http)).createMediaSource(MediaItem.fromUri(url));
-  }
-
-  private void play(int index, long positionMs) {
-    current = index;
-    Option o = options.get(index);
-    quality.setText(o.label + "  ▾");
-    MediaSource video = source(o.videoUrl, o.headers);
-    if (o.audioUrl != null && !o.audioUrl.isEmpty()) {
-      player.setMediaSource(new MergingMediaSource(video, source(o.audioUrl, o.headers)), positionMs);
-    } else {
-      player.setMediaSource(video, positionMs);
-    }
-    player.prepare();
-    player.setPlayWhenReady(true);
-  }
-
-  private void chooseQuality() {
-    String[] labels = new String[options.size()];
-    for (int i = 0; i < labels.length; i++) labels[i] = options.get(i).label + (i == current ? "  ✓" : "");
-    new AlertDialog.Builder(this)
-        .setTitle("Quality")
-        .setItems(labels, (d, which) -> {
-          failures = 0;
-          if (which != current) play(which, player.getCurrentPosition());
-        })
-        .show();
-  }
-
-  @Override
-  public void onWindowFocusChanged(boolean hasFocus) {
-    super.onWindowFocusChanged(hasFocus);
-    if (!hasFocus) return;
-    WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-    c.hide(WindowInsetsCompat.Type.systemBars());
-    c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-  }
-
-  @Override
-  protected void onStop() {
-    super.onStop();
-    if (player != null) player.pause();
-  }
-
-  @Override
-  protected void onDestroy() {
-    super.onDestroy();
-    if (player != null) {
-      player.release();
-      player = null;
-    }
-  }
-}
-```
-
-#### FILE: android/app/src/main/java/com/cyttos/oli/OliVideoPlugin.java
-```java
-package com.cyttos.oli;
-
-import android.content.Intent;
-
-import com.getcapacitor.Plugin;
-import com.getcapacitor.PluginCall;
-import com.getcapacitor.PluginMethod;
-import com.getcapacitor.annotation.CapacitorPlugin;
-
-/** Opens the full-screen video player (picture + sound, sharp qualities) for a YouTube video. */
-@CapacitorPlugin(name = "OliVideo")
-public class OliVideoPlugin extends Plugin {
-  /** {title, options} - options is a JSON list of {height, label, videoUrl, audioUrl, headers}, best first. */
-  @PluginMethod
-  public void open(PluginCall call) {
-    String options = call.getString("options", "");
-    if (options == null || options.length() < 2) {
-      call.reject("no video options");
-      return;
-    }
-    Intent i = new Intent(getContext(), OliVideoActivity.class);
-    i.putExtra(OliVideoActivity.EXTRA_TITLE, call.getString("title", "Video"));
-    i.putExtra(OliVideoActivity.EXTRA_OPTIONS, options);
-    getActivity().startActivity(i);
-    call.resolve();
-  }
-}
-```
-
 #### FILE: android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java
 ```java
 package com.cyttos.oli;
@@ -46749,8 +46509,11 @@ public class OliYouTubePlugin extends Plugin {
       return;
     }
     final boolean streams = Boolean.TRUE.equals(call.getBoolean("streams", false));
+    // the video page plays the addresses in the web view (like the PC window): the plain client, not the phone-only ones
+    final boolean video = Boolean.TRUE.equals(call.getBoolean("video", false));
     ask(call, "https://www.youtube.com/watch?v=" + id,
-        streams ? streamClients() : new String[] {"default", "embed"}, streams ? 30000 : 60000, (r) -> {
+        video ? new String[] {"default", "embed"} : streams ? streamClients() : new String[] {"default", "embed"},
+        video ? 45000 : streams ? 30000 : 60000, (r) -> {
           r.addOption("--no-playlist");
           r.addOption("--skip-download");
           r.addOption("-j");
@@ -46910,7 +46673,7 @@ public class OliYouTubePlugin extends Plugin {
       }
       emit(t.id, "downloading", "", "", 0, 0);
       String lastError = "Download failed";
-      String[] clients = {"default", "embed"};
+      String[] clients = {"default", "embed", "vr"};
       for (int attempt = 0; attempt < clients.length; attempt++) {
         t.processId = "dl-" + t.id + "-" + attempt;
         YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);
@@ -46973,11 +46736,14 @@ public class OliYouTubePlugin extends Plugin {
     r.addOption("--progress");
     r.addOption("--no-mtime");
     r.addOption("--fragment-retries", "10");
+    // YouTube throttles or cuts one long request; asking in 10 MB pieces keeps big files (videos) going to the end
+    r.addOption("--http-chunk-size", "10M");
     r.addOption("-o", new File(root(), t.relBase).getAbsolutePath() + ".%(ext)s");
     if ("video".equals(t.mode)) {
       String h = t.height > 0 ? "[height<=" + t.height + "]" : "";
       String audioSel = "opus".equals(t.audio) ? "ba[ext=webm]" : "ba[ext=m4a]";
-      r.addOption("-f", "bv*" + h + "+" + audioSel + "/bv*" + h + "+ba/b" + h + "/bv*+ba/b");
+      // h264 (mp4) first: it merges into mp4 without conversion on every phone
+      r.addOption("-f", "bv*[ext=mp4]" + h + "+" + audioSel + "/bv*" + h + "+" + audioSel + "/bv*" + h + "+ba/b" + h + "/bv*+ba/b");
       r.addOption("--merge-output-format", "mp4");
     } else {
       r.addOption("-f", "opus".equals(t.audio) ? "ba[ext=webm]/ba" : "ba[ext=m4a]/ba");

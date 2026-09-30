@@ -234,7 +234,7 @@ function MainShell(): React.JSX.Element {
     if (!mobile) return
     const w = window as unknown as { __oliBack?: () => boolean }
     w.__oliBack = () => {
-      if ((window as unknown as { __oliVideoOpen?: boolean }).__oliVideoOpen) {
+      if (__OLI_WEB__ && (window as unknown as { __oliVideoOpen?: boolean }).__oliVideoOpen) {
         window.dispatchEvent(new Event('oli:video-close'))
         return true
       }
