@@ -50757,6 +50757,8 @@ These were separate documents (Appendix A (Handoff), Appendix B (Android plan), 
 
 Lesson: the PC harness replaces the Java plugins, so a bug in the Java argument handling (0.9.20) was invisible to it. When a phone symptom survives a correct JS fix, add a one-line diagnostic on screen (as the "Last seek" line did) instead of guessing.
 
+**Planned, ON HOLD (owner's idea, 2026-10-01; do not build until they say so): a Debug mode.** The owner did not want diagnostics removed after a fix ("the Last seek line"); instead, Settings > Developer > **Debug mode** (off by default) should switch such diagnostics on. Design agreed in chat: one shared, timestamped debug log kept across restarts; a **Copy debug report** button (app + Android version, phone model, settings, recent log); per-area lines: seek/playback (asked, seekable, landed, 1.5 s later, native state changes and errors), notification/lock-screen buttons (which button, did the page answer, how long), next-song (why it ended, what was chosen, did it start), background (minimized, web view throttled, keep-alive ran), downloads (service/locks, queue counts, state changes, failure reasons), YouTube/Archive (yt-dlp version, errors, HTTP status), library scan/storage (found/skipped and why, folder access). Start with playback, notification and downloads. It only shows what was thought of, so it grows with each bug. **Correction to remember:** when a temporary diagnostic has done its job, do not delete it: move it behind Debug mode.
+
 Details of the first round (0.9.15):
 
 Owner's report on 0.9.14: seeking to the start misbehaves; the next song does not start when one ends; next / previous / pause sometimes do nothing;
