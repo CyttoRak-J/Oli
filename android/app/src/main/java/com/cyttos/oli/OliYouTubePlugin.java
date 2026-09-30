@@ -552,7 +552,9 @@ public class OliYouTubePlugin extends Plugin {
       }
       emit(t.id, "downloading", "", "", 0, 0);
       String lastError = "Download failed";
-      String[] clients = {"default", "embed", "vr"};
+      // the PC's client first; every failure is kept so the message says what each one answered
+      String[] clients = VIDEO_CLIENTS;
+      StringBuilder allErrors = new StringBuilder();
       if ("video".equals(t.mode)) {
         StringBuilder why = new StringBuilder();
         String good = pickVideoClient(t, why);
@@ -565,7 +567,7 @@ public class OliYouTubePlugin extends Plugin {
             emit(t.id, "paused", "", "", 0, 0);
           } else {
             String m = "YouTube refuses the picture of this video on this phone (" + why + ")";
-            emit(t.id, "failed", m.length() > 500 ? m.substring(0, 500) : m, "", 0, 0);
+            emit(t.id, "failed", m.length() > 700 ? m.substring(0, 700) : m, "", 0, 0);
           }
           return;
         }
@@ -604,7 +606,9 @@ public class OliYouTubePlugin extends Plugin {
           lastError = "canceled";
           break;
         } catch (Exception e) {
-          lastError = String.valueOf(e.getMessage());
+          String msg = String.valueOf(e.getMessage()).replaceAll("\\s+", " ");
+          allErrors.append(clients[attempt]).append(": ").append(msg.length() > 110 ? msg.substring(0, 110) : msg).append("; ");
+          lastError = allErrors.toString();
           if (t.cancel || t.pause) break;
         }
       }
@@ -615,7 +619,7 @@ public class OliYouTubePlugin extends Plugin {
       } else if (t.pause) {
         emit(t.id, "paused", "", "", 0, 0);
       } else {
-        emit(t.id, "failed", lastError.length() > 500 ? lastError.substring(0, 500) : lastError, "", 0, 0);
+        emit(t.id, "failed", lastError.length() > 700 ? lastError.substring(0, 700) : lastError, "", 0, 0);
       }
     } catch (Exception e) {
       tasks.remove(t.id);

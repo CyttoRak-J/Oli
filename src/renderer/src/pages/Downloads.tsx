@@ -286,7 +286,7 @@ function DownloadRow({
                 file missing
               </span>
             )}
-            {item.error && <span className="truncate text-red-400">{item.error}</span>}
+            {item.error && <span className="line-clamp-4 select-text break-words text-red-400" title={item.error}>{item.error}</span>}
           </div>
         </div>
         <div className="flex items-center gap-1">

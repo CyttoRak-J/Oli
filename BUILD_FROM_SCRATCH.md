@@ -923,7 +923,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.5); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.6); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -1062,7 +1062,7 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.5, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.6, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
@@ -1140,7 +1140,10 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.5: the YouTube method the PC uses for videos
+### What is new in 0.9.6: song downloads use the PC's YouTube method too
+- Audio (song) downloads now try the same YouTube method as the PC first, and a failed download lists what **every** method answered (the list wraps over four lines, long-press to select) instead of only the last one ("'NoneType' object has no attribute 'lower'").
+
+### Already in 0.9.5: the YouTube method the PC uses for videos
 - The phone's default YouTube method served only the first ~12 MB of a video and then refused (HTTP 403): downloads stopped at ~19% and videos would not play. Oli now tries the **same method the PC uses (visionos) first** for videos, then the others, each tested with a real request (start and middle) before use.
 
 ### What is new in 0.9.4: videos that YouTube refuses
@@ -27316,7 +27319,7 @@ function DownloadRow({
                 file missing
               </span>
             )}
-            {item.error && <span className="truncate text-red-400">{item.error}</span>}
+            {item.error && <span className="line-clamp-4 select-text break-words text-red-400" title={item.error}>{item.error}</span>}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -42649,7 +42652,7 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 14
+        versionCode 15
         versionName "0.9.2"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
@@ -46820,7 +46823,9 @@ public class OliYouTubePlugin extends Plugin {
       }
       emit(t.id, "downloading", "", "", 0, 0);
       String lastError = "Download failed";
-      String[] clients = {"default", "embed", "vr"};
+      // the PC's client first; every failure is kept so the message says what each one answered
+      String[] clients = VIDEO_CLIENTS;
+      StringBuilder allErrors = new StringBuilder();
       if ("video".equals(t.mode)) {
         StringBuilder why = new StringBuilder();
         String good = pickVideoClient(t, why);
@@ -46833,7 +46838,7 @@ public class OliYouTubePlugin extends Plugin {
             emit(t.id, "paused", "", "", 0, 0);
           } else {
             String m = "YouTube refuses the picture of this video on this phone (" + why + ")";
-            emit(t.id, "failed", m.length() > 500 ? m.substring(0, 500) : m, "", 0, 0);
+            emit(t.id, "failed", m.length() > 700 ? m.substring(0, 700) : m, "", 0, 0);
           }
           return;
         }
@@ -46872,7 +46877,9 @@ public class OliYouTubePlugin extends Plugin {
           lastError = "canceled";
           break;
         } catch (Exception e) {
-          lastError = String.valueOf(e.getMessage());
+          String msg = String.valueOf(e.getMessage()).replaceAll("\\s+", " ");
+          allErrors.append(clients[attempt]).append(": ").append(msg.length() > 110 ? msg.substring(0, 110) : msg).append("; ");
+          lastError = allErrors.toString();
           if (t.cancel || t.pause) break;
         }
       }
@@ -46883,7 +46890,7 @@ public class OliYouTubePlugin extends Plugin {
       } else if (t.pause) {
         emit(t.id, "paused", "", "", 0, 0);
       } else {
-        emit(t.id, "failed", lastError.length() > 500 ? lastError.substring(0, 500) : lastError, "", 0, 0);
+        emit(t.id, "failed", lastError.length() > 700 ? lastError.substring(0, 700) : lastError, "", 0, 0);
       }
     } catch (Exception e) {
       tasks.remove(t.id);
