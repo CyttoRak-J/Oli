@@ -132,7 +132,7 @@ final class OliAudioEngine {
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
         .build();
     player = new ExoPlayer.Builder(ctx, renderers)
-        .setMediaSourceFactory(new DefaultMediaSourceFactory(new DefaultDataSource.Factory(ctx, http), extractors))
+        .setMediaSourceFactory(new DefaultMediaSourceFactory(new DefaultDataSource.Factory(ctx, () -> new YtChunkedDataSource(http.createDataSource())), extractors))
         .setAudioAttributes(attrs, true)
         .setHandleAudioBecomingNoisy(true)
         .setWakeMode(C.WAKE_MODE_LOCAL)

@@ -4,7 +4,12 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.8: version label, resume, YouTube test
+### What is new in 0.9.9: seeking and song downloads
+- **Seeking online songs**: the player now asks YouTube for short pieces with the range inside the address (the way yt-dlp does) instead of one open-ended request, which YouTube refused after a seek.
+- **Song downloads**: if yt-dlp crashes in its tag / cover step ('NoneType' object has no attribute 'lower') Oli saves the plain audio instead of failing; it retries once more with the simplest format choice.
+- Test video access also lists the public address of 6 new connections.
+
+### Already in 0.9.8: version label, resume, YouTube test
 - The app now shows its real version (it said 0.9.2 since that release).
 - A download cut off by YouTube (HTTP 403) is retried with a fresh address that carries on from the part already saved.
 - **Settings > YouTube engine > Test video access** reports which parts of a video YouTube serves to this phone with each method (send me that text if videos still fail).

@@ -507,6 +507,24 @@ public class OliYouTubePlugin extends Plugin {
           dog.cancel(false);
         }
       }
+      out.append("\nPublic address seen by 6 new connections:");
+      for (int i = 0; i < 6; i++) {
+        HttpURLConnection c = null;
+        try {
+          c = (HttpURLConnection) new URL("https://api.ipify.org").openConnection();
+          c.setConnectTimeout(8000);
+          c.setReadTimeout(8000);
+          c.setRequestProperty("Connection", "close");
+          try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream()))) {
+            out.append(' ').append(br.readLine());
+          }
+        } catch (Exception e) {
+          out.append(" ?");
+        } finally {
+          if (c != null) c.disconnect();
+        }
+      }
+      out.append("\n");
       JSObject o = new JSObject();
       o.put("text", out.toString());
       call.resolve(o);
@@ -542,6 +560,7 @@ public class OliYouTubePlugin extends Plugin {
     String title = "";
     String artist = "";
     String album = "";
+    int level = 0; // 0 full options, 1 without tags and cover, 2 also the simplest format choice
     volatile boolean pause;
     volatile boolean cancel;
     volatile String processId = "";
@@ -749,6 +768,13 @@ public class OliYouTubePlugin extends Plugin {
           allErrors.append(clients[attempt]).append(": ").append(msg.length() > 110 ? msg.substring(0, 110) : msg).append("; ");
           lastError = allErrors.toString();
           if (t.cancel || t.pause) break;
+          // a Python crash in yt-dlp's tag / cover step: save the plain audio first (better than no file)
+          if (msg.contains("NoneType") && t.level < 2) {
+            t.level++;
+            allErrors.setLength(0);
+            attempt--;
+            continue;
+          }
           long now = partialBytes(t);
           if (msg.contains("403") && now > lastPartial && resumes < 10) {
             lastPartial = now;
@@ -793,13 +819,19 @@ public class OliYouTubePlugin extends Plugin {
       r.addOption("-f", "bv*[ext=mp4]" + h + "+" + audioSel + "/bv*" + h + "+" + audioSel + "/bv*" + h + "+ba/b" + h + "/bv*+ba/b");
       r.addOption("--merge-output-format", "mp4");
     } else {
-      r.addOption("-f", "opus".equals(t.audio) ? "ba[ext=webm]/ba" : "ba[ext=m4a]/ba");
-      r.addOption("--embed-metadata");
-      r.addOption("--embed-thumbnail");
-      r.addOption("--convert-thumbnails", "jpg");
-      if (!t.title.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.title) + ":%(meta_title)s");
-      if (!t.artist.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.artist) + ":%(meta_artist)s");
-      if (!t.album.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.album) + ":%(meta_album)s");
+      if (t.level >= 2) {
+        r.addOption("-f", "ba/b");
+      } else {
+        r.addOption("-f", "opus".equals(t.audio) ? "ba[ext=webm]/ba" : "ba[ext=m4a]/ba");
+      }
+      if (t.level == 0) {
+        r.addOption("--embed-metadata");
+        r.addOption("--embed-thumbnail");
+        r.addOption("--convert-thumbnails", "jpg");
+        if (!t.title.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.title) + ":%(meta_title)s");
+        if (!t.artist.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.artist) + ":%(meta_artist)s");
+        if (!t.album.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.album) + ":%(meta_album)s");
+      }
     }
   }
 
