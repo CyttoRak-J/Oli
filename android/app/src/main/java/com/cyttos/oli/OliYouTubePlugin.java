@@ -450,6 +450,38 @@ public class OliYouTubePlugin extends Plugin {
         call.reject(String.valueOf(e.getMessage()));
         return;
       }
+      // what yt-dlp itself says: its real version, the YouTube client it used, warnings
+      {
+        String pid = "dv-" + System.nanoTime();
+        ScheduledFuture<?> dog = WATCHDOG.schedule(() -> YoutubeDL.INSTANCE.destroyProcessById(pid), 50000, TimeUnit.MILLISECONDS);
+        try {
+          YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + id);
+          req.addOption("-v");
+          req.addOption("-4");
+          req.addOption("--no-playlist");
+          req.addOption("--skip-download");
+          req.addOption("-F");
+          YoutubeDLResponse r = YoutubeDL.INSTANCE.execute(req, pid);
+          String all = String.valueOf(r.getErr()) + "\n" + String.valueOf(r.getOut());
+          out.append("\nyt-dlp says:\n");
+          int shown = 0;
+          for (String line : all.split("\n")) {
+            String l = line.trim();
+            boolean keep = l.contains("yt-dlp version") || l.contains("Python") || l.contains("JS runtime") || l.contains("JS Challenge")
+                || l.contains("PO Token") || l.contains("player API") || l.startsWith("WARNING") || l.startsWith("ERROR")
+                || l.contains("Downloading m3u8") || l.contains("Solving");
+            if (keep && shown < 16) {
+              out.append("  ").append(l.length() > 150 ? l.substring(0, 150) : l).append("\n");
+              shown++;
+            }
+          }
+        } catch (Exception e) {
+          String m = String.valueOf(e.getMessage()).replaceAll("\\s+", " ");
+          out.append("\nyt-dlp -v failed: ").append(m.length() > 300 ? m.substring(0, 300) : m).append("\n");
+        } finally {
+          dog.cancel(false);
+        }
+      }
       for (String c : new String[] {"visionos", "default", "vr"}) {
         out.append("\n[").append(c).append("] ");
         String pid = "dg-" + System.nanoTime();
