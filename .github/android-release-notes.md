@@ -4,7 +4,10 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.20: seeking works (the real cause)
+### What is new in 0.9.21
+- The temporary grey "Last seek" line on Now Playing is gone (seeking works).
+
+### Already in 0.9.20: seeking works (the real cause)
 - **Every seek was turned into "go to 0:00" inside the app's Java code**: Capacitor's `getLong()` returns the default unless the number is a `Long`, and small numbers arrive as `Integer`. The same bug made a song that was reopened (after an error, a phone call or a restart) start from the beginning. Both are fixed.
 
 ### Already in 0.9.19: the seek bar really seeks

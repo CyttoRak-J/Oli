@@ -927,7 +927,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.14); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.21; background play/skip, background downloads and seeking fixed in 0.9.15 to 0.9.20, see Appendix D0); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -50743,7 +50743,21 @@ ext {
 
 These were separate documents (Appendix A (Handoff), Appendix B (Android plan), Appendix C (Android phases), Appendix D (Prompts)); they are now one place. "Appendix A/B/C/D" below means these sections.
 
-## Appendix D0: Android 0.9.15: playback and downloads in the background (owner report, 2026-10-01)
+## Appendix D0: Android 0.9.15 to 0.9.21: background play / skip, downloads, the seek bar and seeking (owner reports, 2026-10-01)
+
+**Summary of what was wrong and is now fixed (read this first):**
+| Owner's report | Real cause | Version |
+|---|---|---|
+| Seek / "previous" restarts the song from 0:00 | `OliAudioPlugin` read `positionMs` / `startPositionMs` with Capacitor's `getLong(name, 0L)`, which returns the default unless the value is a `Long`; small JSON numbers are `Integer`. Every seek and every "reopen at position" became 0. **Confirmed fixed on the owner's phone.** | 0.9.20 |
+| Dragging the Now Playing bar did nothing / seeked to 0 | Seek bar committed only on `pointerup`, then on `pointercancel` with the untouched value; now `useSeekSlider` commits the last dragged value once per gesture | 0.9.16, 0.9.17, 0.9.19 |
+| Tapping an Up Next song opened its info | title was a button (`tapToPlay` ignores buttons); on the phone the title plays, an (i) button opens the info | 0.9.16 |
+| Next song / notification skip dead in the background | JavaScript queue throttled while the web view is hidden; `MainActivity.keepVisible` keeps it running (not yet confirmed by the owner) | 0.9.15 |
+| Downloads stop when minimized | service stopped between items, no wake/Wi-Fi lock; `keepAlive` + locks (not yet confirmed by the owner) | 0.9.15 |
+| (diagnosis aid) | The grey "Last seek" line on Now Playing was removed in 0.9.21; Settings > Audio output still has the "Last seek" row | 0.9.18, 0.9.21 |
+
+Lesson: the PC harness replaces the Java plugins, so a bug in the Java argument handling (0.9.20) was invisible to it. When a phone symptom survives a correct JS fix, add a one-line diagnostic on screen (as the "Last seek" line did) instead of guessing.
+
+Details of the first round (0.9.15):
 
 Owner's report on 0.9.14: seeking to the start misbehaves; the next song does not start when one ends; next / previous / pause sometimes do nothing;
 skipping from the notification or outside the app does nothing; downloads stop when the app is minimized. One root cause and two smaller ones
@@ -50762,7 +50776,7 @@ rules in CLAUDE.md. Checked on the PC: 238 unit tests, typecheck, lint; Java of 
 
 **0.9.20 (THE real cause of the seek problem, found from "asked 0.0 s" still showing with a correct JS side):** `OliAudioPlugin` read `positionMs` / `startPositionMs` with `call.getLong(name, 0L)`; Capacitor returns the default unless the value is a `Long`, and JSON numbers that fit an int arrive as `Integer`, so every seek and every "reopen at this position" became 0. Fixed with `OliAudioPlugin.longOf`. The 0.9.16 to 0.9.19 seek-bar changes were real but secondary. Untouched on purpose: `OliDownloadPlugin` `getLong("size")` (always 0 => size check off; enabling it activates "Wrong size" failures). The PC harness cannot catch this class of bug (it replaces the Java plugin): only the phone or a Java unit test can.
 
-**0.9.19 (seek-bar part of the seek problem, found with the 0.9.18 "Last seek" line: "asked 0.0 s"):** on the phone the browser fires `pointercancel` at the very start of a touch and the 0.9.16 commit sent the slider's untouched value, so the native player was asked to seek to 0. `lib/useRangeCommit.ts` now exports `useSeekSlider`: it remembers the last value from `input` events and commits it once when the gesture ends; a gesture without any `input` commits nothing. Used by `NowPlaying` and `PlayerBar`. Harness: `scripts/android-harness/e2e-seekbar.cjs <flac path>` (mouse click, touch tap, touch drag, cancel without movement). The grey "Last seek" line on Now Playing can be removed once the owner confirms.
+**0.9.19 (seek-bar part of the seek problem, found with the 0.9.18 "Last seek" line: "asked 0.0 s"):** on the phone the browser fires `pointercancel` at the very start of a touch and the 0.9.16 commit sent the slider's untouched value, so the native player was asked to seek to 0. `lib/useRangeCommit.ts` now exports `useSeekSlider`: it remembers the last value from `input` events and commits it once when the gesture ends; a gesture without any `input` commits nothing. Used by `NowPlaying` and `PlayerBar`. Harness: `scripts/android-harness/e2e-seekbar.cjs <flac path>` (mouse click, touch tap, touch drag, cancel without movement). (The grey "Last seek" line on Now Playing was removed in 0.9.21 after the owner confirmed seeking.)
 
 **0.9.17 (seeking on Now Playing still failed after 0.9.16):** `useRangeCommit` (lib) listens to the slider's native `change` event (React's onChange is `input`) in `NowPlaying` and `PlayerBar`; `OliAudioEngine.seekNote` (asked / seekable / landed) is shown as "Last seek" in the Audio output rows. If it still fails on the phone, read that row first: `seekable=false` means the extractor has no seek map for that file (native cause); `landed 0` with `seekable=true` points at the player or the source. The harness YouTube suite shows 24/27: three checks still expect the pre-0.9.13 flow (tags handed to yt-dlp) and need updating to the own-ffmpeg flow.
 
@@ -50803,7 +50817,7 @@ they wanted a download-folder setting. Thirteen builds later all of it works. Th
 - `consolidate-alpha.yml` (tag `consolidate-alpha-*`) was the one-time job that moved the old per-version APKs into `android-alpha` (size-checked) before deleting the old pages.
 
 ### State at the end of this session (unverified items in italics)
-Versions: desktop 1.1.1, Android 0.9.14. Confirmed on the owner's phone: video playback, download folder, updated yt-dlp (2026.08.19, all byte ranges 206). *Not yet confirmed on the phone after 0.9.14: joined video+sound, embedded cover/tags (ffmpeg start-up fix); ask for "Test video access" if they fail.* *Seek in online songs was reported broken before the yt-dlp update and not re-tested since.*
+Versions: desktop 1.1.1, Android 0.9.21. Confirmed on the owner's phone: SEEKING (Now Playing bar, after 0.9.20); video playback, download folder, updated yt-dlp (2026.08.19, all byte ranges 206). *Not yet confirmed on the phone after 0.9.14: joined video+sound, embedded cover/tags (ffmpeg start-up fix); ask for "Test video access" if they fail.* *Seek in online songs was reported broken before the yt-dlp update and not re-tested since.*
 
 ## Appendix A: Handoff: current state, what changed, traps
 
