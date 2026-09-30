@@ -58,17 +58,54 @@ public class OliDownloadPlugin extends Plugin {
   }
 
   private File root() {
-    Context ctx = getContext();
-    File dir = ctx.getExternalFilesDir(null);
-    return dir != null ? dir : ctx.getFilesDir();
+    return DownloadRoot.resolve(getContext());
+  }
+
+  private JSObject rootInfo() {
+    JSObject o = new JSObject();
+    o.put("root", root().getAbsolutePath());
+    String custom = DownloadRoot.custom(getContext());
+    o.put("custom", custom == null ? "" : custom);
+    o.put("allFiles", DownloadRoot.allFilesAllowed());
+    return o;
+  }
+
+  /** {volume, path} or {reset:true}: the folder downloads are saved in (the picker result of OliMedia.pickFolder). */
+  @PluginMethod
+  public void setRoot(PluginCall call) {
+    if (Boolean.TRUE.equals(call.getBoolean("reset", false))) {
+      DownloadRoot.set(getContext(), null);
+    } else {
+      DownloadRoot.set(getContext(), DownloadRoot.absolute(call.getString("volume", "primary"), call.getString("path", "")));
+    }
+    call.resolve(rootInfo());
+  }
+
+  /** Opens Android's "allow access to all files" page for Oli (needed to save into a folder of your choice). */
+  @PluginMethod
+  public void requestAllFiles(PluginCall call) {
+    try {
+      android.content.Intent i = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+          android.net.Uri.parse("package:" + getContext().getPackageName()));
+      i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+      getContext().startActivity(i);
+    } catch (Exception e) {
+      try {
+        android.content.Intent i = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+        i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(i);
+      } catch (Exception e2) {
+        call.reject("This phone has no settings page for that");
+        return;
+      }
+    }
+    call.resolve(rootInfo());
   }
 
   /** The folder downloads go to. */
   @PluginMethod
   public void getRoot(PluginCall call) {
-    JSObject o = new JSObject();
-    o.put("root", root().getAbsolutePath());
-    call.resolve(o);
+    call.resolve(rootInfo());
   }
 
   /**

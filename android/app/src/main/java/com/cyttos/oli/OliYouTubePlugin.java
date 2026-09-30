@@ -88,9 +88,35 @@ public class OliYouTubePlugin extends Plugin {
   }
 
   private File root() {
-    Context ctx = getContext();
-    File dir = ctx.getExternalFilesDir(null);
-    return dir != null ? dir : ctx.getFilesDir();
+    return DownloadRoot.resolve(getContext());
+  }
+
+  /** A folder where the library's ffmpeg / ffprobe carry the plain names yt-dlp looks for (the new yt-dlp no longer accepts "libffmpeg.so"). */
+  private String ffmpegDir() {
+    try {
+      Context ctx = getContext();
+      File dir = new File(ctx.getNoBackupFilesDir(), "oli-ffmpeg");
+      //noinspection ResultOfMethodCallIgnored
+      dir.mkdirs();
+      String lib = ctx.getApplicationInfo().nativeLibraryDir;
+      String[][] links = {{"ffmpeg", "libffmpeg.so"}, {"ffprobe", "libffprobe.so"}};
+      for (String[] l : links) {
+        File link = new File(dir, l[0]);
+        File target = new File(lib, l[1]);
+        if (!target.isFile()) continue;
+        try {
+          if (link.getCanonicalPath().equals(target.getCanonicalPath())) continue;
+        } catch (Exception ignored) {
+          // fall through and recreate
+        }
+        //noinspection ResultOfMethodCallIgnored
+        link.delete();
+        android.system.Os.symlink(target.getAbsolutePath(), link.getAbsolutePath());
+      }
+      return dir.getAbsolutePath();
+    } catch (Throwable e) {
+      return null;
+    }
   }
 
   private static synchronized void ensureInit(Context ctx) throws Exception {
@@ -956,6 +982,8 @@ public class OliYouTubePlugin extends Plugin {
   private void buildDownload(YoutubeDLRequest r, DownloadTask t, String client) {
     common(r);
     client(r, client);
+    String ff = ffmpegDir();
+    if (ff != null) r.addOption("--ffmpeg-location", ff);
     r.addOption("--no-playlist");
     r.addOption("--newline");
     r.addOption("--progress");

@@ -128,7 +128,7 @@ The 317 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `CLAUDE.md`  (8 KB)
 - `LICENSE`  (1 KB)
 - `README.md`  (7 KB)
-- `.github/android-release-notes.md`  (14 KB)
+- `.github/android-release-notes.md`  (15 KB)
 - `.github/release-notes.md`  (3 KB)
 - `.github/workflows/android.yml`  (5 KB)
 - `.github/workflows/attach-android.yml`  (1 KB)
@@ -292,7 +292,7 @@ The 317 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `src/renderer/src/pages/Playlists.tsx`  (8 KB)
 - `src/renderer/src/pages/Queue.tsx`  (5 KB)
 - `src/renderer/src/pages/Search.tsx`  (7 KB)
-- `src/renderer/src/pages/Settings.tsx`  (30 KB)
+- `src/renderer/src/pages/Settings.tsx`  (31 KB)
 - `src/renderer/src/pages/SongDetail.tsx`  (13 KB)
 - `src/renderer/src/pages/Songs.tsx`  (14 KB)
 - `src/renderer/src/platform/androidCore.ts`  (8 KB)
@@ -378,10 +378,10 @@ The 317 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `android/app/src/main/java/com/cyttos/oli/OliAudioEngine.java`  (29 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliAudioPlugin.java`  (3 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliAudioService.java`  (3 KB)
-- `android/app/src/main/java/com/cyttos/oli/OliDownloadPlugin.java`  (7 KB)
+- `android/app/src/main/java/com/cyttos/oli/OliDownloadPlugin.java`  (8 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadService.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliMediaPlugin.java`  (20 KB)
-- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (41 KB)
+- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (42 KB)
 - `android/app/src/main/java/com/cyttos/oli/SourceProbe.java`  (5 KB)
 - `android/app/src/main/java/com/cyttos/oli/TagFields.java`  (1 KB)
 - `android/app/src/main/java/com/cyttos/oli/YtChunkedDataSource.java`  (3 KB)
@@ -925,7 +925,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.11); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.12); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -1064,7 +1064,7 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.11, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.12, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
@@ -1142,7 +1142,11 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.11: the real cause of the video / seek / download failures
+### What is new in 0.9.12: download folder, ffmpeg
+- **Settings > Downloads > Download folder**: choose where downloads are saved (like the library folder). Android asks once to allow access to all files; "Use default" goes back to the app folder.
+- Song and video downloads no longer fail with "ffmpeg not found" (the new yt-dlp needs ffmpeg under its plain name; Oli now provides it).
+
+### Already in 0.9.11: the real cause of the video / seek / download failures
 - **The phone was running a 9-month-old yt-dlp (2025.11.12)**; its update button did not really update it, and YouTube serves that old release only the first few MB of a file (videos would not play, downloads stopped at ~20%, seeking went back to 0:00). Oli now downloads the **official newest yt-dlp** from GitHub itself (SHA-256 checked) on first start and when you press update, and shows its real version in Settings > YouTube engine.
 
 ### Already in 0.9.10: more detail in Test video access
@@ -29413,6 +29417,7 @@ import { outputRows } from '../lib/outputText'
 import { isMobileShell } from '../lib/platform'
 
 const YtDiagnose = __OLI_WEB__ ? lazy(() => import('../components/YtDiagnose')) : null
+const PhoneDownloadFolder = __OLI_WEB__ ? lazy(() => import('../components/PhoneDownloadFolder')) : null
 
 export function Settings(): React.JSX.Element {
   const store = useSettings()
@@ -29604,6 +29609,11 @@ export function Settings(): React.JSX.Element {
         </Section>
 
         <Section title="Downloads">
+          {PhoneDownloadFolder && isMobileShell() && (
+            <Suspense fallback={null}>
+              <PhoneDownloadFolder />
+            </Suspense>
+          )}
           {!isMobileShell() && (
             <>
               <Row label="Songs prepared ahead (1-10)">
@@ -31271,7 +31281,9 @@ interface ListenerHandle {
 }
 
 export interface OliDownloadPlugin {
-  getRoot(): Promise<{ root: string }>
+  getRoot(): Promise<{ root: string; custom?: string; allFiles?: boolean }>
+  setRoot(o: { volume?: string; path?: string; reset?: boolean }): Promise<{ root: string; custom?: string; allFiles?: boolean }>
+  requestAllFiles(): Promise<{ root: string; custom?: string; allFiles?: boolean }>
   enqueue(o: {
     id: string
     url: string
@@ -42718,8 +42730,8 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 20
-        versionName "0.9.11"
+        versionCode 21
+        versionName "0.9.12"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a"
@@ -42935,6 +42947,8 @@ public class ExampleInstrumentedTest {
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Finding the music that is already on the phone (Android 13+ / older). -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Saving downloads into a folder chosen in Settings (Android 11+ asks the person to allow it). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 </manifest>
 ```
@@ -45467,17 +45481,54 @@ public class OliDownloadPlugin extends Plugin {
   }
 
   private File root() {
-    Context ctx = getContext();
-    File dir = ctx.getExternalFilesDir(null);
-    return dir != null ? dir : ctx.getFilesDir();
+    return DownloadRoot.resolve(getContext());
+  }
+
+  private JSObject rootInfo() {
+    JSObject o = new JSObject();
+    o.put("root", root().getAbsolutePath());
+    String custom = DownloadRoot.custom(getContext());
+    o.put("custom", custom == null ? "" : custom);
+    o.put("allFiles", DownloadRoot.allFilesAllowed());
+    return o;
+  }
+
+  /** {volume, path} or {reset:true}: the folder downloads are saved in (the picker result of OliMedia.pickFolder). */
+  @PluginMethod
+  public void setRoot(PluginCall call) {
+    if (Boolean.TRUE.equals(call.getBoolean("reset", false))) {
+      DownloadRoot.set(getContext(), null);
+    } else {
+      DownloadRoot.set(getContext(), DownloadRoot.absolute(call.getString("volume", "primary"), call.getString("path", "")));
+    }
+    call.resolve(rootInfo());
+  }
+
+  /** Opens Android's "allow access to all files" page for Oli (needed to save into a folder of your choice). */
+  @PluginMethod
+  public void requestAllFiles(PluginCall call) {
+    try {
+      android.content.Intent i = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+          android.net.Uri.parse("package:" + getContext().getPackageName()));
+      i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+      getContext().startActivity(i);
+    } catch (Exception e) {
+      try {
+        android.content.Intent i = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+        i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(i);
+      } catch (Exception e2) {
+        call.reject("This phone has no settings page for that");
+        return;
+      }
+    }
+    call.resolve(rootInfo());
   }
 
   /** The folder downloads go to. */
   @PluginMethod
   public void getRoot(PluginCall call) {
-    JSObject o = new JSObject();
-    o.put("root", root().getAbsolutePath());
-    call.resolve(o);
+    call.resolve(rootInfo());
   }
 
   /**
@@ -46425,9 +46476,35 @@ public class OliYouTubePlugin extends Plugin {
   }
 
   private File root() {
-    Context ctx = getContext();
-    File dir = ctx.getExternalFilesDir(null);
-    return dir != null ? dir : ctx.getFilesDir();
+    return DownloadRoot.resolve(getContext());
+  }
+
+  /** A folder where the library's ffmpeg / ffprobe carry the plain names yt-dlp looks for (the new yt-dlp no longer accepts "libffmpeg.so"). */
+  private String ffmpegDir() {
+    try {
+      Context ctx = getContext();
+      File dir = new File(ctx.getNoBackupFilesDir(), "oli-ffmpeg");
+      //noinspection ResultOfMethodCallIgnored
+      dir.mkdirs();
+      String lib = ctx.getApplicationInfo().nativeLibraryDir;
+      String[][] links = {{"ffmpeg", "libffmpeg.so"}, {"ffprobe", "libffprobe.so"}};
+      for (String[] l : links) {
+        File link = new File(dir, l[0]);
+        File target = new File(lib, l[1]);
+        if (!target.isFile()) continue;
+        try {
+          if (link.getCanonicalPath().equals(target.getCanonicalPath())) continue;
+        } catch (Exception ignored) {
+          // fall through and recreate
+        }
+        //noinspection ResultOfMethodCallIgnored
+        link.delete();
+        android.system.Os.symlink(target.getAbsolutePath(), link.getAbsolutePath());
+      }
+      return dir.getAbsolutePath();
+    } catch (Throwable e) {
+      return null;
+    }
   }
 
   private static synchronized void ensureInit(Context ctx) throws Exception {
@@ -47293,6 +47370,8 @@ public class OliYouTubePlugin extends Plugin {
   private void buildDownload(YoutubeDLRequest r, DownloadTask t, String client) {
     common(r);
     client(r, client);
+    String ff = ffmpegDir();
+    if (ff != null) r.addOption("--ffmpeg-location", ff);
     r.addOption("--no-playlist");
     r.addOption("--newline");
     r.addOption("--progress");

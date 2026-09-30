@@ -76,7 +76,9 @@ interface ListenerHandle {
 }
 
 export interface OliDownloadPlugin {
-  getRoot(): Promise<{ root: string }>
+  getRoot(): Promise<{ root: string; custom?: string; allFiles?: boolean }>
+  setRoot(o: { volume?: string; path?: string; reset?: boolean }): Promise<{ root: string; custom?: string; allFiles?: boolean }>
+  requestAllFiles(): Promise<{ root: string; custom?: string; allFiles?: boolean }>
   enqueue(o: {
     id: string
     url: string

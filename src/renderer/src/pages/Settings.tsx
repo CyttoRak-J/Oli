@@ -44,6 +44,7 @@ import { outputRows } from '../lib/outputText'
 import { isMobileShell } from '../lib/platform'
 
 const YtDiagnose = __OLI_WEB__ ? lazy(() => import('../components/YtDiagnose')) : null
+const PhoneDownloadFolder = __OLI_WEB__ ? lazy(() => import('../components/PhoneDownloadFolder')) : null
 
 export function Settings(): React.JSX.Element {
   const store = useSettings()
@@ -235,6 +236,11 @@ export function Settings(): React.JSX.Element {
         </Section>
 
         <Section title="Downloads">
+          {PhoneDownloadFolder && isMobileShell() && (
+            <Suspense fallback={null}>
+              <PhoneDownloadFolder />
+            </Suspense>
+          )}
           {!isMobileShell() && (
             <>
               <Row label="Songs prepared ahead (1-10)">
