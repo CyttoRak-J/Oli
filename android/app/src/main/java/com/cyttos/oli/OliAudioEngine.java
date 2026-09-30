@@ -86,6 +86,8 @@ final class OliAudioEngine {
   private int trackChannels = 0;
   private boolean trackOffload = false;
   private String lastSinkError = "";
+  /** For the Audio output screen: what the last seek asked for and where it landed. */
+  private String seekNote = "";
 
   private final Runnable ticker = new Runnable() {
     @Override
@@ -171,6 +173,7 @@ final class OliAudioEngine {
       @Override
       public void onPositionDiscontinuity(Player.PositionInfo oldPos, Player.PositionInfo newPos, int reason) {
         if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+          seekNote = seekNote.replaceAll(" -> landed .*$", "") + " -> landed " + (newPos.positionMs / 1000) + " s";
           JSObject o = base();
           o.put("positionMs", newPos.positionMs);
           sink.emit("seeked", o);
@@ -368,6 +371,8 @@ final class OliAudioEngine {
   void seekTo(long positionMs) {
     if (reloadLast(Math.max(0, positionMs), false)) return;
     revive();
+    seekNote = "asked " + (positionMs / 1000.0) + " s, seekable=" + player.isCurrentMediaItemSeekable()
+        + ", state=" + stateName(player.getPlaybackState());
     player.seekTo(Math.max(0, positionMs));
   }
 
@@ -735,6 +740,7 @@ final class OliAudioEngine {
     o.put("resampled", resampled);
     o.put("verdict", verdict);
     if (!lastSinkError.isEmpty()) o.put("sinkError", lastSinkError);
+    if (!seekNote.isEmpty()) o.put("seekNote", seekNote);
     return o;
   }
 

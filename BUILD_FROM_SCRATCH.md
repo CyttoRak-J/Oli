@@ -50760,6 +50760,8 @@ rules in CLAUDE.md. Checked on the PC: 238 unit tests, typecheck, lint; Java of 
 
 **0.9.16 (owner: seek on Now Playing plays from 0:00; tapping an Up Next song shows its info):** (1) the seek slider committed only on `pointerup`; a touch drag can end in `pointercancel`/`touchend`, so the seek never happened, and `progressMax` was `max(1, duration)` (1 s while the stream's duration was still 0). Now `NowPlaying` / `PlayerBar` commit on pointerup, pointercancel and touchend using the slider's own value, `touch-action: none`, and fall back to the song's duration. (2) `tapToPlay` ignores taps on buttons and the title was a button opening the info; on the phone the title now plays and an (i) button opens the info. Not yet confirmed on a phone.
 
+**0.9.17 (seeking on Now Playing still failed after 0.9.16):** `useRangeCommit` (lib) listens to the slider's native `change` event (React's onChange is `input`) in `NowPlaying` and `PlayerBar`; `OliAudioEngine.seekNote` (asked / seekable / landed) is shown as "Last seek" in the Audio output rows. If it still fails on the phone, read that row first: `seekable=false` means the extractor has no seek map for that file (native cause); `landed 0` with `seekable=true` points at the player or the source. The harness YouTube suite shows 24/27: three checks still expect the pre-0.9.13 flow (tags handed to yt-dlp) and need updating to the own-ffmpeg flow.
+
 ## Appendix D: Android 0.9.2 to 0.9.14: the YouTube / download / video saga (READ THIS FIRST, it saves days)
 
 Between 2026-09-30 and 2026-10-01 the owner tested the phone app on a real phone (mobile data only, no Wi-Fi) and reported: online songs jump back to 0:00

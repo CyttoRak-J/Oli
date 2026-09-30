@@ -59,5 +59,6 @@ export function outputRows(info: NativeOutputInfo | null): Array<[string, string
   }
   if (info.verdict) rows.push(['What happens', info.verdict])
   if (info.sinkError) rows.push(['Audio error', info.sinkError])
+  if (info.seekNote) rows.push(['Last seek', info.seekNote])
   return rows
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useRangeCommit } from '../lib/useRangeCommit'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -70,6 +71,10 @@ export function PlayerBar(): React.JSX.Element {
   const progressPct = Math.min(100, (sliderValue / progressMax) * 100)
   const volumePct = (player.muted ? 0 : player.volume) * 100
 
+  const sliderRef = useRangeCommit((v) => {
+    player.seek(v)
+    setPreviewTime(null)
+  })
   const onProgressInput = (raw: string): void => {
     setPreviewTime(Number(raw))
   }
@@ -229,6 +234,7 @@ export function PlayerBar(): React.JSX.Element {
             {formatDuration(sliderValue)}
           </span>
           <input
+            ref={sliderRef}
             type="range"
             className="flex-1"
             min={0}

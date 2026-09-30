@@ -4,7 +4,11 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.16: seek bar and Up Next on the Now Playing screen
+### What is new in 0.9.17: seek bar, second try
+- The seek bar now also reacts to the browser's own "value committed" event, which arrives for every kind of touch (taps on the bar, drags, releases outside the bar).
+- **Settings > Audio output > Last seek** shows what the player was asked and where it landed (for example "asked 120.0 s, seekable=true -> landed 120.0 s"). If seeking still fails, please send me that line.
+
+### Already in 0.9.16: seek bar and Up Next on the Now Playing screen
 - **Seek bar**: a finger drag now always counts as a seek (before, Android could end the drag without the app noticing, so the song restarted from 0:00), and the bar has a proper length even while a stream is still loading.
 - **Up Next**: tapping a song's title now plays it (before it opened the song info); the small (i) button at the right opens the info.
 

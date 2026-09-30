@@ -58,6 +58,7 @@ export interface NativeOutputInfo {
   resampled?: boolean
   verdict?: string
   sinkError?: string
+  seekNote?: string
 }
 
 interface NativeListenerHandle {

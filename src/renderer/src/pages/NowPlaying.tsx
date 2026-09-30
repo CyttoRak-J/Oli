@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useRangeCommit } from '../lib/useRangeCommit'
 import { Info, Play, Pause, SkipBack, SkipForward, Disc3, ListMusic, Radio, Shuffle, Repeat, Repeat1, History, Mic2 } from 'lucide-react'
 import { usePlayer } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -43,6 +44,10 @@ export function NowPlaying(): React.JSX.Element {
   const phone = isMobileShell()
   const openInfo = useTrackInfo()
   const [previewTime, setPreviewTime] = useState<number | null>(null)
+  const sliderRef = useRangeCommit((v) => {
+    player.seek(v)
+    setPreviewTime(null)
+  })
 
   const { current, status, currentTime, duration, queue, index, radioMode, toggleRadioMode } = player
 
@@ -111,6 +116,7 @@ export function NowPlaying(): React.JSX.Element {
 
       <div>
         <input
+          ref={sliderRef}
           type="range"
           className="w-full"
           min={0}
