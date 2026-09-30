@@ -36,11 +36,14 @@ import {
 import { formatCount, formatFileSize } from '../lib/format'
 import { IPC } from '@shared/ipc'
 import { cn } from '../components/cn'
+import { lazy, Suspense } from 'react'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { usePlayer } from '../store/player'
 import { useNativeOutput } from '../lib/useNativeOutput'
 import { outputRows } from '../lib/outputText'
 import { isMobileShell } from '../lib/platform'
+
+const YtDiagnose = __OLI_WEB__ ? lazy(() => import('../components/YtDiagnose')) : null
 
 export function Settings(): React.JSX.Element {
   const store = useSettings()
@@ -268,6 +271,11 @@ export function Settings(): React.JSX.Element {
 
         <Section title="YouTube engine">
           <YtEngineSection />
+          {YtDiagnose && isMobileShell() && (
+            <Suspense fallback={null}>
+              <YtDiagnose />
+            </Suspense>
+          )}
         </Section>
 
         <Section title="Backup & restore">

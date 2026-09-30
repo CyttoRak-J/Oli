@@ -432,6 +432,103 @@ public class OliYouTubePlugin extends Plugin {
     return null;
   }
 
+  /** {videoId} -> {text}: for each YouTube method, which parts of a picture stream are served (Settings > Test video access). */
+  @PluginMethod
+  public void diagnose(PluginCall call) {
+    final String id = call.getString("videoId", "");
+    if (!VIDEO_ID.matcher(id).matches()) {
+      call.reject("invalid video id");
+      return;
+    }
+    final Context ctx = getContext();
+    WORK.execute(() -> {
+      StringBuilder out = new StringBuilder();
+      try {
+        ensureInit(ctx);
+        out.append("yt-dlp ").append(YoutubeDL.INSTANCE.version(ctx)).append("\n");
+      } catch (Exception e) {
+        call.reject(String.valueOf(e.getMessage()));
+        return;
+      }
+      for (String c : new String[] {"visionos", "default", "vr"}) {
+        out.append("\n[").append(c).append("] ");
+        String pid = "dg-" + System.nanoTime();
+        ScheduledFuture<?> dog = WATCHDOG.schedule(() -> YoutubeDL.INSTANCE.destroyProcessById(pid), 50000, TimeUnit.MILLISECONDS);
+        try {
+          YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + id);
+          common(req);
+          client(req, c);
+          req.addOption("--no-playlist");
+          req.addOption("--skip-download");
+          req.addOption("-j");
+          String json = YoutubeDL.INSTANCE.execute(req, pid).getOut();
+          if (json == null || json.trim().isEmpty()) {
+            out.append("no answer\n");
+            continue;
+          }
+          JSONObject info = new JSONObject(json.trim());
+          JSONArray formats = info.optJSONArray("formats");
+          JSONObject best = null;
+          int hls = 0;
+          int total = formats == null ? 0 : formats.length();
+          for (int i = 0; i < total; i++) {
+            JSONObject f = formats.getJSONObject(i);
+            if (f.optString("protocol", "").startsWith("m3u8")) hls++;
+            String url = f.optString("url", "");
+            int h = f.optInt("height", 0);
+            if (!url.startsWith("http") || "none".equals(f.optString("vcodec", "none")) || h <= 0 || h > 720) continue;
+            if (!"none".equals(f.optString("acodec", "none")) || f.optString("protocol", "").startsWith("m3u8")) continue;
+            if (best == null || h > best.optInt("height", 0)) best = f;
+          }
+          out.append(total).append(" formats, ").append(hls).append(" HLS\n");
+          if (best == null) {
+            out.append("  no picture-only stream up to 720p\n");
+            continue;
+          }
+          Map<String, String> headers = new HashMap<>();
+          addHeaders(headers, info.optJSONObject("http_headers"));
+          addHeaders(headers, best.optJSONObject("http_headers"));
+          String url = best.getString("url");
+          out.append("  ").append(best.optInt("height")).append("p ").append(best.optString("vcodec")).append(" size ")
+              .append(best.optLong("filesize", best.optLong("filesize_approx", 0)) / 1000000).append(" MB\n");
+          long[] offsets = {0, 6_000_000L, 11_000_000L, 13_000_000L, 21_000_000L, 40_000_000L};
+          StringBuilder hdr = new StringBuilder("  Range header:");
+          StringBuilder par = new StringBuilder("  range= in address:");
+          for (long off : offsets) {
+            hdr.append(' ').append(off / 1000000).append("MB=").append(fetchStatus(url, headers, off));
+            par.append(' ').append(off / 1000000).append("MB=")
+                .append(fetchStatusParam(url, headers, off));
+          }
+          out.append(hdr).append("\n").append(par).append("\n");
+        } catch (Exception e) {
+          String m = String.valueOf(e.getMessage()).replaceAll("\\s+", " ");
+          out.append("error ").append(m.length() > 140 ? m.substring(0, 140) : m).append("\n");
+        } finally {
+          dog.cancel(false);
+        }
+      }
+      JSObject o = new JSObject();
+      o.put("text", out.toString());
+      call.resolve(o);
+    });
+  }
+
+  private static int fetchStatusParam(String url, Map<String, String> headers, long from) {
+    HttpURLConnection c = null;
+    try {
+      String u = url + (url.contains("?") ? "&" : "?") + "range=" + from + "-" + (from + 4095);
+      c = (HttpURLConnection) new URL(u).openConnection();
+      c.setConnectTimeout(12000);
+      c.setReadTimeout(12000);
+      for (Map.Entry<String, String> e : headers.entrySet()) c.setRequestProperty(e.getKey(), e.getValue());
+      return c.getResponseCode();
+    } catch (Exception e) {
+      return -1;
+    } finally {
+      if (c != null) c.disconnect();
+    }
+  }
+
   // ---------------------------------------------------------------------------------------------------------------
   // Downloads (same events as OliDownload: dlProgress / dlState)
 
@@ -557,6 +654,12 @@ public class OliYouTubePlugin extends Plugin {
     call.resolve(o);
   }
 
+  private long partialBytes(DownloadTask t) {
+    long n = 0;
+    for (File f : filesOf(t)) n += f.length();
+    return n;
+  }
+
   private void deleteLeftovers(DownloadTask t) {
     for (File f : filesOf(t)) {
       if (isPartial(f.getName())) {
@@ -606,6 +709,9 @@ public class OliYouTubePlugin extends Plugin {
         }
         clients = new String[] {good};
       }
+      // a 403 part-way (YouTube cuts a stream off) is retried with a fresh address that carries on from the partial file
+      long lastPartial = 0;
+      int resumes = 0;
       for (int attempt = 0; attempt < clients.length; attempt++) {
         t.processId = "dl-" + t.id + "-" + attempt;
         YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);
@@ -643,6 +749,13 @@ public class OliYouTubePlugin extends Plugin {
           allErrors.append(clients[attempt]).append(": ").append(msg.length() > 110 ? msg.substring(0, 110) : msg).append("; ");
           lastError = allErrors.toString();
           if (t.cancel || t.pause) break;
+          long now = partialBytes(t);
+          if (msg.contains("403") && now > lastPartial && resumes < 10) {
+            lastPartial = now;
+            resumes++;
+            allErrors.setLength(0);
+            attempt--;
+          }
         }
       }
       tasks.remove(t.id);
