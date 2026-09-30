@@ -49714,7 +49714,9 @@ The owner installed 0.8.0 on a phone and reported 11 things. For the native-rewr
 
 **Found by the owner right after 0.9.0 and fixed in 0.9.1:** the full-screen panels covered the page, so a tab below changed the page behind the panel (any navigation now closes the panel), and the owner asked for swipe-down to return to the previous page (a downward drag from the top of a panel; sliders and scrolled lists are left alone). The look of Now Playing was kept as it was.
 
-**Ask the owner next:** install 0.9.0; check the notification with the screen off; make a call or play other audio and press play; tell if covers appear; how long a YouTube song takes to start (first tap, and the next one in a playlist).
+**Owner's result for 0.9.1 (2026-09-30):** installed on the phone and tested: "works fine". The 0.9.0/0.9.1 fixes are confirmed by the owner (no per-item detail was given). Nothing further is pending from the phone; the owner said not to release again for now.
+
+**Older question (answered):** install 0.9.0; check the notification with the screen off; make a call or play other audio and press play; tell if covers appear; how long a YouTube song takes to start (first tap, and the next one in a playlist).
 
 #### Architecture (decided by the assistant; the owner said any approach is fine)
 **Hybrid: same screens + same desktop logic inside the app, native Android code only where a phone requires it.**
@@ -50160,7 +50162,7 @@ What I want next:
   branch `android-dev` builds without releasing). It is a Capacitor app reusing the React UI with the desktop services inside the web view, plus four
   native Java plugins: `OliAudio` (Media3 player in a foreground service, honest hi-res report, bit-perfect), `OliMedia` (scan the phone's music),
   `OliDownload` (resumable downloads, FLAC/MP3 tag writers), `OliYouTube` (yt-dlp on the phone). All planned phases are built (1b, 1c, 2, 3, 5) plus the folder picker (0.8.0: Settings > Library > Choose folder); the APK is
-  about 104 MB. **It has never been run on a real phone**: CI compiles and signature-checks it, the pure Java is tested on the PC with the JDK, and the
+  about 104 MB. **The owner has run it on a real phone (0.8.0, then 0.9.1 which "works fine")**; CI compiles and signature-checks it, the pure Java is tested on the PC with the JDK, and the
   JavaScript side runs in the PC test window (`scripts/android-harness`, `run-all.ps1`: 142 checks) against stand-ins for the plugins. The owner's phone
   reports are the next step; the checklists are at the top of the sections of Appendix C (Android phases). Open decisions (native rewrite, real signing key) are in Appendix B (Android plan).
 - After adding npm packages, check `node_modules/electron/dist` still exists (newer npm skips install scripts); if not, run `node node_modules/electron/install.js`,
