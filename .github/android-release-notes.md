@@ -4,6 +4,9 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
+### What is new in 0.9.5: the YouTube method the PC uses for videos
+- The phone's default YouTube method served only the first ~12 MB of a video and then refused (HTTP 403): downloads stopped at ~19% and videos would not play. Oli now tries the **same method the PC uses (visionos) first** for videos, then the others, each tested with a real request (start and middle) before use.
+
 ### What is new in 0.9.4: videos that YouTube refuses
 - Before playing or downloading a video, Oli now **tests each YouTube method with a real request** (start and middle of the picture stream) and uses the first one that YouTube really serves. This is the fix for "HTTP Error 403: Forbidden" on video downloads and for a video that would not play.
 - If YouTube refuses every method on this phone, the message says which method was refused and how (for example "default: 1080p refused in the middle (HTTP 403)"), for both the video button and Downloads.

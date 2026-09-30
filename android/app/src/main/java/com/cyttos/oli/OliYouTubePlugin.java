@@ -160,6 +160,9 @@ public class OliYouTubePlugin extends Plugin {
   private static void client(YoutubeDLRequest r, String which) {
     if ("embed".equals(which)) r.addOption("--extractor-args", "youtube:player_client=web_embedded");
     else if ("vr".equals(which)) r.addOption("--extractor-args", "youtube:player_client=android_vr");
+    // the clients the PC gets its videos from: their addresses are served whole (the default web ones stop after about 12 MB)
+    else if ("visionos".equals(which)) r.addOption("--extractor-args", "youtube:player_client=visionos");
+    else if ("tvs".equals(which)) r.addOption("--extractor-args", "youtube:player_client=tv_simply");
   }
 
   private interface Builder {
@@ -278,8 +281,8 @@ public class OliYouTubePlugin extends Plugin {
     // the video page plays the addresses in the web view (like the PC window): the plain client, not the phone-only ones
     final boolean video = Boolean.TRUE.equals(call.getBoolean("video", false));
     ask(call, "https://www.youtube.com/watch?v=" + id,
-        video ? new String[] {"default", "embed"} : streams ? streamClients() : new String[] {"default", "embed"},
-        video ? 45000 : streams ? 30000 : 60000, (r) -> {
+        video ? VIDEO_CLIENTS : streams ? streamClients() : new String[] {"default", "embed"},
+        video ? 40000 : streams ? 30000 : 60000, (r) -> {
           r.addOption("--no-playlist");
           r.addOption("--skip-download");
           r.addOption("-j");
@@ -289,6 +292,8 @@ public class OliYouTubePlugin extends Plugin {
   // ---------------------------------------------------------------------------------------------------------------
   // Does this client's video really download? YouTube answers some clients with addresses that then refuse (403) once the
   // file gets big; the picture streams are the ones that fail, so one is fetched here (start and middle) before it is used.
+
+  private static final String[] VIDEO_CLIENTS = {"visionos", "default", "vr", "tvs", "embed"};
 
   private static final java.util.Set<String> SAFE_HEADERS =
       new java.util.HashSet<>(java.util.Arrays.asList("user-agent", "accept", "accept-language", "referer", "origin"));
@@ -363,7 +368,7 @@ public class OliYouTubePlugin extends Plugin {
 
   /** The first client whose picture streams download, or null (the reasons are appended to why). */
   private String pickVideoClient(DownloadTask t, StringBuilder why) {
-    for (String c : new String[] {"default", "embed", "vr"}) {
+    for (String c : VIDEO_CLIENTS) {
       String pid = "vp-" + t.id + "-" + c;
       try {
         YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);

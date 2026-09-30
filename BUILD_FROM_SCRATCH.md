@@ -923,7 +923,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.4); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.5); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -1062,7 +1062,7 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.4, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.5, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
@@ -1139,6 +1139,9 @@ from `%APPDATA%\Oli\logs`.
 An early build of Oli for Android phones. **Install:** download `Oli-<version>-android.apk` to your phone, open it, and allow
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
+
+### What is new in 0.9.5: the YouTube method the PC uses for videos
+- The phone's default YouTube method served only the first ~12 MB of a video and then refused (HTTP 403): downloads stopped at ~19% and videos would not play. Oli now tries the **same method the PC uses (visionos) first** for videos, then the others, each tested with a real request (start and middle) before use.
 
 ### What is new in 0.9.4: videos that YouTube refuses
 - Before playing or downloading a video, Oli now **tests each YouTube method with a real request** (start and middle of the picture stream) and uses the first one that YouTube really serves. This is the fix for "HTTP Error 403: Forbidden" on video downloads and for a video that would not play.
@@ -42646,7 +42649,7 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 13
+        versionCode 14
         versionName "0.9.2"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
@@ -46425,6 +46428,9 @@ public class OliYouTubePlugin extends Plugin {
   private static void client(YoutubeDLRequest r, String which) {
     if ("embed".equals(which)) r.addOption("--extractor-args", "youtube:player_client=web_embedded");
     else if ("vr".equals(which)) r.addOption("--extractor-args", "youtube:player_client=android_vr");
+    // the clients the PC gets its videos from: their addresses are served whole (the default web ones stop after about 12 MB)
+    else if ("visionos".equals(which)) r.addOption("--extractor-args", "youtube:player_client=visionos");
+    else if ("tvs".equals(which)) r.addOption("--extractor-args", "youtube:player_client=tv_simply");
   }
 
   private interface Builder {
@@ -46543,8 +46549,8 @@ public class OliYouTubePlugin extends Plugin {
     // the video page plays the addresses in the web view (like the PC window): the plain client, not the phone-only ones
     final boolean video = Boolean.TRUE.equals(call.getBoolean("video", false));
     ask(call, "https://www.youtube.com/watch?v=" + id,
-        video ? new String[] {"default", "embed"} : streams ? streamClients() : new String[] {"default", "embed"},
-        video ? 45000 : streams ? 30000 : 60000, (r) -> {
+        video ? VIDEO_CLIENTS : streams ? streamClients() : new String[] {"default", "embed"},
+        video ? 40000 : streams ? 30000 : 60000, (r) -> {
           r.addOption("--no-playlist");
           r.addOption("--skip-download");
           r.addOption("-j");
@@ -46554,6 +46560,8 @@ public class OliYouTubePlugin extends Plugin {
   // ---------------------------------------------------------------------------------------------------------------
   // Does this client's video really download? YouTube answers some clients with addresses that then refuse (403) once the
   // file gets big; the picture streams are the ones that fail, so one is fetched here (start and middle) before it is used.
+
+  private static final String[] VIDEO_CLIENTS = {"visionos", "default", "vr", "tvs", "embed"};
 
   private static final java.util.Set<String> SAFE_HEADERS =
       new java.util.HashSet<>(java.util.Arrays.asList("user-agent", "accept", "accept-language", "referer", "origin"));
@@ -46628,7 +46636,7 @@ public class OliYouTubePlugin extends Plugin {
 
   /** The first client whose picture streams download, or null (the reasons are appended to why). */
   private String pickVideoClient(DownloadTask t, StringBuilder why) {
-    for (String c : new String[] {"default", "embed", "vr"}) {
+    for (String c : VIDEO_CLIENTS) {
       String pid = "vp-" + t.id + "-" + c;
       try {
         YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);
