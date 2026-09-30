@@ -93,6 +93,8 @@ export interface OliDownloadPlugin {
   resume(o: { id: string }): Promise<void>
   cancel(o: { id: string; relPath?: string }): Promise<void>
   getActive(): Promise<{ ids: string[] }>
+  /** How many downloads are waiting or running (also those not handed to the native side yet): keeps the download service alive. */
+  keepAlive?(o: { count: number }): Promise<void>
   /** Writes tags into a FLAC / MP3 file in the app's own folder. */
   writeTags(o: { path: string; tags: DownloadTags }): Promise<{ written: boolean; note: string }>
   addListener(event: string, cb: (data: never) => void): Promise<ListenerHandle> | ListenerHandle
@@ -434,8 +436,16 @@ export class DownloadQueue {
     this.items = this.items.map((d) => (d.id === id ? { ...d, ...p, updatedAt: this.now() } : d))
   }
 
+  private lastKeepAlive = -1
+
   private commit(): void {
     this.opts.publish([...this.items])
+    // The service that keeps the phone awake and the download notification alive must not stop between two songs.
+    const pending = this.items.filter((d) => d.state === 'queued' || d.state === 'downloading').length
+    if (pending !== this.lastKeepAlive) {
+      this.lastKeepAlive = pending
+      void this.opts.plugin.keepAlive?.({ count: pending })?.catch(() => undefined)
+    }
     if (this.saveTimer) return
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null

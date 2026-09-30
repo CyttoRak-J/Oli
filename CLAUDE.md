@@ -21,7 +21,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.14); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.15); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -72,6 +72,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - Capacitor plugin proxies are thenables: never `await` or return one from an async function.
 - Media3 hi-res: float output only for hi-res/unknown sources (`ForwardingAudioSink.getFormatSupport`); the output report must never claim bit-perfect unless Android holds the mixer attribute.
 - minSdk is 24: no `java.nio.file` (Android 8); tag writers replace files with `File.renameTo`.
+- Background: the queue, the notification buttons and the download list run in the web page, which Chromium throttles when the app is hidden. Keep `MainActivity.keepVisible` (resumeTimers + dispatchWindowVisibilityChanged) and never use `setTimeout` on a path that must run in the background (`NativeAudio.emit` uses a microtask). Downloads need `OliDownload.keepAlive` (service alive while anything is queued) and the wake/Wi-Fi locks in `OliDownloadService`. Position reports older than a seek are dropped in `NativeAudio.staleAfterSeek`. See BUILD_FROM_SCRATCH.md Appendix D0.
 - yt-dlp `--parse-metadata` values: `%` doubled, `:` escaped, backslashes not doubled (`YtDlpOutput.metadataLiteral`).
 
 - **YouTube on the phone (0.9.2 to 0.9.14; full story in BUILD_FROM_SCRATCH.md Appendix D)**: the phone runs its OWN yt-dlp, installed by Oli from the official GitHub release (never trust the library's updater); ffmpeg must be started with `FFmpeg.INSTANCE.init` and is run by Oli itself (yt-dlp only downloads); test a YouTube client with a real request before using it; the video page is the PC's shared page shown in an iframe (phone CSP allows inline script); ask the owner for Settings > Test video access before guessing.

@@ -198,6 +198,14 @@ public class OliDownloadPlugin extends Plugin {
     call.resolve();
   }
 
+  /** {count}: downloads that are waiting or running in the app (also ones not started natively yet); keeps the service up. */
+  @PluginMethod
+  public void keepAlive(PluginCall call) {
+    int count = call.getInt("count", 0);
+    OliDownloadService.setPending(getContext(), count);
+    call.resolve();
+  }
+
   /** Ids the engine is working on right now (the screen uses it after the web view was reloaded). */
   @PluginMethod
   public void getActive(PluginCall call) {

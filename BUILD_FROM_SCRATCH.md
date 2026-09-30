@@ -50743,6 +50743,21 @@ ext {
 
 These were separate documents (Appendix A (Handoff), Appendix B (Android plan), Appendix C (Android phases), Appendix D (Prompts)); they are now one place. "Appendix A/B/C/D" below means these sections.
 
+## Appendix D0: Android 0.9.15: playback and downloads in the background (owner report, 2026-10-01)
+
+Owner's report on 0.9.14: seeking to the start misbehaves; the next song does not start when one ends; next / previous / pause sometimes do nothing;
+skipping from the notification or outside the app does nothing; downloads stop when the app is minimized. One root cause and two smaller ones
+(found by reading the code; **not yet confirmed on a phone**, ask the owner):
+
+| Symptom | Cause | Fix (where) |
+|---|---|---|
+| Next song / notification buttons dead in the background | The queue lives in JavaScript (`store/player.ts`); the native player only *asks* the page (`command` and `state: ended` events). When the app is minimized Android marks the web view hidden and Chromium slows page timers to ~1/s (1/min after 5 min), so the page answered late or never. | `MainActivity`: while the activity is paused/stopped it calls `WebView.resumeTimers()` and `dispatchWindowVisibilityChanged(VISIBLE)` every 4 s (the trick of cordova-plugin-background-mode). `NativeAudio.emit` uses a microtask instead of `setTimeout(0)`. |
+| Seek / "previous" to 0:00 jumps back | `currentTime = x` set the position at once, but a `time` event sent 250 ms earlier by the native player then overwrote it (and `Last.positionMs`). | `NativeAudio`: `seekTarget` / `staleAfterSeek()` drop position reports that are not near the target until the `seeked` event (or 2.5 s). Test in `test/nativeAudio.test.ts`. |
+| Downloads stop when minimized / screen off | (1) `OliDownloadService` stopped itself whenever the native engine was idle, which includes the time a queued item is still being prepared in JS; (2) no CPU / Wi-Fi wake lock, so the phone slept. | `DownloadQueue.commit()` tells the plugin how many items are waiting/running (`OliDownload.keepAlive({count})` -> `OliDownloadService.setPending`); the service counts `max(pending, engine + yt-dlp)` and holds a partial wake lock + Wi-Fi lock while it lives. |
+
+If the phone still loses the queue in the background, the next step is a native queue (the native player advancing to a preloaded URL by itself); see ANDROID
+rules in CLAUDE.md. Checked on the PC: 238 unit tests, typecheck, lint; Java of `MainActivity` / `OliDownloadService` is compile-checked by the `android-dev` CI run.
+
 ## Appendix D: Android 0.9.2 to 0.9.14: the YouTube / download / video saga (READ THIS FIRST, it saves days)
 
 Between 2026-09-30 and 2026-10-01 the owner tested the phone app on a real phone (mobile data only, no Wi-Fi) and reported: online songs jump back to 0:00

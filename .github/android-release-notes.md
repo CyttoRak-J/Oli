@@ -4,7 +4,12 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.14: ffmpeg starts
+### What is new in 0.9.15: background play and downloads
+- **Next song, notification Next / Previous and the lock-screen buttons keep working when the app is minimized or the screen is off** (the app's queue runs in its web page, which Android slowed down almost to a stop in the background; it is now kept running).
+- **Seeking / "previous" to the start**: a position report sent just before the seek no longer drags the bar (and the song) back to where it was.
+- **Downloads continue when the app is minimized**: the download service stays up between songs (also while the next song is still being prepared) and holds the CPU and Wi-Fi awake until the list is done.
+
+### Already in 0.9.14: ffmpeg starts
 - **Oli now unpacks the phone's ffmpeg** (the library only does that when asked, so ffmpeg could never start). Video + sound are joined into one file, and song covers and tags are embedded; a `.webp` cover is converted to `.jpg` first.
 - Test video access shows ffmpeg's last problem, if any.
 

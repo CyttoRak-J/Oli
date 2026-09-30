@@ -156,6 +156,9 @@ export class NativeAudio extends EventTarget implements AudioLike {
   /** playWhenReady value our own last play() / pause() asked for, until the native side confirms it. */
   private awaiting: boolean | null = null
   private awaitUntil = 0
+  /** Position we asked for with currentTime = x, until the native side confirms the seek (older position reports are stale). */
+  private seekTarget: number | null = null
+  private seekUntil = 0
 
   constructor(plugin: OliAudioPlugin) {
     super()
@@ -164,6 +167,7 @@ export class NativeAudio extends EventTarget implements AudioLike {
     void this.listen('time', (d: TimeEvent) => this.onTime(d))
     void this.listen('seeked', (d: { token: string; positionMs: number }) => {
       if (d.token !== this.token) return
+      this.seekTarget = null
       this._currentTime = d.positionMs / 1000
       this.emit('seeked')
     })
@@ -192,8 +196,9 @@ export class NativeAudio extends EventTarget implements AudioLike {
   }
 
   private emit(type: string): void {
-    // Asynchronous like the events of a real audio element.
-    setTimeout(() => this.dispatchEvent(new Event(type)), 0)
+    // Asynchronous like the events of a real audio element. A microtask, not a timer: timers are slowed down a lot
+    // while the app is minimized.
+    void Promise.resolve().then(() => this.dispatchEvent(new Event(type)))
   }
 
   // --- properties the player engine uses ---------------------------------------------------------------------
@@ -218,6 +223,8 @@ export class NativeAudio extends EventTarget implements AudioLike {
     if (!Number.isFinite(seconds) || seconds < 0) return
     this._currentTime = seconds
     if (!this._src) return
+    this.seekTarget = seconds
+    this.seekUntil = Date.now() + 2500
     void this.send(() => this.plugin.seekTo({ positionMs: Math.round(seconds * 1000) })).catch(() => undefined)
   }
 
@@ -309,6 +316,7 @@ export class NativeAudio extends EventTarget implements AudioLike {
     this.waiting = false
     this.playing = false
     this.awaiting = null
+    this.seekTarget = null
   }
 
   private loadNew(rawUrl: string): void {
@@ -429,10 +437,21 @@ export class NativeAudio extends EventTarget implements AudioLike {
 
   // --- events from the native player ------------------------------------------------------------------------
 
+  /** True while a seek we asked for is on its way: position reports from before it would make the bar jump back. */
+  private staleAfterSeek(positionMs: number): boolean {
+    if (this.seekTarget === null) return false
+    if (Date.now() > this.seekUntil || Math.abs(positionMs / 1000 - this.seekTarget) < 1.5) {
+      this.seekTarget = null
+      return false
+    }
+    return true
+  }
+
   private onTime(d: TimeEvent): void {
     if (d.token !== this.token) return
-    this._currentTime = d.positionMs / 1000
     if (d.durationMs > 0) this._duration = d.durationMs / 1000
+    if (this.staleAfterSeek(d.positionMs)) return
+    this._currentTime = d.positionMs / 1000
     this.dispatchEvent(new Event('timeupdate'))
   }
 

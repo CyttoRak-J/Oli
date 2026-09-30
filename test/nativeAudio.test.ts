@@ -139,6 +139,18 @@ describe('NativeAudio', () => {
     expect(events).toContain('seeked')
   })
 
+  it('a position report from before a seek does not pull the bar back', async () => {
+    const { audio, fire, token } = setup()
+    audio.src = 'file:///a.flac'
+    await settle()
+    fire('time', { token: token(), positionMs: 90000, durationMs: 200000, bufferedMs: 0 })
+    audio.currentTime = 0 // "previous" / seek to the start
+    fire('time', { token: token(), positionMs: 90250, durationMs: 200000, bufferedMs: 0 }) // sent before the seek landed
+    expect(audio.currentTime).toBe(0)
+    fire('time', { token: token(), positionMs: 300, durationMs: 200000, bufferedMs: 0 }) // after it landed
+    expect(audio.currentTime).toBeCloseTo(0.3)
+  })
+
   it('pause() is not undone by an older "playing" event, but a later outside resume is mirrored', async () => {
     const { audio, calls, events, fire, token } = setup()
     audio.src = 'file:///a.flac'

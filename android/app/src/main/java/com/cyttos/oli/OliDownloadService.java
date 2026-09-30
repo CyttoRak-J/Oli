@@ -17,6 +17,9 @@ import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 
+import android.net.wifi.WifiManager;
+import android.os.PowerManager;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -52,8 +55,21 @@ public class OliDownloadService extends Service {
     }
   }
 
+  /** Downloads the app says are waiting or running, including ones still being prepared (not in the engine yet). */
+  private static volatile int pending = 0;
+
+  static void setPending(Context ctx, int count) {
+    pending = Math.max(0, count);
+    OliDownloadService s = live;
+    if (pending > 0) {
+      if (s == null) ensureRunning(ctx);
+    } else if (s != null) {
+      s.main.postDelayed(s::update, 1500);
+    }
+  }
+
   private static int totalActive() {
-    return engine().activeCount() + Math.max(0, externalCount.getAsInt());
+    return Math.max(pending, engine().activeCount() + Math.max(0, externalCount.getAsInt()));
   }
 
   static synchronized DownloadEngine engine() {
@@ -76,11 +92,48 @@ public class OliDownloadService extends Service {
   private final Map<String, long[]> progress = new ConcurrentHashMap<>(); // id -> {bytes, total}
   private DownloadEngine.Listener listener;
   private long lastNotify = 0;
+  private PowerManager.WakeLock cpuLock;
+  private WifiManager.WifiLock wifiLock;
+
+  /** With the screen off the phone may sleep and stall the transfer: hold the CPU and Wi-Fi awake while downloads run. */
+  @SuppressWarnings("deprecation")
+  private void holdLocks() {
+    try {
+      if (cpuLock == null) {
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (pm != null) {
+          cpuLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "oli:downloads");
+          cpuLock.setReferenceCounted(false);
+        }
+      }
+      if (cpuLock != null && !cpuLock.isHeld()) cpuLock.acquire(3 * 60 * 60 * 1000L);
+      if (wifiLock == null) {
+        WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        if (wm != null) {
+          wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "oli:downloads");
+          wifiLock.setReferenceCounted(false);
+        }
+      }
+      if (wifiLock != null && !wifiLock.isHeld()) wifiLock.acquire();
+    } catch (Exception ignored) {
+      // locks are an extra; downloads still run
+    }
+  }
+
+  private void releaseLocks() {
+    try {
+      if (cpuLock != null && cpuLock.isHeld()) cpuLock.release();
+      if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
+    } catch (Exception ignored) {
+      // nothing to do
+    }
+  }
 
   @Override
   public void onCreate() {
     super.onCreate();
     live = this;
+    holdLocks();
     createChannel();
     listener = new DownloadEngine.Listener() {
       @Override
@@ -168,6 +221,7 @@ public class OliDownloadService extends Service {
   @Override
   public void onDestroy() {
     if (live == this) live = null;
+    releaseLocks();
     if (listener != null) {
       engine().removeListener(listener);
       listener = null;
