@@ -1,6 +1,6 @@
 // Speed test of the phone build with a big made-up library (run the window with OLI_HARNESS_SONGS=N on a FRESH profile).
 // The PC is much faster than a phone: CPU=4 (default) slows the page down 4x, which is roughly a mid-range phone. These are
-// estimates for the "native rewrite" triggers in ANDROID_PLAN.md, not phone measurements.
+// estimates for the "native rewrite" triggers in Appendix B (Android plan), not phone measurements.
 const { connect, sleep } = require('./drive.cjs')
 
 const CPU = Number(process.env.CPU || 4)

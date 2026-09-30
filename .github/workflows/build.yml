@@ -113,3 +113,15 @@ jobs:
               --title "Oli ${TAG#v}" \
               --notes-file .github/release-notes.md
           fi
+
+      # One page with every download: the newest Android APK (from the android-v* pre-releases) goes on this page too.
+      # Best effort: a problem here never stops the desktop release.
+      - name: Attach the newest Android APK
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          AND=$(gh release list --limit 50 --json tagName --jq '[.[] | select(.tagName | test("^android-v[0-9]"))][0].tagName')
+          if [ -n "$AND" ]; then bash scripts/attach-android.sh "$TAG" "$AND"; else echo "no Android release yet"; fi

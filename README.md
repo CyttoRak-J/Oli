@@ -59,7 +59,7 @@ contains the YouTube engine). Same screens as the PC app with a phone layout, an
 - It is signed with a public alpha key, so it is for testing (`docs/ANDROID_SIGNING.md` explains how to use your own key).
 
 **Honest status:** every planned feature is built and the build is checked by GitHub Actions and by tests on a PC, but the app has **not been run on a real phone yet**.
-See [`ANDROID_PLAN.md`](ANDROID_PLAN.md) for the status table and [`ANDROID_PHASE_6.md`](ANDROID_PHASE_6.md) for what comes next.
+See [`BUILD_FROM_SCRATCH.md`](BUILD_FROM_SCRATCH.md), Appendix B (status table) and Appendix C (phases, Phase 6 = what comes next).
 
 ## Building from source
 
@@ -89,10 +89,10 @@ The installer bundles `yt-dlp`. Merging YouTube video and audio, and converting 
 ## For contributors and AI assistants
 
 - [`CLAUDE.md`](CLAUDE.md) — project rules, commands and the mistakes not to repeat.
-- [`HANDOFF.md`](HANDOFF.md) — what changed recently, what is verified, what is still open.
+- [`BUILD_FROM_SCRATCH.md`](BUILD_FROM_SCRATCH.md) Appendix A — what changed recently, what is verified, what is still open.
 - [`BUILD_FROM_SCRATCH.md`](BUILD_FROM_SCRATCH.md) — a complete guide for building this app from zero
   (it asks the user for the name and other choices first).
-- [`CONTINUE_PROMPT.md`](CONTINUE_PROMPT.md) — paste this into a new chat to continue the work.
+- Appendix B and C of the same file — the Android status, plan and per-phase notes; Appendix D — prompts to paste into a new chat (continue the work, or build and release: the release agent asks which platforms).
 
 ## Documentation
 

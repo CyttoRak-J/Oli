@@ -7,7 +7,7 @@
  * This file adds the phone-specific parts: Internet Archive search and downloads to the phone, and answers for the
  * features that are not built yet (YouTube, scanning the phone's music, ...), so every screen still opens.
  *
- * Status and next steps: ANDROID_PLAN.md.
+ * Status and next steps: Appendix B (Android plan).
  */
 import {
   ARCHIVE_ITEM_CACHE_MS,

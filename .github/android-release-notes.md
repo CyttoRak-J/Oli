@@ -66,7 +66,7 @@ Allow notifications and access to your music when asked: the lock-screen control
 - The **same database and logic as the PC app** run inside the app: settings, playlists (manual and smart), favorites, queue, history, play counts, local search and lyrics lookup.
 - **Internet Archive:** search free lossless music, open an item, pick a format and tracks, download to the phone. Downloaded files become songs in your library.
 
-### What is not there yet (planned, see ANDROID_PLAN.md)
+### What is not there yet (planned, see the project's BUILD_FROM_SCRATCH.md, Appendix B)
 - A folder picker for music outside Android's media library (music on the phone or SD card is normally in it already); ReplayGain / lyrics from MP3 and M4A tags (FLAC is read).
 - Online metadata matching ("fix metadata") for YouTube songs; tags of downloaded YouTube songs come from the video's title and channel (edit them in the song list if they are off).
 

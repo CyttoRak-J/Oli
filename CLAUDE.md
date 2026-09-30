@@ -1,6 +1,6 @@
 # Oli: music player for Windows/macOS (Electron + React + sql.js) and Android (Capacitor + Java plugins)
 
-Local library manager and player, with YouTube search/stream/download. **Read `HANDOFF.md`
+Local library manager and player, with YouTube search/stream/download. **Read `BUILD_FROM_SCRATCH.md` Appendix A (Handoff)
 first** for what was changed recently, what is verified, and what is still open.
 
 ## Commands
@@ -12,7 +12,7 @@ first** for what was changed recently, what is verified, and what is still open.
   `A:\oli-dev-tools\original-backup`. Commit before large changes; never commit `bin/` (yt-dlp is fetched by `npm install`).
 
 - `BUILD_FROM_SCRATCH.md` is a full guide for a new agent to rebuild the app (asks the user for name etc. first).
-  Its verbatim code blocks are copies of the source: after big changes run `node scripts/sync-build-spec.mjs --fix` (`node scripts/sync-build-spec.mjs` only checks) and update its section 20 (Android) text.
+  Its Part II embeds EVERY file of the project (that is what lets an agent rebuild everything from this one file): after ANY change `git add` new files, run `node scripts/build-spec.mjs`, and commit the result (`--check` only verifies). Keep the prose (Part I, appendices) true too.
 
 ## Layout
 - `src/main`: Electron main. `services/` (library, scanner, provider = YouTube/Spotify/yt-dlp, downloads,
@@ -20,8 +20,8 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/renderer/src`: React UI. `store/player.ts` is the playback engine (audio element, fallbacks, queue).
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
-  four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `ANDROID_PLAN.md` first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.1); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in `ANDROID_PLAN.md`.
+  four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.1); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -78,5 +78,5 @@ first** for what was changed recently, what is verified, and what is still open.
 - Dev mode edits the real library (`%APPDATA%\Oli\library.sqlite`). Back it up before tests that write.
 - The database lives in memory and is flushed on quit: **stop the app before editing the file**.
 - Playing songs in tests records history and play counts, and `usePlayer.stop()` clears the saved queue.
-  Clean up afterwards (see `HANDOFF.md`) and never remove entries you cannot prove are yours: the user
+  Clean up afterwards (see Appendix A (Handoff)) and never remove entries you cannot prove are yours: the user
   often uses the app at the same time.

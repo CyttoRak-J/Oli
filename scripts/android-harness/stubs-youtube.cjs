@@ -2,7 +2,7 @@
 // Stand-in for the OliYouTube plugin in the PC test window. yt-dlp itself is not run: search, playlist and video
 // descriptions are answered with REAL yt-dlp output saved in test/fixtures/yt (stream addresses are replaced by a local
 // song so the player has something to play), and downloads copy a local FLAC into the app folder with progress events.
-// The Java side and yt-dlp on the phone are NOT exercised here (see HANDOFF.md).
+// The Java side and yt-dlp on the phone are NOT exercised here (see Appendix A (Handoff)).
 const fs = require('fs')
 const path = require('path')
 const os = require('os')

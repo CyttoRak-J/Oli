@@ -42,4 +42,4 @@ Screenshots go to `$env:SHOTS` (or this folder). Each suite needs a FRESH profil
 - A hidden Electron window does not run `requestAnimationFrame`; the drivers call `Page.bringToFront` when they need drawing.
 - The window is started with switches that stop Windows from treating it as hidden when another window covers it (a hidden page does not scroll or draw, which broke the big-list suite once).
 - `window.__fakeNative.fail()` / `.sticky` imitate a player that went idle after a phone call (play and seek then do nothing until the source is loaded again).
-- Results: phase 1b 20/20, 1c 19/19 + 3/3, folders 17/17, 2 23/23, 3 27/27, 5 8/8 (see `HANDOFF.md`).
+- Results: phase 1b 20/20, 1c 19/19 + 3/3, folders 17/17, 2 23/23, 3 27/27, 5 8/8 (see Appendix A (Handoff)).
