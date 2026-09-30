@@ -77,6 +77,8 @@ public class OliYouTubePlugin extends Plugin {
     call.resolve();
   }
   private static boolean ready = false;
+  /** Why ffmpeg last failed (shown by Settings > Test video access). */
+  private static volatile String lastFfmpegNote = "";
 
   private final Map<String, DownloadTask> tasks = new ConcurrentHashMap<>();
   private final Map<String, DownloadTask> known = new ConcurrentHashMap<>();
@@ -94,6 +96,12 @@ public class OliYouTubePlugin extends Plugin {
   private static synchronized void ensureInit(Context ctx) throws Exception {
     if (ready) return;
     YoutubeDL.INSTANCE.init(ctx);
+    try {
+      // unpacks the ffmpeg libraries next to the phone's ffmpeg program; without this ffmpeg cannot start
+      com.yausername.ffmpeg.FFmpeg.INSTANCE.init(ctx);
+    } catch (Throwable e) {
+      lastFfmpegNote = "ffmpeg setup: " + e.getMessage();
+    }
     ready = true;
   }
 
@@ -603,9 +611,11 @@ public class OliYouTubePlugin extends Plugin {
       try {
         ffmpegRun("-version");
         out.append("\nffmpeg runs\n");
+        if (!lastFfmpegNote.isEmpty()) out.append("last ffmpeg problem: ").append(lastFfmpegNote.length() > 260 ? lastFfmpegNote.substring(0, 260) : lastFfmpegNote).append("\n");
       } catch (Exception e) {
         String m = String.valueOf(e.getMessage());
         out.append("\nffmpeg does not run: ").append(m.length() > 260 ? m.substring(0, 260) : m).append("\n");
+        if (!lastFfmpegNote.isEmpty()) out.append("last ffmpeg problem: ").append(lastFfmpegNote.length() > 260 ? lastFfmpegNote.substring(0, 260) : lastFfmpegNote).append("\n");
       }
       for (String c : new String[] {"visionos", "default", "vr"}) {
         out.append("\n[").append(c).append("] ");
@@ -1038,6 +1048,7 @@ public class OliYouTubePlugin extends Plugin {
           a.delete();
           return out;
         } catch (Exception e) {
+          lastFfmpegNote = "join: " + e.getMessage();
           // no ffmpeg: fall back to one file that already has sound (lower quality) rather than a silent picture
           //noinspection ResultOfMethodCallIgnored
           out.delete();
@@ -1062,6 +1073,17 @@ public class OliYouTubePlugin extends Plugin {
     File audio = stageFile(t, "");
     if (audio == null) throw new Exception("yt-dlp finished but the file was not found");
     File cover = coverFile(t);
+    if (cover != null && "webp".equals(extOf(cover))) {
+      File jpg = new File(cover.getParentFile(), new File(root(), t.relBase).getName() + ".jpg");
+      try {
+        ffmpegRun("-y", "-i", cover.getAbsolutePath(), jpg.getAbsolutePath());
+        //noinspection ResultOfMethodCallIgnored
+        cover.delete();
+        cover = jpg;
+      } catch (Exception e) {
+        lastFfmpegNote = "cover: " + e.getMessage();
+      }
+    }
     if (t.level == 0) {
       String ext = extOf(audio);
       boolean mp4 = "m4a".equals(ext) || "mp4".equals(ext);
@@ -1087,6 +1109,7 @@ public class OliYouTubePlugin extends Plugin {
         }
         return tmp;
       } catch (Exception e) {
+        lastFfmpegNote = "tags: " + e.getMessage();
         //noinspection ResultOfMethodCallIgnored
         tmp.delete();
         // the plain song is still a complete file; the cover stays next to it as a picture

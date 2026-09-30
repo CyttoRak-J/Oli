@@ -4,7 +4,11 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.13: joined video + sound, covers, titles, the video player
+### What is new in 0.9.14: ffmpeg starts
+- **Oli now unpacks the phone's ffmpeg** (the library only does that when asked, so ffmpeg could never start). Video + sound are joined into one file, and song covers and tags are embedded; a `.webp` cover is converted to `.jpg` first.
+- Test video access shows ffmpeg's last problem, if any.
+
+### Already in 0.9.13: joined video + sound, covers, titles, the video player
 - **Video downloads now have sound**: Oli downloads picture and sound and joins them with the phone's ffmpeg itself (if ffmpeg cannot run it falls back to a lower-quality file that already has sound, never a silent picture).
 - **Song downloads embed the cover and tags** (title, artist, album) with the same ffmpeg.
 - **File names**: videos are named after the video title (before: "YouTube video [id]"); no more [id] in names.

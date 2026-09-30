@@ -128,7 +128,7 @@ The 319 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `CLAUDE.md`  (8 KB)
 - `LICENSE`  (1 KB)
 - `README.md`  (7 KB)
-- `.github/android-release-notes.md`  (15 KB)
+- `.github/android-release-notes.md`  (16 KB)
 - `.github/release-notes.md`  (3 KB)
 - `.github/workflows/android.yml`  (5 KB)
 - `.github/workflows/attach-android.yml`  (1 KB)
@@ -383,7 +383,7 @@ The 319 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadPlugin.java`  (8 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadService.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliMediaPlugin.java`  (20 KB)
-- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (48 KB)
+- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (49 KB)
 - `android/app/src/main/java/com/cyttos/oli/SourceProbe.java`  (5 KB)
 - `android/app/src/main/java/com/cyttos/oli/TagFields.java`  (1 KB)
 - `android/app/src/main/java/com/cyttos/oli/YtChunkedDataSource.java`  (3 KB)
@@ -927,7 +927,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.13); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.14); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -1066,7 +1066,7 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.13, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.14, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
@@ -1144,7 +1144,11 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.13: joined video + sound, covers, titles, the video player
+### What is new in 0.9.14: ffmpeg starts
+- **Oli now unpacks the phone's ffmpeg** (the library only does that when asked, so ffmpeg could never start). Video + sound are joined into one file, and song covers and tags are embedded; a `.webp` cover is converted to `.jpg` first.
+- Test video access shows ffmpeg's last problem, if any.
+
+### Already in 0.9.13: joined video + sound, covers, titles, the video player
 - **Video downloads now have sound**: Oli downloads picture and sound and joins them with the phone's ffmpeg itself (if ffmpeg cannot run it falls back to a lower-quality file that already has sound, never a silent picture).
 - **Song downloads embed the cover and tags** (title, artist, album) with the same ffmpeg.
 - **File names**: videos are named after the video title (before: "YouTube video [id]"); no more [id] in names.
@@ -42833,8 +42837,8 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 22
-        versionName "0.9.13"
+        versionCode 23
+        versionName "0.9.14"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a"
@@ -46637,6 +46641,8 @@ public class OliYouTubePlugin extends Plugin {
     call.resolve();
   }
   private static boolean ready = false;
+  /** Why ffmpeg last failed (shown by Settings > Test video access). */
+  private static volatile String lastFfmpegNote = "";
 
   private final Map<String, DownloadTask> tasks = new ConcurrentHashMap<>();
   private final Map<String, DownloadTask> known = new ConcurrentHashMap<>();
@@ -46654,6 +46660,12 @@ public class OliYouTubePlugin extends Plugin {
   private static synchronized void ensureInit(Context ctx) throws Exception {
     if (ready) return;
     YoutubeDL.INSTANCE.init(ctx);
+    try {
+      // unpacks the ffmpeg libraries next to the phone's ffmpeg program; without this ffmpeg cannot start
+      com.yausername.ffmpeg.FFmpeg.INSTANCE.init(ctx);
+    } catch (Throwable e) {
+      lastFfmpegNote = "ffmpeg setup: " + e.getMessage();
+    }
     ready = true;
   }
 
@@ -47163,9 +47175,11 @@ public class OliYouTubePlugin extends Plugin {
       try {
         ffmpegRun("-version");
         out.append("\nffmpeg runs\n");
+        if (!lastFfmpegNote.isEmpty()) out.append("last ffmpeg problem: ").append(lastFfmpegNote.length() > 260 ? lastFfmpegNote.substring(0, 260) : lastFfmpegNote).append("\n");
       } catch (Exception e) {
         String m = String.valueOf(e.getMessage());
         out.append("\nffmpeg does not run: ").append(m.length() > 260 ? m.substring(0, 260) : m).append("\n");
+        if (!lastFfmpegNote.isEmpty()) out.append("last ffmpeg problem: ").append(lastFfmpegNote.length() > 260 ? lastFfmpegNote.substring(0, 260) : lastFfmpegNote).append("\n");
       }
       for (String c : new String[] {"visionos", "default", "vr"}) {
         out.append("\n[").append(c).append("] ");
@@ -47598,6 +47612,7 @@ public class OliYouTubePlugin extends Plugin {
           a.delete();
           return out;
         } catch (Exception e) {
+          lastFfmpegNote = "join: " + e.getMessage();
           // no ffmpeg: fall back to one file that already has sound (lower quality) rather than a silent picture
           //noinspection ResultOfMethodCallIgnored
           out.delete();
@@ -47622,6 +47637,17 @@ public class OliYouTubePlugin extends Plugin {
     File audio = stageFile(t, "");
     if (audio == null) throw new Exception("yt-dlp finished but the file was not found");
     File cover = coverFile(t);
+    if (cover != null && "webp".equals(extOf(cover))) {
+      File jpg = new File(cover.getParentFile(), new File(root(), t.relBase).getName() + ".jpg");
+      try {
+        ffmpegRun("-y", "-i", cover.getAbsolutePath(), jpg.getAbsolutePath());
+        //noinspection ResultOfMethodCallIgnored
+        cover.delete();
+        cover = jpg;
+      } catch (Exception e) {
+        lastFfmpegNote = "cover: " + e.getMessage();
+      }
+    }
     if (t.level == 0) {
       String ext = extOf(audio);
       boolean mp4 = "m4a".equals(ext) || "mp4".equals(ext);
@@ -47647,6 +47673,7 @@ public class OliYouTubePlugin extends Plugin {
         }
         return tmp;
       } catch (Exception e) {
+        lastFfmpegNote = "tags: " + e.getMessage();
         //noinspection ResultOfMethodCallIgnored
         tmp.delete();
         // the plain song is still a complete file; the cover stays next to it as a picture
