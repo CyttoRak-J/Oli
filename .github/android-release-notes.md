@@ -4,7 +4,10 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.10: more detail in Test video access
+### What is new in 0.9.11: the real cause of the video / seek / download failures
+- **The phone was running a 9-month-old yt-dlp (2025.11.12)**; its update button did not really update it, and YouTube serves that old release only the first few MB of a file (videos would not play, downloads stopped at ~20%, seeking went back to 0:00). Oli now downloads the **official newest yt-dlp** from GitHub itself (SHA-256 checked) on first start and when you press update, and shows its real version in Settings > YouTube engine.
+
+### Already in 0.9.10: more detail in Test video access
 - Test video access now also prints what yt-dlp itself reports (its real version, the YouTube client it used, warnings).
 
 ### Already in 0.9.9: seeking and song downloads

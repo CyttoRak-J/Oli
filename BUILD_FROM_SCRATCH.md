@@ -381,7 +381,7 @@ The 317 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadPlugin.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadService.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliMediaPlugin.java`  (20 KB)
-- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (36 KB)
+- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (41 KB)
 - `android/app/src/main/java/com/cyttos/oli/SourceProbe.java`  (5 KB)
 - `android/app/src/main/java/com/cyttos/oli/TagFields.java`  (1 KB)
 - `android/app/src/main/java/com/cyttos/oli/YtChunkedDataSource.java`  (3 KB)
@@ -925,7 +925,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.10); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.11); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -1064,7 +1064,7 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.10, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.11, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
@@ -1142,7 +1142,10 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.10: more detail in Test video access
+### What is new in 0.9.11: the real cause of the video / seek / download failures
+- **The phone was running a 9-month-old yt-dlp (2025.11.12)**; its update button did not really update it, and YouTube serves that old release only the first few MB of a file (videos would not play, downloads stopped at ~20%, seeking went back to 0:00). Oli now downloads the **official newest yt-dlp** from GitHub itself (SHA-256 checked) on first start and when you press update, and shows its real version in Settings > YouTube engine.
+
+### Already in 0.9.10: more detail in Test video access
 - Test video access now also prints what yt-dlp itself reports (its real version, the YouTube client it used, warnings).
 
 ### Already in 0.9.9: seeking and song downloads
@@ -42715,8 +42718,8 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 19
-        versionName "0.9.10"
+        versionCode 20
+        versionName "0.9.11"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a"
@@ -46436,6 +46439,118 @@ public class OliYouTubePlugin extends Plugin {
   // ---------------------------------------------------------------------------------------------------------------
   // Engine
 
+  // ---------------------------------------------------------------------------------------------------------------
+  // The yt-dlp copy. The library's own updater left the phone on a 9-month-old release (YouTube then serves only the first
+  // few MB of a video), so Oli installs the official newest release itself: downloaded from GitHub, SHA-256 checked, and put
+  // where the library runs yt-dlp from.
+
+  private static final Object INSTALL_LOCK = new Object();
+
+  private static File ytdlpBinary(Context ctx) {
+    return new File(new File(new File(ctx.getNoBackupFilesDir(), "youtubedl-android"), "yt-dlp"), "yt-dlp");
+  }
+
+  private static File markerOf(File bin) {
+    return new File(bin.getParentFile(), "oli-version.txt");
+  }
+
+  /** The release tag Oli installed, when the file on disk is still that one (the library may put its own copy back after an app update). */
+  private static String installedTag(File bin) {
+    try {
+      File m = markerOf(bin);
+      if (!m.isFile() || !bin.isFile()) return null;
+      String[] parts = new String(java.nio.file.Files.readAllBytes(m.toPath()), "UTF-8").trim().split("\\n");
+      if (parts.length < 2) return null;
+      return Long.parseLong(parts[1].trim()) == bin.length() ? parts[0].trim() : null;
+    } catch (Throwable e) {
+      return null;
+    }
+  }
+
+  private static String httpText(String url) throws Exception {
+    HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+    try {
+      c.setConnectTimeout(20000);
+      c.setReadTimeout(30000);
+      c.setRequestProperty("User-Agent", "Oli-Android");
+      c.setRequestProperty("Accept", "application/vnd.github+json");
+      if (c.getResponseCode() != 200) throw new Exception("GitHub answered HTTP " + c.getResponseCode());
+      java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+      try (java.io.InputStream in = c.getInputStream()) {
+        byte[] buf = new byte[16384];
+        int n;
+        while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+      }
+      return bo.toString("UTF-8");
+    } finally {
+      c.disconnect();
+    }
+  }
+
+  /** Installs the newest official yt-dlp; returns its release tag. Throws with a readable reason. */
+  private static String installLatest(Context ctx) throws Exception {
+    synchronized (INSTALL_LOCK) {
+      File bin = ytdlpBinary(ctx);
+      if (!bin.getParentFile().isDirectory()) throw new Exception("the yt-dlp folder is missing");
+      JSONObject rel = new JSONObject(httpText("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"));
+      String tag = rel.getString("tag_name");
+      if (tag.equals(installedTag(bin))) return tag;
+      JSONArray assets = rel.getJSONArray("assets");
+      String url = null;
+      String digest = "";
+      String sumsUrl = null;
+      for (int i = 0; i < assets.length(); i++) {
+        JSONObject a = assets.getJSONObject(i);
+        if ("yt-dlp".equals(a.optString("name"))) {
+          url = a.optString("browser_download_url");
+          digest = a.optString("digest", "");
+        } else if ("SHA2-256SUMS".equals(a.optString("name"))) {
+          sumsUrl = a.optString("browser_download_url");
+        }
+      }
+      if (url == null || url.isEmpty()) throw new Exception("release " + tag + " has no yt-dlp file");
+      String want = digest.startsWith("sha256:") ? digest.substring(7).toLowerCase(java.util.Locale.ROOT) : "";
+      if (want.isEmpty() && sumsUrl != null) {
+        for (String line : httpText(sumsUrl).split("\\n")) {
+          String[] f = line.trim().split("\\s+");
+          if (f.length == 2 && (f[1].equals("yt-dlp") || f[1].equals("*yt-dlp"))) want = f[0].toLowerCase(java.util.Locale.ROOT);
+        }
+      }
+      if (want.isEmpty()) throw new Exception("no checksum published for " + tag);
+      File tmp = new File(bin.getParentFile(), "yt-dlp.new");
+      java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+      HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+      try {
+        c.setConnectTimeout(20000);
+        c.setReadTimeout(30000);
+        c.setRequestProperty("User-Agent", "Oli-Android");
+        if (c.getResponseCode() != 200) throw new Exception("download answered HTTP " + c.getResponseCode());
+        try (java.io.InputStream in = c.getInputStream(); java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
+          byte[] buf = new byte[65536];
+          int n;
+          while ((n = in.read(buf)) > 0) {
+            md.update(buf, 0, n);
+            out.write(buf, 0, n);
+          }
+        }
+      } finally {
+        c.disconnect();
+      }
+      StringBuilder hex = new StringBuilder();
+      for (byte b : md.digest()) hex.append(String.format("%02x", b));
+      if (!hex.toString().equals(want) || tmp.length() < 500_000L) {
+        //noinspection ResultOfMethodCallIgnored
+        tmp.delete();
+        throw new Exception("the downloaded yt-dlp did not match its checksum");
+      }
+      //noinspection ResultOfMethodCallIgnored
+      bin.delete();
+      if (!tmp.renameTo(bin)) throw new Exception("could not put yt-dlp in place");
+      java.nio.file.Files.write(markerOf(bin).toPath(), (tag + "\n" + bin.length() + "\n").getBytes("UTF-8"));
+      return tag;
+    }
+  }
+
   /** Starts the engine (the first start unpacks Python, a few seconds) and reports its version. */
   @PluginMethod
   public void status(PluginCall call) {
@@ -46445,7 +46560,15 @@ public class OliYouTubePlugin extends Plugin {
       try {
         ensureInit(ctx);
         o.put("ready", true);
-        String v = YoutubeDL.INSTANCE.version(ctx);
+        String tagNow = installedTag(ytdlpBinary(ctx));
+        if (tagNow == null) {
+          try {
+            tagNow = installLatest(ctx);
+          } catch (Exception e) {
+            o.put("installError", String.valueOf(e.getMessage()));
+          }
+        }
+        String v = tagNow != null ? tagNow : YoutubeDL.INSTANCE.version(ctx);
         o.put("version", v == null ? "" : v);
         String vn = YoutubeDL.INSTANCE.versionName(ctx);
         o.put("versionName", vn == null ? "" : vn);
@@ -46466,11 +46589,11 @@ public class OliYouTubePlugin extends Plugin {
       JSObject o = new JSObject();
       try {
         ensureInit(ctx);
-        YoutubeDL.UpdateChannel ch = "nightly".equals(channel) ? YoutubeDL.UpdateChannel._NIGHTLY : YoutubeDL.UpdateChannel._STABLE;
-        YoutubeDL.UpdateStatus st = YoutubeDL.INSTANCE.updateYoutubeDL(ctx, ch);
-        o.put("status", st == null ? "UNKNOWN" : st.name());
-        String v = YoutubeDL.INSTANCE.version(ctx);
-        o.put("version", v == null ? "" : v);
+        // Oli installs the official release itself (the library's updater kept the phone on a 9-month-old one)
+        String before = installedTag(ytdlpBinary(ctx));
+        String tag = installLatest(ctx);
+        o.put("status", tag.equals(before) ? "ALREADY_UP_TO_DATE" : "DONE");
+        o.put("version", tag);
         call.resolve(o);
       } catch (Exception e) {
         call.reject(String.valueOf(e.getMessage()));
