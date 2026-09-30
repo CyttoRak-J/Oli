@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useRangeCommit } from '../lib/useRangeCommit'
+import { useNativeOutput } from '../lib/useNativeOutput'
 import { Info, Play, Pause, SkipBack, SkipForward, Disc3, ListMusic, Radio, Shuffle, Repeat, Repeat1, History, Mic2 } from 'lucide-react'
 import { usePlayer } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -44,6 +45,7 @@ export function NowPlaying(): React.JSX.Element {
   const phone = isMobileShell()
   const openInfo = useTrackInfo()
   const [previewTime, setPreviewTime] = useState<number | null>(null)
+  const { info: nativeInfo, native } = useNativeOutput()
   const sliderRef = useRangeCommit((v) => {
     player.seek(v)
     setPreviewTime(null)
@@ -140,6 +142,10 @@ export function NowPlaying(): React.JSX.Element {
           <span>{formatDuration(sliderValue)}</span>
           <span>{duration > 0 ? formatDuration(duration) : '—'}</span>
         </div>
+        {native && nativeInfo?.seekNote && (
+          // Temporary while seeking is being fixed on the phone: what the native player did with the last seek.
+          <div className="mt-1 break-words text-[10px] leading-tight text-ink-3">Last seek: {nativeInfo.seekNote}</div>
+        )}
       </div>
 
       <div className="flex items-center justify-center gap-6">

@@ -88,6 +88,7 @@ final class OliAudioEngine {
   private String lastSinkError = "";
   /** For the Audio output screen: what the last seek asked for and where it landed. */
   private String seekNote = "";
+  private String seekError = "";
 
   private final Runnable ticker = new Runnable() {
     @Override
@@ -161,6 +162,7 @@ final class OliAudioEngine {
 
       @Override
       public void onPlayerError(PlaybackException error) {
+        seekError = error.getErrorCodeName();
         JSObject o = base();
         o.put("code", mediaErrorCode(error));
         o.put("codeName", error.getErrorCodeName());
@@ -374,6 +376,13 @@ final class OliAudioEngine {
     seekNote = "asked " + (positionMs / 1000.0) + " s, seekable=" + player.isCurrentMediaItemSeekable()
         + ", state=" + stateName(player.getPlaybackState());
     player.seekTo(Math.max(0, positionMs));
+    final String asked = seekNote;
+    main.postDelayed(() -> {
+      if (released || !seekNote.startsWith(asked)) return;
+      seekNote = seekNote + " | 1.5 s later: at " + (player.getCurrentPosition() / 1000.0) + " s, " + stateName(player.getPlaybackState())
+          + (seekError.isEmpty() ? "" : ", error " + seekError);
+      emitOutputChanged();
+    }, 1500);
   }
 
   void setVolume(float volume) {
