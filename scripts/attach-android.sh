@@ -2,10 +2,10 @@
 # Puts an Android APK (and its checksum file) on a DESKTOP release page, so one page has every download:
 #   Windows installer, macOS disk images and the Android app.
 #
-#   scripts/attach-android.sh <desktop tag | latest> <android tag>
+#   scripts/attach-android.sh <desktop tag | latest> <android tag>   (the APK comes from the one "android-alpha" release)
 #   e.g.  scripts/attach-android.sh v1.1.1 android-v0.9.1
 #
-# The files are copied byte for byte from the Android pre-release (the checksum is verified first), so the APK on the
+# The files are copied byte for byte from the alpha pre-release (the checksum is verified first), so the APK on the
 # desktop page is the same file that was signed and checked when it was built. Needs the GitHub CLI (`gh`) and a token in
 # GH_TOKEN, as on a GitHub Actions runner. Older Android files on that page are replaced.
 set -euo pipefail
@@ -21,13 +21,14 @@ fi
 echo "Attaching $AND to $DESK"
 
 work=$(mktemp -d)
-gh release download "$AND" --dir "$work" --pattern 'Oli-*-android.apk' --pattern 'SHA256SUMS-android.txt'
-(cd "$work" && sha256sum -c SHA256SUMS-android.txt)
-apk=$(basename "$work"/Oli-*-android.apk)
 version="${AND#android-v}"
+gh release download android-alpha --dir "$work" --pattern "Oli-${version}-android.apk" --pattern "Oli-${version}-android.apk.sha256"
+(cd "$work" && sha256sum -c "Oli-${version}-android.apk.sha256")
+apk="Oli-${version}-android.apk"
+cp "$work/$apk.sha256" "$work/SHA256SUMS-android.txt"
 
 # replace the Android files of an earlier version
-for name in $(gh release view "$DESK" --json assets --jq '.assets[].name' | grep -E '^Oli-.*-android\.apk$|^SHA256SUMS-android\.txt$' || true); do
+for name in $(gh release view "$DESK" --json assets --jq '.assets[].name' | grep -E '^Oli-.*-android\.apk$|^SHA256SUMS-android\.txt$|^Oli-.*-android\.apk\.sha256$' || true); do
   gh release delete-asset "$DESK" "$name" --yes
 done
 gh release upload "$DESK" "$work/$apk" "$work/SHA256SUMS-android.txt"
@@ -37,7 +38,7 @@ body=$(gh release view "$DESK" --json body --jq '.body' | sed "/$MARK/,\$d")
 note="$MARK
 ## Android (alpha)
 
-**\`$apk\`** is attached below: the Oli app for Android phones, version $version (\`SHA256SUMS-android.txt\` has its checksum). Open it on your phone and allow *Install unknown apps* when Android asks. It is a test build signed with a public alpha key; its own notes and older versions are on the [\`$AND\` pre-release](https://github.com/${GITHUB_REPOSITORY:-CyttoRak-J/Oli}/releases/tag/$AND)."
+**\`$apk\`** is attached below: the Oli app for Android phones, version $version (\`SHA256SUMS-android.txt\` has its checksum). Open it on your phone and allow *Install unknown apps* when Android asks. It is a test build signed with a public alpha key; every alpha version and its notes are on the [alpha release](https://github.com/${GITHUB_REPOSITORY:-CyttoRak-J/Oli}/releases/tag/android-alpha)."
 gh release edit "$DESK" --notes "$body
 
 $note"

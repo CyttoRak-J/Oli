@@ -125,7 +125,7 @@ The 319 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `electron-builder.yml`  (1 KB)
 - `capacitor.config.ts`  (0 KB)
 - `vite.android.config.ts`  (3 KB)
-- `CLAUDE.md`  (8 KB)
+- `CLAUDE.md`  (9 KB)
 - `LICENSE`  (1 KB)
 - `README.md`  (7 KB)
 - `.github/android-release-notes.md`  (16 KB)
@@ -980,6 +980,9 @@ first** for what was changed recently, what is verified, and what is still open.
 - minSdk is 24: no `java.nio.file` (Android 8); tag writers replace files with `File.renameTo`.
 - yt-dlp `--parse-metadata` values: `%` doubled, `:` escaped, backslashes not doubled (`YtDlpOutput.metadataLiteral`).
 
+- **YouTube on the phone (0.9.2 to 0.9.14; full story in BUILD_FROM_SCRATCH.md Appendix D)**: the phone runs its OWN yt-dlp, installed by Oli from the official GitHub release (never trust the library's updater); ffmpeg must be started with `FFmpeg.INSTANCE.init` and is run by Oli itself (yt-dlp only downloads); test a YouTube client with a real request before using it; the video page is the PC's shared page shown in an iframe (phone CSP allows inline script); ask the owner for Settings > Test video access before guessing.
+- Releases: ONE alpha pre-release `android-alpha` holds every APK (`android-vX.Y.Z` tag adds a version), ONE latest desktop release carries Windows + macOS + the newest APK (`attach-` tag). Check `versionName` really changed after bumping.
+
 ## Data safety
 - Dev mode edits the real library (`%APPDATA%\Oli\library.sqlite`). Back it up before tests that write.
 - The database lives in memory and is flushed on quit: **stop the app before editing the file**.
@@ -1320,7 +1323,7 @@ formats (Opus, WavPack, APE) for playback, need `ffmpeg` on your PC.
 ```yaml
 name: android
 
-# Builds the Android app (an installable APK) and, for an `android-v*` tag, publishes it as a GitHub pre-release.
+# Builds the Android app (an installable APK) and, for an `android-v*` tag, adds it to the one "android-alpha" pre-release (every alpha version lives there).
 # The APK is signed with the ALPHA key in android/keystore (public on purpose, for testing only).
 # Before a real release: put your own keystore in GitHub secrets and change signingConfigs in android/app/build.gradle.
 on:
@@ -1407,7 +1410,7 @@ jobs:
           fi
           mkdir -p out-apk
           cp android/app/build/outputs/apk/release/*.apk "out-apk/Oli-${VERSION}-android.apk"
-          (cd out-apk && sha256sum *.apk | tee SHA256SUMS-android.txt)
+          (cd out-apk && sha256sum *.apk | tee "Oli-${VERSION}-android.apk.sha256")
           ls -la out-apk
 
       - name: Upload the APK
@@ -1432,18 +1435,18 @@ jobs:
           name: oli-android
           path: artifacts
 
-      - name: Create or update the release
+      # ONE pre-release ("android-alpha") holds every alpha version: each android-vX.Y.Z tag adds its APK to it.
+      - name: Add the APK to the alpha release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
-          # Re-running a tag replaces the release (and its old files); the tag itself stays.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release delete "$TAG" --yes
+          if ! gh release view android-alpha >/dev/null 2>&1; then
+            gh release create android-alpha --prerelease --title "Oli for Android: all alpha builds" \
+              --notes-file .github/android-release-notes.md
           fi
-          gh release create "$TAG" artifacts/* \
-            --prerelease \
-            --title "Oli Android ${TAG#android-v} (alpha)" \
+          # --clobber: re-running a tag replaces that version's files only
+          gh release upload android-alpha artifacts/* --clobber
+          gh release edit android-alpha --prerelease --title "Oli for Android: all alpha builds" \
             --notes-file .github/android-release-notes.md
 
       # The same APK also goes on the newest desktop release page (Windows + macOS + Android on one page).
@@ -1613,7 +1616,7 @@ jobs:
               --notes-file .github/release-notes.md
           fi
 
-      # One page with every download: the newest Android APK (from the android-v* pre-releases) goes on this page too.
+      # One page with every download: the newest Android APK (from the one android-alpha pre-release) goes on this page too.
       # Best effort: a problem here never stops the desktop release.
       - name: Attach the newest Android APK
         continue-on-error: true
@@ -1622,8 +1625,8 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          AND=$(gh release list --limit 50 --json tagName --jq '[.[] | select(.tagName | test("^android-v[0-9]"))][0].tagName')
-          if [ -n "$AND" ]; then bash scripts/attach-android.sh "$TAG" "$AND"; else echo "no Android release yet"; fi
+          V=$(gh release view android-alpha --json assets --jq '.assets[].name' 2>/dev/null | grep -oP '^Oli-\K[0-9.]+(?=-android\.apk$)' | sort -V | tail -1)
+          if [ -n "$V" ]; then bash scripts/attach-android.sh "$TAG" "android-v$V"; else echo "no Android release yet"; fi
 ```
 
 #### FILE: .claude/agents/oli-release.md
@@ -4046,10 +4049,10 @@ public class YtCli {
 # Puts an Android APK (and its checksum file) on a DESKTOP release page, so one page has every download:
 #   Windows installer, macOS disk images and the Android app.
 #
-#   scripts/attach-android.sh <desktop tag | latest> <android tag>
+#   scripts/attach-android.sh <desktop tag | latest> <android tag>   (the APK comes from the one "android-alpha" release)
 #   e.g.  scripts/attach-android.sh v1.1.1 android-v0.9.1
 #
-# The files are copied byte for byte from the Android pre-release (the checksum is verified first), so the APK on the
+# The files are copied byte for byte from the alpha pre-release (the checksum is verified first), so the APK on the
 # desktop page is the same file that was signed and checked when it was built. Needs the GitHub CLI (`gh`) and a token in
 # GH_TOKEN, as on a GitHub Actions runner. Older Android files on that page are replaced.
 set -euo pipefail
@@ -4065,13 +4068,14 @@ fi
 echo "Attaching $AND to $DESK"
 
 work=$(mktemp -d)
-gh release download "$AND" --dir "$work" --pattern 'Oli-*-android.apk' --pattern 'SHA256SUMS-android.txt'
-(cd "$work" && sha256sum -c SHA256SUMS-android.txt)
-apk=$(basename "$work"/Oli-*-android.apk)
 version="${AND#android-v}"
+gh release download android-alpha --dir "$work" --pattern "Oli-${version}-android.apk" --pattern "Oli-${version}-android.apk.sha256"
+(cd "$work" && sha256sum -c "Oli-${version}-android.apk.sha256")
+apk="Oli-${version}-android.apk"
+cp "$work/$apk.sha256" "$work/SHA256SUMS-android.txt"
 
 # replace the Android files of an earlier version
-for name in $(gh release view "$DESK" --json assets --jq '.assets[].name' | grep -E '^Oli-.*-android\.apk$|^SHA256SUMS-android\.txt$' || true); do
+for name in $(gh release view "$DESK" --json assets --jq '.assets[].name' | grep -E '^Oli-.*-android\.apk$|^SHA256SUMS-android\.txt$|^Oli-.*-android\.apk\.sha256$' || true); do
   gh release delete-asset "$DESK" "$name" --yes
 done
 gh release upload "$DESK" "$work/$apk" "$work/SHA256SUMS-android.txt"
@@ -4081,7 +4085,7 @@ body=$(gh release view "$DESK" --json body --jq '.body' | sed "/$MARK/,\$d")
 note="$MARK
 ## Android (alpha)
 
-**\`$apk\`** is attached below: the Oli app for Android phones, version $version (\`SHA256SUMS-android.txt\` has its checksum). Open it on your phone and allow *Install unknown apps* when Android asks. It is a test build signed with a public alpha key; its own notes and older versions are on the [\`$AND\` pre-release](https://github.com/${GITHUB_REPOSITORY:-CyttoRak-J/Oli}/releases/tag/$AND)."
+**\`$apk\`** is attached below: the Oli app for Android phones, version $version (\`SHA256SUMS-android.txt\` has its checksum). Open it on your phone and allow *Install unknown apps* when Android asks. It is a test build signed with a public alpha key; every alpha version and its notes are on the [alpha release](https://github.com/${GITHUB_REPOSITORY:-CyttoRak-J/Oli}/releases/tag/android-alpha)."
 gh release edit "$DESK" --notes "$body
 
 $note"
@@ -50738,6 +50742,45 @@ ext {
 # PART III: project state, Android plan and prompts (appendices)
 
 These were separate documents (Appendix A (Handoff), Appendix B (Android plan), Appendix C (Android phases), Appendix D (Prompts)); they are now one place. "Appendix A/B/C/D" below means these sections.
+
+## Appendix D: Android 0.9.2 to 0.9.14: the YouTube / download / video saga (READ THIS FIRST, it saves days)
+
+Between 2026-09-30 and 2026-10-01 the owner tested the phone app on a real phone (mobile data only, no Wi-Fi) and reported: online songs jump back to 0:00
+when seeked; videos do not play; video and song downloads fail ("HTTP Error 403"); downloaded videos are silent; covers are missing; files have bad names;
+they wanted a download-folder setting. Thirteen builds later all of it works. The causes below were found IN THIS ORDER, one hidden behind the next:
+
+| # | Symptom | REAL cause | Fix (where) |
+|---|---|---|---|
+| 1 | 403 after the first few MB, seek back to 0:00, video never plays, download stops at ~20% | **The phone ran yt-dlp 2025.11.12** (the copy inside the youtubedl-android library; its "update" never updated it; `YoutubeDL.version()` returned null). YouTube serves that old release only the first ~6 MB of a file; every client (default, vr, visionos) looked identical because the old release ignores `player_client=visionos`. The PC (2026.08.19) was fine. | `OliYouTubePlugin.installLatest`: downloads the official `yt-dlp` zip from the GitHub release API, checks its SHA-256 (API `digest` or `SHA2-256SUMS`), writes it over the library's copy (`noBackupFilesDir/youtubedl-android/yt-dlp/yt-dlp`) and a marker `oli-version.txt` (tag + file length; a mismatch means the library put its own copy back, so it reinstalls). Runs in `status()` and `updateEngine`. Settings shows the real version. |
+| 2 | "ffmpeg not found" on downloads, silent videos (picture and sound left as two files), covers left as separate .webp | **ffmpeg never started**: the library unpacks its ffmpeg libraries only when `com.yausername.ffmpeg.FFmpeg.INSTANCE.init(ctx)` is called, and Oli only called `YoutubeDL.INSTANCE.init`. Also the new yt-dlp refuses the library's `libffmpeg.so` file name. | `ensureInit` now calls `FFmpeg.INSTANCE.init`. yt-dlp only DOWNLOADS (`--fixup never`, stages "v" video, "a" audio, "m" muxed fallback; `downloadAll`/`ytStage`); Oli runs `libffmpeg.so` itself (`ffmpegRun`, LD_LIBRARY_PATH = packages/python, packages/ffmpeg, nativeLibraryDir) to join picture + sound and to embed cover + title/artist/album into the .m4a. No ffmpeg -> falls back to a lower-quality file that already has sound, never a silent picture. |
+| 3 | "Watch video" page shows controls but nothing plays (empty quality list, "-") | The phone app's Content-Security-Policy (`script-src 'self'`) blocked the inline script of the video page shown in an `<iframe srcdoc>`. | `vite.android.config.ts` (`webCsp`) adds `'unsafe-inline'` to script-src for the PHONE build only; desktop keeps the strict policy. |
+| 4 | Android Settings said "Oli 0.9.2" for many releases | `versionName` in `android/app/build.gradle` was never really bumped (a scripted replace matched nothing). | Always check `grep versionName` after bumping; the app info screen must show the new number. |
+| 5 | Seeking an online song reset it to 0:00 | A seek asks for an open-ended `Range` far into the file; the old yt-dlp's addresses refused it (cause 1). | Addresses are now tested for a later part (`audioProblem`); `YtChunkedDataSource` turns googlevideo reads into short `&range=a-b` requests (kept as a safety net). |
+| 6 | Song download: `'NoneType' object has no attribute 'lower'` | Python crash in yt-dlp's tag/cover step on the phone (hidden by "last error only"). | `DownloadTask.level` ladder (0 full options, 1 without tags/cover, 2 simplest format). Now moot for m4a because Oli tags with ffmpeg, but kept. |
+| 7 | Error text hid the real reason | The Downloads row truncated it; only the last client's error was kept. | Every client's error is collected; the row wraps 4 lines and is selectable. |
+
+### What else was added
+- **Client order** for videos and songs: `visionos, default, vr, tvs, embed` (`VIDEO_CLIENTS`). Before use, a client's answer is TESTED with a real request (start and middle of the stream; `videoProblem`/`audioProblem`, `pickVideoClient`). If all fail, the error lists what each answered.
+- **Watch video (phone)** = the PC's own video page (`src/shared/videoPage.ts`, `buildVideoPage`; the PC window and the phone `components/VideoOverlay.tsx` iframe use the same code; `parseVideoQualities` is shared too). Not a native player (the first attempt, 0.9.2, was one and did not work).
+- **Download folder** (Settings > Downloads): `DownloadRoot.java` + `OliDownload.setRoot/requestAllFiles` + `components/PhoneDownloadFolder.tsx`; needs the special "all files access" permission (`MANAGE_EXTERNAL_STORAGE`, Android 11+), falls back to the app folder until it is granted.
+- **File names**: video = the video title (`videoDownload` waits up to 12 s for `yt.meta`), song = "Artist - Title"; no "[videoId]" suffix.
+- **Settings > YouTube engine > Test video access** (`OliYouTube.diagnose`, `components/YtDiagnose.tsx`): prints yt-dlp's real version, the client it used, whether ffmpeg runs (+ the last ffmpeg problem), which byte offsets YouTube serves for each client, and the public address of 6 connections. ASK THE OWNER FOR THIS TEXT FIRST whenever YouTube misbehaves on the phone; it answered in one round what six guesses could not.
+
+### Traps (do not repeat)
+- Do not guess at the phone: you cannot run it. Add a visible diagnostic, ship it, read the owner's paste. Compare with the PC by running the SAME yt-dlp command in PowerShell (`--no-js-runtimes`, `--extractor-args "youtube:player_client=visionos"`, curl with `-r a-b`).
+- The PC and the phone run DIFFERENT yt-dlp builds and different ffmpeg wiring. "Works on the PC" proves nothing about the phone.
+- Never rely on the library's updater or on yt-dlp finding ffmpeg by itself on Android.
+- youtubedl-android puts `--ffmpeg-location .../libffmpeg.so` on every command; do not fight it, avoid needing yt-dlp's post-processing.
+- PowerShell `Set-Content -Encoding utf8` writes a BOM (breaks files); node `-e` with double quotes is mangled by PowerShell: write scripts to a file and run them. `sleep` chains are blocked: poll with a loop.
+- CI gives the only Java compile check (push `android-dev`); read the run through the public API. There is no `gh`.
+
+### Release model (changed 2026-10-01, at the owner's request)
+- **ONE alpha pre-release, tag `android-alpha`**, holds every Android version: `Oli-X.Y.Z-android.apk` and `Oli-X.Y.Z-android.apk.sha256`. Pushing a tag `android-vX.Y.Z` builds and ADDS that version to it (`android.yml`, job "Add the APK to the alpha release"); its notes are `.github/android-release-notes.md`. The per-version release pages no longer exist (the git tags do).
+- **ONE latest release** = the newest desktop tag (currently `v1.1.1`) with Windows (`Oli-Setup`), macOS (dmg/zip) AND the newest Android APK. `scripts/attach-android.sh <desktop tag|latest> android-vX.Y.Z` copies the APK from the alpha release onto it (the `attach-<desktop tag>-with-android-vX.Y.Z` trigger tag, deleted by its workflow). A desktop tag build (`build.yml`) attaches the newest APK by itself.
+- `consolidate-alpha.yml` (tag `consolidate-alpha-*`) was the one-time job that moved the old per-version APKs into `android-alpha` (size-checked) before deleting the old pages.
+
+### State at the end of this session (unverified items in italics)
+Versions: desktop 1.1.1, Android 0.9.14. Confirmed on the owner's phone: video playback, download folder, updated yt-dlp (2026.08.19, all byte ranges 206). *Not yet confirmed on the phone after 0.9.14: joined video+sound, embedded cover/tags (ffmpeg start-up fix); ask for "Test video access" if they fail.* *Seek in online songs was reported broken before the yt-dlp update and not re-tested since.*
 
 ## Appendix A: Handoff: current state, what changed, traps
 

@@ -1,6 +1,6 @@
 name: android
 
-# Builds the Android app (an installable APK) and, for an `android-v*` tag, publishes it as a GitHub pre-release.
+# Builds the Android app (an installable APK) and, for an `android-v*` tag, adds it to the one "android-alpha" pre-release (every alpha version lives there).
 # The APK is signed with the ALPHA key in android/keystore (public on purpose, for testing only).
 # Before a real release: put your own keystore in GitHub secrets and change signingConfigs in android/app/build.gradle.
 on:
@@ -87,7 +87,7 @@ jobs:
           fi
           mkdir -p out-apk
           cp android/app/build/outputs/apk/release/*.apk "out-apk/Oli-${VERSION}-android.apk"
-          (cd out-apk && sha256sum *.apk | tee SHA256SUMS-android.txt)
+          (cd out-apk && sha256sum *.apk | tee "Oli-${VERSION}-android.apk.sha256")
           ls -la out-apk
 
       - name: Upload the APK
@@ -112,18 +112,18 @@ jobs:
           name: oli-android
           path: artifacts
 
-      - name: Create or update the release
+      # ONE pre-release ("android-alpha") holds every alpha version: each android-vX.Y.Z tag adds its APK to it.
+      - name: Add the APK to the alpha release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
-          # Re-running a tag replaces the release (and its old files); the tag itself stays.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release delete "$TAG" --yes
+          if ! gh release view android-alpha >/dev/null 2>&1; then
+            gh release create android-alpha --prerelease --title "Oli for Android: all alpha builds" \
+              --notes-file .github/android-release-notes.md
           fi
-          gh release create "$TAG" artifacts/* \
-            --prerelease \
-            --title "Oli Android ${TAG#android-v} (alpha)" \
+          # --clobber: re-running a tag replaces that version's files only
+          gh release upload android-alpha artifacts/* --clobber
+          gh release edit android-alpha --prerelease --title "Oli for Android: all alpha builds" \
             --notes-file .github/android-release-notes.md
 
       # The same APK also goes on the newest desktop release page (Windows + macOS + Android on one page).

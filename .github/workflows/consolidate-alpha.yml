@@ -1,0 +1,58 @@
+name: consolidate-alpha
+
+# One-time (safe to repeat): moves every APK of the per-version pre-releases (android-v*) into the single "android-alpha"
+# release, checks that each file arrived with the same size, and only then deletes the old per-version release PAGES.
+# The git tags stay. Started by pushing a tag named consolidate-alpha-<anything>; this workflow deletes that tag again.
+on:
+  push:
+    tags:
+      - 'consolidate-alpha*'
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Move the APKs into android-alpha
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! gh release view android-alpha >/dev/null 2>&1; then
+            gh release create android-alpha --prerelease --title "Oli for Android: all alpha builds" \
+              --notes-file .github/android-release-notes.md
+          fi
+          tags=$(gh release list --limit 200 --json tagName --jq '.[] | select(.tagName | test("^android-v[0-9]")) | .tagName')
+          for tag in $tags; do
+            ver="${tag#android-v}"
+            dir=$(mktemp -d)
+            gh release download "$tag" --dir "$dir" --pattern 'Oli-*-android.apk'
+            (cd "$dir" && sha256sum "Oli-$ver-android.apk" > "Oli-$ver-android.apk.sha256")
+            gh release upload android-alpha "$dir"/* --clobber
+            want=$(stat -c %s "$dir/Oli-$ver-android.apk")
+            got=$(gh release view android-alpha --json assets --jq ".assets[] | select(.name==\"Oli-$ver-android.apk\") | .size")
+            if [ "$want" != "$got" ]; then echo "size mismatch for $ver: $want vs $got"; exit 1; fi
+            echo "$ver moved ($want bytes)"
+            rm -rf "$dir"
+          done
+          gh release edit android-alpha --prerelease --title "Oli for Android: all alpha builds" \
+            --notes-file .github/android-release-notes.md
+          echo "$tags" > moved-tags.txt
+
+      - name: Delete the old per-version release pages (tags stay)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for tag in $(cat moved-tags.txt); do
+            gh release delete "$tag" --yes
+            echo "deleted release page $tag"
+          done
+
+      - name: Remove the trigger tag
+        if: always()
+        run: git push origin ":refs/tags/${GITHUB_REF_NAME}" || true

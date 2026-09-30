@@ -74,6 +74,9 @@ first** for what was changed recently, what is verified, and what is still open.
 - minSdk is 24: no `java.nio.file` (Android 8); tag writers replace files with `File.renameTo`.
 - yt-dlp `--parse-metadata` values: `%` doubled, `:` escaped, backslashes not doubled (`YtDlpOutput.metadataLiteral`).
 
+- **YouTube on the phone (0.9.2 to 0.9.14; full story in BUILD_FROM_SCRATCH.md Appendix D)**: the phone runs its OWN yt-dlp, installed by Oli from the official GitHub release (never trust the library's updater); ffmpeg must be started with `FFmpeg.INSTANCE.init` and is run by Oli itself (yt-dlp only downloads); test a YouTube client with a real request before using it; the video page is the PC's shared page shown in an iframe (phone CSP allows inline script); ask the owner for Settings > Test video access before guessing.
+- Releases: ONE alpha pre-release `android-alpha` holds every APK (`android-vX.Y.Z` tag adds a version), ONE latest desktop release carries Windows + macOS + the newest APK (`attach-` tag). Check `versionName` really changed after bumping.
+
 ## Data safety
 - Dev mode edits the real library (`%APPDATA%\Oli\library.sqlite`). Back it up before tests that write.
 - The database lives in memory and is flushed on quit: **stop the app before editing the file**.
