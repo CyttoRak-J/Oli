@@ -91,34 +91,6 @@ public class OliYouTubePlugin extends Plugin {
     return DownloadRoot.resolve(getContext());
   }
 
-  /** A folder where the library's ffmpeg / ffprobe carry the plain names yt-dlp looks for (the new yt-dlp no longer accepts "libffmpeg.so"). */
-  private String ffmpegDir() {
-    try {
-      Context ctx = getContext();
-      File dir = new File(ctx.getNoBackupFilesDir(), "oli-ffmpeg");
-      //noinspection ResultOfMethodCallIgnored
-      dir.mkdirs();
-      String lib = ctx.getApplicationInfo().nativeLibraryDir;
-      String[][] links = {{"ffmpeg", "libffmpeg.so"}, {"ffprobe", "libffprobe.so"}};
-      for (String[] l : links) {
-        File link = new File(dir, l[0]);
-        File target = new File(lib, l[1]);
-        if (!target.isFile()) continue;
-        try {
-          if (link.getCanonicalPath().equals(target.getCanonicalPath())) continue;
-        } catch (Exception ignored) {
-          // fall through and recreate
-        }
-        //noinspection ResultOfMethodCallIgnored
-        link.delete();
-        android.system.Os.symlink(target.getAbsolutePath(), link.getAbsolutePath());
-      }
-      return dir.getAbsolutePath();
-    } catch (Throwable e) {
-      return null;
-    }
-  }
-
   private static synchronized void ensureInit(Context ctx) throws Exception {
     if (ready) return;
     YoutubeDL.INSTANCE.init(ctx);
@@ -628,6 +600,13 @@ public class OliYouTubePlugin extends Plugin {
           dog.cancel(false);
         }
       }
+      try {
+        ffmpegRun("-version");
+        out.append("\nffmpeg runs\n");
+      } catch (Exception e) {
+        String m = String.valueOf(e.getMessage());
+        out.append("\nffmpeg does not run: ").append(m.length() > 260 ? m.substring(0, 260) : m).append("\n");
+      }
       for (String c : new String[] {"visionos", "default", "vr"}) {
         out.append("\n[").append(c).append("] ");
         String pid = "dg-" + System.nanoTime();
@@ -738,6 +717,8 @@ public class OliYouTubePlugin extends Plugin {
     String title = "";
     String artist = "";
     String album = "";
+    long baseBytes = 0; // bytes of the finished stages of this download
+    long lastStageBytes = 0;
     int level = 0; // 0 full options, 1 without tags and cover, 2 also the simplest format choice
     volatile boolean pause;
     volatile boolean cancel;
@@ -911,26 +892,9 @@ public class OliYouTubePlugin extends Plugin {
       int resumes = 0;
       for (int attempt = 0; attempt < clients.length; attempt++) {
         t.processId = "dl-" + t.id + "-" + attempt;
-        YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);
-        buildDownload(req, t, clients[attempt]);
-        final long[] lastEmit = {0};
         try {
-          YoutubeDL.INSTANCE.execute(req, t.processId, false, (Float pct, Long eta, String line) -> {
-            YtDlpOutput.Progress p = YtDlpOutput.parse(line);
-            long now = System.currentTimeMillis();
-            if (p != null && now - lastEmit[0] > 250) {
-              lastEmit[0] = now;
-              JSObject o = new JSObject();
-              o.put("id", t.id);
-              o.put("bytes", p.downloadedBytes);
-              o.put("total", p.totalBytes);
-              o.put("speed", p.bytesPerSecond);
-              notifyListeners("dlProgress", o);
-              OliDownloadService.externalProgress(t.id, p.downloadedBytes, p.totalBytes);
-            }
-            return kotlin.Unit.INSTANCE;
-          });
-          File done = finished(t);
+          t.baseBytes = 0;
+          File done = downloadAll(t, clients[attempt]);
           tasks.remove(t.id);
           if (done == null) {
             emit(t.id, "failed", "yt-dlp finished but the file was not found", "", 0, 0);
@@ -979,11 +943,15 @@ public class OliYouTubePlugin extends Plugin {
     }
   }
 
-  private void buildDownload(YoutubeDLRequest r, DownloadTask t, String client) {
+  // ---------------------------------------------------------------------------------------------------------------
+  // yt-dlp only downloads; Oli runs the phone's ffmpeg itself to join picture and sound and to write the cover and tags
+  // (the new yt-dlp refuses the library's ffmpeg file name, and a failed join used to leave a silent picture file).
+
+  private void ytStage(DownloadTask t, String client, String suffix, String format, boolean thumbnail) throws Exception {
+    t.processId = "dl-" + t.id + "-" + suffix + "-" + System.nanoTime();
+    YoutubeDLRequest r = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);
     common(r);
     client(r, client);
-    String ff = ffmpegDir();
-    if (ff != null) r.addOption("--ffmpeg-location", ff);
     r.addOption("--no-playlist");
     r.addOption("--newline");
     r.addOption("--progress");
@@ -991,27 +959,178 @@ public class OliYouTubePlugin extends Plugin {
     r.addOption("--fragment-retries", "10");
     // YouTube throttles or cuts one long request; asking in 10 MB pieces keeps big files (videos) going to the end
     r.addOption("--http-chunk-size", "10M");
-    r.addOption("-o", new File(root(), t.relBase).getAbsolutePath() + ".%(ext)s");
+    r.addOption("--fixup", "never");
+    if (thumbnail) r.addOption("--write-thumbnail");
+    r.addOption("-o", new File(root(), t.relBase).getAbsolutePath() + (suffix.isEmpty() ? "" : "." + suffix) + ".%(ext)s");
+    r.addOption("-f", format);
+    final long[] lastEmit = {0};
+    YoutubeDL.INSTANCE.execute(r, t.processId, false, (Float pct, Long eta, String line) -> {
+      YtDlpOutput.Progress p = YtDlpOutput.parse(line);
+      long now = System.currentTimeMillis();
+      if (p != null && now - lastEmit[0] > 250) {
+        lastEmit[0] = now;
+        t.lastStageBytes = p.downloadedBytes;
+        JSObject o = new JSObject();
+        o.put("id", t.id);
+        o.put("bytes", t.baseBytes + p.downloadedBytes);
+        o.put("total", t.baseBytes + p.totalBytes);
+        o.put("speed", p.bytesPerSecond);
+        notifyListeners("dlProgress", o);
+        OliDownloadService.externalProgress(t.id, t.baseBytes + p.downloadedBytes, t.baseBytes + p.totalBytes);
+      }
+      return kotlin.Unit.INSTANCE;
+    });
+    t.baseBytes += Math.max(t.lastStageBytes, 0);
+    t.lastStageBytes = 0;
+  }
+
+  /** The file a stage produced: stem + "." + suffix + "." + extension. */
+  private File stageFile(DownloadTask t, String suffix) {
+    File base = new File(root(), t.relBase);
+    File dir = base.getParentFile();
+    if (dir == null || !dir.exists()) return null;
+    final String head = base.getName() + (suffix.isEmpty() ? "." : "." + suffix + ".");
+    File best = null;
+    File[] all = dir.listFiles();
+    if (all == null) return null;
+    for (File f : all) {
+      String n = f.getName();
+      String low = n.toLowerCase(java.util.Locale.ROOT);
+      if (!n.startsWith(head) || isPartial(n)) continue;
+      if (low.endsWith(".jpg") || low.endsWith(".jpeg") || low.endsWith(".webp") || low.endsWith(".png") || low.endsWith(".json")) continue;
+      if (suffix.isEmpty() && (low.contains(".tagged.") || low.contains(".v.") || low.contains(".a.") || low.contains(".m."))) continue;
+      if (best == null || f.lastModified() > best.lastModified()) best = f;
+    }
+    return best;
+  }
+
+  private File coverFile(DownloadTask t) {
+    File base = new File(root(), t.relBase);
+    for (String ext : new String[] {"jpg", "jpeg", "png", "webp"}) {
+      File f = new File(base.getParentFile(), base.getName() + "." + ext);
+      if (f.isFile() && f.length() > 0) return f;
+    }
+    return null;
+  }
+
+  private static String extOf(File f) {
+    String n = f.getName();
+    int dot = n.lastIndexOf('.');
+    return dot < 0 ? "" : n.substring(dot + 1);
+  }
+
+  private File downloadAll(DownloadTask t, String client) throws Exception {
+    String h = t.height > 0 ? "[height<=" + t.height + "]" : "";
     if ("video".equals(t.mode)) {
-      String h = t.height > 0 ? "[height<=" + t.height + "]" : "";
-      String audioSel = "opus".equals(t.audio) ? "ba[ext=webm]" : "ba[ext=m4a]";
-      // h264 (mp4) first: it merges into mp4 without conversion on every phone
-      r.addOption("-f", "bv*[ext=mp4]" + h + "+" + audioSel + "/bv*" + h + "+" + audioSel + "/bv*" + h + "+ba/b" + h + "/bv*+ba/b");
-      r.addOption("--merge-output-format", "mp4");
-    } else {
-      if (t.level >= 2) {
-        r.addOption("-f", "ba/b");
-      } else {
-        r.addOption("-f", "opus".equals(t.audio) ? "ba[ext=webm]/ba" : "ba[ext=m4a]/ba");
+      String audioSel = "opus".equals(t.audio) ? "ba[ext=webm]/ba" : "ba[ext=m4a]/ba";
+      ytStage(t, client, "v", "bv*[ext=mp4]" + h + "/bv*" + h, false);
+      ytStage(t, client, "a", audioSel, false);
+      File v = stageFile(t, "v");
+      File a = stageFile(t, "a");
+      File out = new File(root(), t.relBase + ".mp4");
+      if (v != null && a != null) {
+        try {
+          ffmpegRun("-y", "-i", v.getAbsolutePath(), "-i", a.getAbsolutePath(), "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+              "-movflags", "+faststart", out.getAbsolutePath());
+          //noinspection ResultOfMethodCallIgnored
+          v.delete();
+          //noinspection ResultOfMethodCallIgnored
+          a.delete();
+          return out;
+        } catch (Exception e) {
+          // no ffmpeg: fall back to one file that already has sound (lower quality) rather than a silent picture
+          //noinspection ResultOfMethodCallIgnored
+          out.delete();
+          ytStage(t, client, "m", "b[ext=mp4]" + h + "/b" + h + "/b", false);
+          File m = stageFile(t, "m");
+          if (m != null) {
+            //noinspection ResultOfMethodCallIgnored
+            v.delete();
+            //noinspection ResultOfMethodCallIgnored
+            a.delete();
+            if (m.renameTo(out)) return out;
+            return m;
+          }
+          throw e;
+        }
       }
-      if (t.level == 0) {
-        r.addOption("--embed-metadata");
-        r.addOption("--embed-thumbnail");
-        r.addOption("--convert-thumbnails", "jpg");
-        if (!t.title.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.title) + ":%(meta_title)s");
-        if (!t.artist.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.artist) + ":%(meta_artist)s");
-        if (!t.album.isEmpty()) r.addOption("--parse-metadata", YtDlpOutput.metadataLiteral(t.album) + ":%(meta_album)s");
+      throw new Exception("yt-dlp finished but the picture or the sound file was not found");
+    }
+    // a song: audio first, then the cover and tags
+    String fmt = t.level >= 2 ? "ba/b" : "opus".equals(t.audio) ? "ba[ext=webm]/ba" : "ba[ext=m4a]/ba";
+    ytStage(t, client, "", fmt, t.level == 0);
+    File audio = stageFile(t, "");
+    if (audio == null) throw new Exception("yt-dlp finished but the file was not found");
+    File cover = coverFile(t);
+    if (t.level == 0) {
+      String ext = extOf(audio);
+      boolean mp4 = "m4a".equals(ext) || "mp4".equals(ext);
+      File tmp = new File(audio.getParentFile(), new File(root(), t.relBase).getName() + ".tagged." + ext);
+      java.util.List<String> args = new java.util.ArrayList<>();
+      java.util.Collections.addAll(args, "-y", "-i", audio.getAbsolutePath());
+      boolean withCover = cover != null && mp4 && !"webp".equals(extOf(cover));
+      if (withCover) java.util.Collections.addAll(args, "-i", cover.getAbsolutePath(), "-map", "0:a", "-map", "1:v", "-c:v", "copy", "-disposition:v:0", "attached_pic");
+      else java.util.Collections.addAll(args, "-map", "0:a");
+      java.util.Collections.addAll(args, "-c:a", "copy");
+      if (!t.title.isEmpty()) java.util.Collections.addAll(args, "-metadata", "title=" + t.title);
+      if (!t.artist.isEmpty()) java.util.Collections.addAll(args, "-metadata", "artist=" + t.artist);
+      if (!t.album.isEmpty()) java.util.Collections.addAll(args, "-metadata", "album=" + t.album);
+      args.add(tmp.getAbsolutePath());
+      try {
+        ffmpegRun(args.toArray(new String[0]));
+        //noinspection ResultOfMethodCallIgnored
+        audio.delete();
+        if (tmp.renameTo(audio)) {
+          if (cover != null) //noinspection ResultOfMethodCallIgnored
+            cover.delete();
+          return audio;
+        }
+        return tmp;
+      } catch (Exception e) {
+        //noinspection ResultOfMethodCallIgnored
+        tmp.delete();
+        // the plain song is still a complete file; the cover stays next to it as a picture
+        return audio;
       }
+    }
+    return audio;
+  }
+
+  /** Runs the phone's ffmpeg (the library's libffmpeg.so) and throws with its own words when it fails. */
+  private void ffmpegRun(String... args) throws Exception {
+    Context ctx = getContext();
+    String lib = ctx.getApplicationInfo().nativeLibraryDir;
+    File bin = new File(lib, "libffmpeg.so");
+    if (!bin.isFile()) throw new Exception("ffmpeg is not part of this build");
+    java.util.List<String> cmd = new java.util.ArrayList<>();
+    cmd.add(bin.getAbsolutePath());
+    java.util.Collections.addAll(cmd, args);
+    ProcessBuilder pb = new ProcessBuilder(cmd);
+    pb.redirectErrorStream(true);
+    String base = new File(ctx.getNoBackupFilesDir(), "youtubedl-android").getAbsolutePath();
+    StringBuilder ld = new StringBuilder();
+    for (String d : new String[] {base + "/packages/python/usr/lib", base + "/packages/ffmpeg/usr/lib", base + "/ffmpeg/usr/lib", base + "/python/usr/lib", lib}) {
+      if (ld.length() > 0) ld.append(':');
+      ld.append(d);
+    }
+    String old = pb.environment().get("LD_LIBRARY_PATH");
+    if (old != null && !old.isEmpty()) ld.append(':').append(old);
+    pb.environment().put("LD_LIBRARY_PATH", ld.toString());
+    pb.environment().put("TMPDIR", ctx.getCacheDir().getAbsolutePath());
+    Process proc = pb.start();
+    StringBuilder out = new StringBuilder();
+    try (java.io.InputStream in = proc.getInputStream()) {
+      byte[] buf = new byte[4096];
+      int n;
+      while ((n = in.read(buf)) > 0) {
+        if (out.length() < 20000) out.append(new String(buf, 0, n, "UTF-8"));
+      }
+    }
+    int code = proc.waitFor();
+    if (code != 0) {
+      String tail = out.toString().trim();
+      tail = tail.length() > 300 ? tail.substring(tail.length() - 300) : tail;
+      throw new Exception("ffmpeg exit " + code + ": " + tail.replaceAll("\\s+", " "));
     }
   }
 

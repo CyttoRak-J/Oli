@@ -427,8 +427,8 @@ function youtubeEntries(
     const tags = songTagsFor(e.title, channel, e.track ? { track: e.track.name, artist: e.track.artists.join(', '), album: e.track.album } : null)
     const relBase =
       mode === 'video'
-        ? `Oli/Videos/${safeName(e.title)} [${e.videoId}]`
-        : `Oli/YouTube/${safeName(`${tags.artist} - ${tags.title}`)} [${e.videoId}]`
+        ? `Oli/Videos/${safeName(e.title)}`
+        : `Oli/YouTube/${safeName(`${tags.artist} - ${tags.title}`)}`
     const meta: YouTubeJobMeta = { kind: 'youtube', duration: e.duration ?? null, thumbnail: null }
     return {
       title: mode === 'video' ? e.title : tags.title,
@@ -447,7 +447,7 @@ function youtubeEntries(
               const m = await yt!.meta(e.videoId)
               if (!m) return null
               const t = songTagsFor(m.title, m.channel, m)
-              return { title: t.title, youtube: { title: t.title, artist: t.artist, album: t.album, relBase: `Oli/YouTube/${safeName(`${t.artist} - ${t.title}`)} [${e.videoId}]` }, meta: { kind: 'youtube', duration: m.duration, thumbnail: m.thumbnail } satisfies YouTubeJobMeta }
+              return { title: t.title, youtube: { title: t.title, artist: t.artist, album: t.album, relBase: `Oli/YouTube/${safeName(`${t.artist} - ${t.title}`)}` }, meta: { kind: 'youtube', duration: m.duration, thumbnail: m.thumbnail } satisfies YouTubeJobMeta }
             }
           : undefined
     }
@@ -494,11 +494,11 @@ const youtubeHandlers: Record<string, Handler> = {
   }) as Handler,
   [IPC.videoDownload]: (async (videoId: string, height?: number, audio?: string) => {
     if (!queue || !yt || !videoId) return null
-    const entries = youtubeEntries([{ videoId, title: 'YouTube video' }], 'video', audioChoice(audio), Number(height) || 0)
+    // the file is named after the video's real title, so it is read first (a few seconds at most)
+    const meta = await Promise.race([yt.meta(videoId), new Promise<null>((r) => setTimeout(() => r(null), 12000))]).catch(() => null)
+    const entries = youtubeEntries([{ videoId, title: meta?.title || 'YouTube video' }], 'video', audioChoice(audio), Number(height) || 0)
     queue.add(entries)
-    const id = queue.list().find((d) => d.url === watchUrl(videoId))?.id ?? null
-    void yt.meta(videoId).then((m) => id && m && queue?.updateTitle(id, m.title))
-    return id
+    return queue.list().find((d) => d.url === watchUrl(videoId))?.id ?? null
   }) as Handler,
   [IPC.enqueuePlaylist]: (async (url: string, audio?: string) => {
     if (!queue || !yt) return { found: 0, enqueued: 0, error: 'YouTube is not available in this build of the app.' }

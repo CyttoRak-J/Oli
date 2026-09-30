@@ -31,7 +31,7 @@ function webCsp(): Plugin {
     transformIndexHtml(html) {
       const before = "script-src 'self' cyttos-vendor:"
       if (!html.includes(before)) throw new Error('index.html CSP changed: update the oli-web-csp plugin')
-      return html.replace(before, "script-src 'self' 'wasm-unsafe-eval' cyttos-vendor:")
+      return html.replace(before, "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' cyttos-vendor:")
     }
   }
 }
