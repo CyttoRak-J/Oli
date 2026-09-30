@@ -62,7 +62,7 @@ public class OliYouTubePlugin extends Plugin {
    */
   private static final Semaphore ASK_SLOTS = new Semaphore(3, true);
   /** The client that answered the last stream question: asked first next time (a client that keeps failing costs seconds per song). */
-  private static volatile String lastGoodStreamClient = "default";
+  private static volatile String lastGoodStreamClient = "visionos";
   private static int slotLimit = 2;
 
   /** {count: 1..6} - how many YouTube downloads run at the same time. */
@@ -208,7 +208,7 @@ public class OliYouTubePlugin extends Plugin {
               JSObject o = new JSObject();
               o.put("json", resp.getOut());
               o.put("client", c);
-              if (clients.length == 3) lastGoodStreamClient = c;
+              if (clients.length == 4) lastGoodStreamClient = c;
               call.resolve(o);
               return;
             }
@@ -265,7 +265,8 @@ public class OliYouTubePlugin extends Plugin {
     String first = lastGoodStreamClient;
     java.util.List<String> order = new java.util.ArrayList<>();
     order.add(first);
-    for (String c : new String[] {"default", "embed", "vr"}) if (!c.equals(first)) order.add(c);
+    // the PC's client first (its addresses can be seeked anywhere), then the rest; four entries marks a song question
+    for (String c : new String[] {"visionos", "default", "embed", "vr"}) if (!c.equals(first)) order.add(c);
     return order.toArray(new String[0]);
   }
 
@@ -286,7 +287,7 @@ public class OliYouTubePlugin extends Plugin {
           r.addOption("--no-playlist");
           r.addOption("--skip-download");
           r.addOption("-j");
-        }, video ? (out) -> videoProblem(out, 0) : null);
+        }, video ? (out) -> videoProblem(out, 0) : streams ? (out) -> audioProblem(out) : null);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -360,6 +361,38 @@ public class OliYouTubePlugin extends Plugin {
         int mid = fetchStatus(url, headers, 12_000_000L);
         if (mid != 200 && mid != 206) return best.optInt("height") + "p refused in the middle (HTTP " + mid + ")";
       }
+      return null;
+    } catch (Exception e) {
+      return "unreadable answer";
+    }
+  }
+
+  /** null when the best audio stream can be fetched from the middle too (a seek asks for a later part of the file), else why not. */
+  private static String audioProblem(String json) {
+    try {
+      JSONObject info = new JSONObject(json.trim());
+      JSONArray formats = info.optJSONArray("formats");
+      if (formats == null) return "no formats";
+      JSONObject best = null;
+      for (int i = 0; i < formats.length(); i++) {
+        JSONObject f = formats.getJSONObject(i);
+        String url = f.optString("url", "");
+        if (!url.startsWith("http") || !"none".equals(f.optString("vcodec", "none")) || "none".equals(f.optString("acodec", "none"))) continue;
+        if (f.optString("protocol", "").startsWith("m3u8")) continue;
+        boolean m4a = "m4a".equals(f.optString("ext"));
+        if (best == null || (m4a && !"m4a".equals(best.optString("ext")))) best = f;
+      }
+      if (best == null) return "no audio streams";
+      Map<String, String> headers = new HashMap<>();
+      addHeaders(headers, info.optJSONObject("http_headers"));
+      addHeaders(headers, best.optJSONObject("http_headers"));
+      String url = best.getString("url");
+      int start = fetchStatus(url, headers, 0);
+      if (start != 200 && start != 206) return "audio refused (HTTP " + start + ")";
+      long size = best.optLong("filesize", best.optLong("filesize_approx", 0));
+      long at = size > 3_000_000L ? size / 2 : 2_500_000L;
+      int mid = fetchStatus(url, headers, at);
+      if (mid != 200 && mid != 206 && mid != 416) return "audio refused when seeking (HTTP " + mid + ")";
       return null;
     } catch (Exception e) {
       return "unreadable answer";

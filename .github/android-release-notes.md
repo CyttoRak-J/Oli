@@ -4,7 +4,10 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.6: song downloads use the PC's YouTube method too
+### What is new in 0.9.7: seeking online songs
+- **Seeking in an online song no longer jumps back to 0:00.** Oli now uses the PC's YouTube method for songs and tests that a later part of the file can be fetched (that is what a seek asks for) before it plays; a method whose addresses refuse that is skipped.
+
+### Already in 0.9.6: song downloads use the PC's YouTube method too
 - Audio (song) downloads now try the same YouTube method as the PC first, and a failed download lists what **every** method answered (the list wraps over four lines, long-press to select) instead of only the last one ("'NoneType' object has no attribute 'lower'").
 
 ### Already in 0.9.5: the YouTube method the PC uses for videos

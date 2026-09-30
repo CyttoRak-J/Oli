@@ -128,7 +128,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `CLAUDE.md`  (8 KB)
 - `LICENSE`  (1 KB)
 - `README.md`  (7 KB)
-- `.github/android-release-notes.md`  (12 KB)
+- `.github/android-release-notes.md`  (13 KB)
 - `.github/release-notes.md`  (3 KB)
 - `.github/workflows/android.yml`  (5 KB)
 - `.github/workflows/attach-android.yml`  (1 KB)
@@ -380,7 +380,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadPlugin.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadService.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliMediaPlugin.java`  (20 KB)
-- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (26 KB)
+- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (28 KB)
 - `android/app/src/main/java/com/cyttos/oli/SourceProbe.java`  (5 KB)
 - `android/app/src/main/java/com/cyttos/oli/TagFields.java`  (1 KB)
 - `android/app/src/main/java/com/cyttos/oli/YtDlpOutput.java`  (2 KB)
@@ -923,7 +923,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.6); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.7); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -1062,7 +1062,7 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.6, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.7, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
@@ -1140,7 +1140,10 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.6: song downloads use the PC's YouTube method too
+### What is new in 0.9.7: seeking online songs
+- **Seeking in an online song no longer jumps back to 0:00.** Oli now uses the PC's YouTube method for songs and tests that a later part of the file can be fetched (that is what a seek asks for) before it plays; a method whose addresses refuse that is skipped.
+
+### Already in 0.9.6: song downloads use the PC's YouTube method too
 - Audio (song) downloads now try the same YouTube method as the PC first, and a failed download lists what **every** method answered (the list wraps over four lines, long-press to select) instead of only the last one ("'NoneType' object has no attribute 'lower'").
 
 ### Already in 0.9.5: the YouTube method the PC uses for videos
@@ -42652,7 +42655,7 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 15
+        versionCode 16
         versionName "0.9.2"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
@@ -46333,7 +46336,7 @@ public class OliYouTubePlugin extends Plugin {
    */
   private static final Semaphore ASK_SLOTS = new Semaphore(3, true);
   /** The client that answered the last stream question: asked first next time (a client that keeps failing costs seconds per song). */
-  private static volatile String lastGoodStreamClient = "default";
+  private static volatile String lastGoodStreamClient = "visionos";
   private static int slotLimit = 2;
 
   /** {count: 1..6} - how many YouTube downloads run at the same time. */
@@ -46479,7 +46482,7 @@ public class OliYouTubePlugin extends Plugin {
               JSObject o = new JSObject();
               o.put("json", resp.getOut());
               o.put("client", c);
-              if (clients.length == 3) lastGoodStreamClient = c;
+              if (clients.length == 4) lastGoodStreamClient = c;
               call.resolve(o);
               return;
             }
@@ -46536,7 +46539,8 @@ public class OliYouTubePlugin extends Plugin {
     String first = lastGoodStreamClient;
     java.util.List<String> order = new java.util.ArrayList<>();
     order.add(first);
-    for (String c : new String[] {"default", "embed", "vr"}) if (!c.equals(first)) order.add(c);
+    // the PC's client first (its addresses can be seeked anywhere), then the rest; four entries marks a song question
+    for (String c : new String[] {"visionos", "default", "embed", "vr"}) if (!c.equals(first)) order.add(c);
     return order.toArray(new String[0]);
   }
 
@@ -46557,7 +46561,7 @@ public class OliYouTubePlugin extends Plugin {
           r.addOption("--no-playlist");
           r.addOption("--skip-download");
           r.addOption("-j");
-        }, video ? (out) -> videoProblem(out, 0) : null);
+        }, video ? (out) -> videoProblem(out, 0) : streams ? (out) -> audioProblem(out) : null);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -46631,6 +46635,38 @@ public class OliYouTubePlugin extends Plugin {
         int mid = fetchStatus(url, headers, 12_000_000L);
         if (mid != 200 && mid != 206) return best.optInt("height") + "p refused in the middle (HTTP " + mid + ")";
       }
+      return null;
+    } catch (Exception e) {
+      return "unreadable answer";
+    }
+  }
+
+  /** null when the best audio stream can be fetched from the middle too (a seek asks for a later part of the file), else why not. */
+  private static String audioProblem(String json) {
+    try {
+      JSONObject info = new JSONObject(json.trim());
+      JSONArray formats = info.optJSONArray("formats");
+      if (formats == null) return "no formats";
+      JSONObject best = null;
+      for (int i = 0; i < formats.length(); i++) {
+        JSONObject f = formats.getJSONObject(i);
+        String url = f.optString("url", "");
+        if (!url.startsWith("http") || !"none".equals(f.optString("vcodec", "none")) || "none".equals(f.optString("acodec", "none"))) continue;
+        if (f.optString("protocol", "").startsWith("m3u8")) continue;
+        boolean m4a = "m4a".equals(f.optString("ext"));
+        if (best == null || (m4a && !"m4a".equals(best.optString("ext")))) best = f;
+      }
+      if (best == null) return "no audio streams";
+      Map<String, String> headers = new HashMap<>();
+      addHeaders(headers, info.optJSONObject("http_headers"));
+      addHeaders(headers, best.optJSONObject("http_headers"));
+      String url = best.getString("url");
+      int start = fetchStatus(url, headers, 0);
+      if (start != 200 && start != 206) return "audio refused (HTTP " + start + ")";
+      long size = best.optLong("filesize", best.optLong("filesize_approx", 0));
+      long at = size > 3_000_000L ? size / 2 : 2_500_000L;
+      int mid = fetchStatus(url, headers, at);
+      if (mid != 200 && mid != 206 && mid != 416) return "audio refused when seeking (HTTP " + mid + ")";
       return null;
     } catch (Exception e) {
       return "unreadable answer";
