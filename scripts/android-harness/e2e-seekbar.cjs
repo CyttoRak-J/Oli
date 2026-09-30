@@ -26,6 +26,20 @@ const HI = 'A:/Flac'
   await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await sleep(800)
   console.log('after touch tap:', JSON.stringify(await seeks()), 'state', JSON.stringify(await c.ev(`const s=__oliPlayer.getState(); return {t:s.currentTime,st:s.status}`)))
+  // a finger drag from 10% to 30%
+  const xa = r.x + r.w * 0.1, xb = r.x + r.w * 0.3
+  const before = (await seeks()).length
+  await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: xa, y: r.y }] })
+  for (let k = 1; k <= 6; k++) await c.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: xa + (xb - xa) * k / 6, y: r.y }] })
+  await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await sleep(800)
+  const after = await seeks()
+  console.log('after touch drag 10%->30% (expect ~26400 ms):', JSON.stringify(after.slice(before)))
+  // the browser cancelling a touch at its very start (no movement) must not seek
+  const n2 = after.length
+  await c.ev("const el=document.querySelector('[aria-label=\"Seek\"]'); el.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true})); return 1")
+  await sleep(500)
+  console.log('after a cancelled touch without movement (expect no new seek):', (await seeks()).length - n2, 'new seeks')
   c.close()
   process.exit(0)
 })()

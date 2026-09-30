@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useRangeCommit } from '../lib/useRangeCommit'
+import { useSeekSlider } from '../lib/useRangeCommit'
 import { useNativeOutput } from '../lib/useNativeOutput'
 import { Info, Play, Pause, SkipBack, SkipForward, Disc3, ListMusic, Radio, Shuffle, Repeat, Repeat1, History, Mic2 } from 'lucide-react'
 import { usePlayer } from '../store/player'
@@ -44,12 +43,9 @@ export function NowPlaying(): React.JSX.Element {
   const togglePanel = usePanels((s) => s.toggle)
   const phone = isMobileShell()
   const openInfo = useTrackInfo()
-  const [previewTime, setPreviewTime] = useState<number | null>(null)
   const { info: nativeInfo, native } = useNativeOutput()
-  const sliderRef = useRangeCommit((v) => {
-    player.seek(v)
-    setPreviewTime(null)
-  })
+  const { ref: sliderRef, preview: sliderPreview, props: sliderProps } = useSeekSlider((v) => player.seek(v))
+  const previewTime = sliderPreview
 
   const { current, status, currentTime, duration, queue, index, radioMode, toggleRadioMode } = player
 
@@ -70,19 +66,6 @@ export function NowPlaying(): React.JSX.Element {
   const progressMax = Math.max(1, duration || current.duration || 0)
   const progressPct = Math.min(100, (sliderValue / progressMax) * 100)
   const upcoming = queue.slice(index + 1)
-
-  const onSeek = (raw: string): void => {
-    setPreviewTime(Number(raw))
-  }
-  // A finger drag on the phone often ends in pointercancel / touchend instead of pointerup: commit on all of them,
-  // using the slider's own value (the state may not have re-rendered yet).
-  const onSeekCommit = (e?: { currentTarget: HTMLInputElement }): void => {
-    const v = e ? Number(e.currentTarget.value) : previewTime
-    if (v != null && Number.isFinite(v) && (previewTime != null || e)) {
-      player.seek(v)
-      setPreviewTime(null)
-    }
-  }
 
   const playAt = (track: Track): void => {
     player.playTrack(track, { source: 'queue', sourceId: null })
@@ -125,17 +108,11 @@ export function NowPlaying(): React.JSX.Element {
           max={progressMax}
           step={0.1}
           value={Math.min(sliderValue, progressMax)}
-          onInput={(e) => onSeek((e.target as HTMLInputElement).value)}
           style={{
             background: `linear-gradient(to right, var(--color-accent) ${progressPct}%, var(--color-surface-4) ${progressPct}%)`,
             touchAction: 'none'
           }}
-          onPointerUp={onSeekCommit}
-          onPointerCancel={onSeekCommit}
-          onTouchEnd={onSeekCommit}
-          onKeyUp={(e) => {
-            if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') onSeekCommit(e)
-          }}
+          {...sliderProps}
           aria-label="Seek"
         />
         <div className="mt-1 flex justify-between text-[10.5px] tabular-nums text-ink-3">

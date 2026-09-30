@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useRangeCommit } from '../lib/useRangeCommit'
+import { useMemo } from 'react'
+import { useSeekSlider } from '../lib/useRangeCommit'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -57,7 +57,6 @@ export function PlayerBar(): React.JSX.Element {
   const navigate = useNavigate()
   const togglePanel = usePanels((s) => s.toggle)
   const queryClient = useQueryClient()
-  const [previewTime, setPreviewTime] = useState<number | null>(null)
   // The output device's rate can change (different DAC, new Windows format):
   // look again whenever the track changes.
   const currentId = player.current?.id
@@ -66,25 +65,11 @@ export function PlayerBar(): React.JSX.Element {
     return readOutputSampleRate()
   }, [currentId])
 
-  const sliderValue = previewTime ?? player.currentTime
+  const { ref: sliderRef, preview: sliderPreview, props: sliderProps } = useSeekSlider((v) => player.seek(v))
+  const sliderValue = sliderPreview ?? player.currentTime
   const progressMax = Math.max(1, player.duration || player.current?.duration || 0)
   const progressPct = Math.min(100, (sliderValue / progressMax) * 100)
   const volumePct = (player.muted ? 0 : player.volume) * 100
-
-  const sliderRef = useRangeCommit((v) => {
-    player.seek(v)
-    setPreviewTime(null)
-  })
-  const onProgressInput = (raw: string): void => {
-    setPreviewTime(Number(raw))
-  }
-  const onProgressCommit = (e?: { currentTarget: HTMLInputElement }): void => {
-    const v = e ? Number(e.currentTarget.value) : previewTime
-    if (v != null && Number.isFinite(v) && (previewTime != null || e)) {
-      player.seek(v)
-      setPreviewTime(null)
-    }
-  }
 
   const onVolumeWheel = (e: React.WheelEvent<HTMLDivElement>): void => {
     const delta = e.deltaY > 0 ? -0.05 : 0.05
@@ -242,13 +227,7 @@ export function PlayerBar(): React.JSX.Element {
             step={0.1}
             value={Math.min(sliderValue ?? 0, progressMax)}
             style={rangeFill(progressPct)}
-            onInput={(e) => onProgressInput((e.target as HTMLInputElement).value)}
-            onPointerUp={onProgressCommit}
-            onPointerCancel={onProgressCommit}
-            onTouchEnd={onProgressCommit}
-            onKeyUp={(e) => {
-              if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') onProgressCommit(e)
-            }}
+            {...sliderProps}
             aria-label="Seek"
           />
           <span className="w-10 text-[10.5px] tabular-nums text-ink-2">

@@ -4,7 +4,10 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.18: seek diagnosis
+### What is new in 0.9.19: the seek bar really seeks
+- Found with the "Last seek" line (thank you): the player was asked to seek to 0:00. The phone's browser cancels a touch at its very start, and the bar then sent its untouched position. The bar now seeks once per touch, to the place you moved it to, and ignores a touch that never moved it.
+
+### Already in 0.9.18: seek diagnosis
 - Now Playing shows a small grey "Last seek: ..." line under the time after every seek (what the player was asked, whether the file is seekable, where it landed, where it was 1.5 s later, any error). Temporary, to find why seeking restarts the song on the phone.
 
 ### Already in 0.9.17: seek bar, second try
