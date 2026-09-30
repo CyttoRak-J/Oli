@@ -13,6 +13,7 @@ import { ShortcutsPanel } from './components/ShortcutsPanel'
 import { TitleBar } from './components/TitleBar'
 import { YtEngineBanner } from './components/YtEngineBanner'
 import { MobileNav } from './components/MobileNav'
+import { VideoOverlay } from './components/VideoOverlay'
 import { MobilePlayerBar } from './components/MobilePlayerBar'
 import { isMobileShell } from './lib/platform'
 import { Sidebar } from './components/Sidebar'
@@ -233,6 +234,10 @@ function MainShell(): React.JSX.Element {
     if (!mobile) return
     const w = window as unknown as { __oliBack?: () => boolean }
     w.__oliBack = () => {
+      if ((window as unknown as { __oliVideoOpen?: boolean }).__oliVideoOpen) {
+        window.dispatchEvent(new Event('oli:video-close'))
+        return true
+      }
       const panels = usePanels.getState()
       if (panels.panel) {
         panels.close()
@@ -286,6 +291,7 @@ function MainShell(): React.JSX.Element {
       </div>
       {mobile ? <MobilePlayerBar /> : <PlayerBar />}
       {mobile && <MobileNav />}
+      {__OLI_WEB__ && mobile && <VideoOverlay />}
       {shortcutsOpen && <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />}
     </div>
   )

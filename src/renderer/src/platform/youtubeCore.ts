@@ -185,8 +185,6 @@ interface YtFormat {
   abr?: number
   tbr?: number
   mimeType?: string
-  height?: number
-  protocol?: string
   http_headers?: Record<string, string>
 }
 
@@ -231,57 +229,6 @@ export function extractStreams(stdout: string): StreamSet {
     return { urls: [...seen], headers }
   } catch {
     return { urls: [], headers: {} }
-  }
-}
-
-/** One way to watch a video: a picture stream (with its own sound when audioUrl is empty) at one height. */
-export interface VideoOption {
-  height: number
-  label: string
-  videoUrl: string
-  /** Separate audio stream to play along with videoUrl (empty when the picture stream already has sound). */
-  audioUrl: string
-  headers: Record<string, string>
-}
-
-/**
- * The qualities a video can be watched in, best first. YouTube serves sharp pictures (720p and up) without sound, so
- * each of those is paired with the best audio-only stream; muxed streams (picture + sound, usually 360p) are the fallback.
- */
-export function extractVideoOptions(stdout: string): VideoOption[] {
-  try {
-    const data = JSON.parse(stdout) as { formats?: YtFormat[]; http_headers?: Record<string, string> }
-    const formats = (Array.isArray(data.formats) ? data.formats : []).filter(
-      (f) => f.url && /^https?:\/\//.test(f.url) && !/\.m3u8|\.mpd/i.test(f.url) && !(f.protocol ?? '').startsWith('m3u8')
-    )
-    const hasVideo = (f: YtFormat): boolean => !!f.vcodec && f.vcodec !== 'none' && (f.height ?? 0) > 0
-    const hasAudio = (f: YtFormat): boolean => !!f.acodec && f.acodec !== 'none'
-    const rate = (f: YtFormat): number => f.tbr ?? f.abr ?? 0
-    const hdr = (f: YtFormat): Record<string, string> => safeHeaders(f.http_headers ?? data.http_headers)
-    const isAvc = (f: YtFormat): boolean => /^avc1/i.test(f.vcodec ?? '')
-    const isM4a = (f: YtFormat): boolean => f.ext === 'm4a' || /audio\/mp4/i.test(f.mimeType ?? '')
-    const bestAudio = formats
-      .filter((f) => !hasVideo(f) && hasAudio(f))
-      .sort((a, b) => (isM4a(a) !== isM4a(b) ? (isM4a(a) ? -1 : 1) : rate(b) - rate(a)))[0]
-    // h264 plays on every phone; a sharper codec is only chosen when nothing else has that height
-    const better = (a: YtFormat, b: YtFormat | undefined): boolean => !b || (isAvc(a) !== isAvc(b) ? isAvc(a) : rate(a) > rate(b))
-    const pick = (list: YtFormat[]): Map<number, YtFormat> => {
-      const m = new Map<number, YtFormat>()
-      for (const f of list) if (better(f, m.get(f.height as number))) m.set(f.height as number, f)
-      return m
-    }
-    const out = new Map<number, VideoOption>()
-    if (bestAudio) {
-      for (const [h, f] of pick(formats.filter((x) => hasVideo(x) && !hasAudio(x)))) {
-        out.set(h, { height: h, label: h + 'p', videoUrl: f.url as string, audioUrl: bestAudio.url as string, headers: hdr(f) })
-      }
-    }
-    for (const [h, f] of pick(formats.filter((x) => hasVideo(x) && hasAudio(x)))) {
-      if (!out.has(h)) out.set(h, { height: h, label: h + 'p', videoUrl: f.url as string, audioUrl: '', headers: hdr(f) })
-    }
-    return [...out.values()].sort((a, b) => b.height - a.height)
-  } catch {
-    return []
   }
 }
 

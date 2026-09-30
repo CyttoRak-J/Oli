@@ -9,7 +9,6 @@ import {
   MIX_LIMIT,
   PLAYLIST_LIMIT,
   extractStreams,
-  extractVideoOptions,
   isVideoId,
   isYouTubeUrl,
   parsePlaylist,
@@ -20,9 +19,9 @@ import {
   streamExpiry,
   videoIdFromUrl,
   type PlaylistResult,
-  type VideoOption,
   type VideoMeta
 } from './youtubeCore'
+import { parseVideoQualities, type VideoQualitySet } from '@shared/videoPage'
 
 interface ListenerHandle {
   remove(): Promise<void> | void
@@ -34,7 +33,7 @@ export interface OliYouTubePlugin {
   updateEngine(o: { channel?: string }): Promise<{ status: string; version: string }>
   search(o: { query: string; count?: number }): Promise<{ json: string; client?: string }>
   playlist(o: { url: string; limit?: number }): Promise<{ json: string; client?: string }>
-  info(o: { videoId: string; streams?: boolean }): Promise<{ json: string; client?: string }>
+  info(o: { videoId: string; streams?: boolean; video?: boolean }): Promise<{ json: string; client?: string }>
   enqueue(o: YouTubeDownloadSpec & { id: string }): Promise<void>
   pause(o: { id: string }): Promise<void>
   resume(o: { id: string }): Promise<void>
@@ -288,14 +287,15 @@ export class YouTubeService {
     })
   }
 
-  /** Every quality this video can be watched in (picture + sound), best first; empty when YouTube gives nothing. */
-  async resolveVideo(videoId: string): Promise<VideoOption[]> {
-    if (!isVideoId(videoId)) return []
+  /** Every quality this video can be watched in (same reading rules as the PC's video window); empty when YouTube gives nothing. */
+  async resolveVideoSet(videoId: string): Promise<VideoQualitySet> {
+    const none: VideoQualitySet = { streams: [], audioUrl: null }
+    if (!isVideoId(videoId)) return none
     return this.share(`v:${videoId}`, async () => {
       try {
-        return extractVideoOptions((await this.opts.plugin.info({ videoId, streams: true })).json)
+        return parseVideoQualities((await this.opts.plugin.info({ videoId, streams: true, video: true })).json) ?? none
       } catch {
-        return []
+        return none
       }
     })
   }
@@ -326,22 +326,6 @@ export class YouTubeService {
       })()
     }
   }
-}
-
-/** The native full-screen video player (Media3). */
-export interface OliVideoPlugin {
-  open(o: { title: string; options: string; startHeight?: number }): Promise<void>
-}
-let videoProxy: OliVideoPlugin | null = null
-
-export function getVideoPlugin(): OliVideoPlugin | null {
-  if (videoProxy) return videoProxy
-  if (typeof window === 'undefined') return null
-  const cap = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor
-  if (!cap || cap.getPlatform?.() !== 'android' || !cap.registerPlugin) return null
-  if (Array.isArray(cap.PluginHeaders) && !cap.PluginHeaders.some((h) => h.name === 'OliVideo')) return null
-  videoProxy = cap.registerPlugin<OliVideoPlugin>('OliVideo')
-  return videoProxy
 }
 
 interface CapacitorGlobal {

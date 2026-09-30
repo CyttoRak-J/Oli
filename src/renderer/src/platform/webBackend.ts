@@ -34,7 +34,7 @@ import { Browser } from '@capacitor/browser'
 import { deviceFileUrl } from '../lib/platform'
 import { setStreamHeaders } from './nativeAudio'
 import { initAndroidCore, trackIds, type AndroidCore, type AndroidProviders } from './androidCore'
-import { YouTubeService, getYouTubePlugin, getVideoPlugin } from './youtubeService'
+import { YouTubeService, getYouTubePlugin } from './youtubeService'
 import { songTagsFor, videoIdFromUrl, isYouTubeUrl, type SongTags } from './youtubeCore'
 import { getMediaPlugin, isPhoneLocation, PhoneLibrary } from './phoneLibrary'
 import { checkAndroidUpdate, type AndroidUpdateStatus } from './androidUpdate'
@@ -476,16 +476,14 @@ const youtubeHandlers: Record<string, Handler> = {
   // the PC plays the audio of a video that refuses to stream by downloading it first; here the stream is all there is
   [IPC.downloadYouTubeAudio]: (() => null) as Handler,
   [IPC.videoFallbackUrl]: (() => null) as Handler,
+  // the PC opens a window; the phone shows the same video page over the app (components/VideoOverlay.tsx)
   [IPC.openVideoWindow]: (async (videoId: string) => {
-    const player = getVideoPlugin()
-    if (!yt || !player || !videoId) return false
-    const [options, meta] = await Promise.all([yt.resolveVideo(String(videoId)), yt.meta(String(videoId))])
-    if (options.length === 0) return false
-    const title = meta?.title ?? 'YouTube video'
-    await player.open({ title, options: JSON.stringify(options) })
-    return true
+    if (!yt || typeof videoId !== 'string' || !videoId) return false
+    const set = await yt.resolveVideoSet(videoId)
+    window.dispatchEvent(new CustomEvent('oli:video', { detail: { videoId, set } }))
+    return set.streams.length > 0
   }) as Handler,
-  [IPC.videoRetry]: (() => false) as Handler,
+  [IPC.videoRetry]: ((videoId: string) => (core.handlers[IPC.openVideoWindow] as (id: string) => unknown)(videoId)) as Handler,
   [IPC.videoDownloadSong]: (async (videoId: string, audio?: string) => {
     if (!queue || !yt || !videoId) return null
     const title = 'YouTube song'

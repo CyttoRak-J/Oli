@@ -4,7 +4,6 @@ import * as path from 'node:path'
 import {
   cleanTrackTitle,
   extractStreams,
-  extractVideoOptions,
   isVideoId,
   isYouTubeUrl,
   parsePlaylist,
@@ -150,30 +149,3 @@ describe('tags for downloaded songs', () => {
   })
 })
 
-describe('extractVideoOptions', () => {
-  const fmt = (o: Record<string, unknown>): Record<string, unknown> => ({ url: `https://v.example/${Math.random()}`, ...o })
-  const json = JSON.stringify({
-    http_headers: { 'User-Agent': 'UA', Cookie: 'secret' },
-    formats: [
-      fmt({ vcodec: 'none', acodec: 'opus', ext: 'webm', abr: 160 }),
-      fmt({ vcodec: 'none', acodec: 'mp4a.40.2', ext: 'm4a', abr: 128, url: 'https://v.example/audio-m4a' }),
-      fmt({ vcodec: 'vp09', acodec: 'none', height: 1080, tbr: 2000, url: 'https://v.example/vp9-1080' }),
-      fmt({ vcodec: 'avc1.640028', acodec: 'none', height: 1080, tbr: 1500, url: 'https://v.example/avc-1080' }),
-      fmt({ vcodec: 'avc1.4d401f', acodec: 'none', height: 720, tbr: 900, url: 'https://v.example/avc-720' }),
-      fmt({ vcodec: 'avc1.42001e', acodec: 'mp4a.40.2', height: 360, tbr: 500, url: 'https://v.example/muxed-360' }),
-      fmt({ vcodec: 'avc1.4d401f', acodec: 'none', height: 720, url: 'https://v.example/x.m3u8' })
-    ]
-  })
-
-  it('pairs each sharp picture with the best m4a audio, prefers h264, and keeps muxed as the low fallback', () => {
-    const o = extractVideoOptions(json)
-    expect(o.map((x) => x.label)).toEqual(['1080p', '720p', '360p'])
-    expect(o[0]).toMatchObject({ videoUrl: 'https://v.example/avc-1080', audioUrl: 'https://v.example/audio-m4a' })
-    expect(o[2]).toMatchObject({ videoUrl: 'https://v.example/muxed-360', audioUrl: '' })
-    expect(o[0].headers).toEqual({ 'User-Agent': 'UA' })
-  })
-
-  it('returns nothing for garbage', () => {
-    expect(extractVideoOptions('nope')).toEqual([])
-  })
-})

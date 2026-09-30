@@ -487,24 +487,8 @@ export interface ProviderStatus {
   youtubeConfigured: boolean
 }
 
-/** A single video stream for the internal video window. */
-export interface VideoQualityStream {
-  height: number
-  url: string
-  /** HLS manifest (played with hls.js) vs a direct media URL. */
-  hls: boolean
-  /** True when the stream is video-only DASH and needs the paired audio URL. */
-  videoOnly: boolean
-}
-
-/** Per-video quality set: video streams by height + the best audio stream. */
-export interface VideoQualitySet {
-  streams: VideoQualityStream[]
-  /** Best audio stream (m4a/AAC) to pair with video-only DASH; null when all streams are muxed. */
-  audioUrl: string | null
-  /** True when this set was produced by a live yt-dlp run (not the cache). */
-  fresh?: boolean
-}
+import { parseVideoQualities, type VideoQualitySet } from '@shared/videoPage'
+export type { VideoQualityStream, VideoQualitySet } from '@shared/videoPage'
 
 interface CacheRow {
   payload: string
@@ -3196,76 +3180,7 @@ export class ProviderService {
     ])
     if (!stdout) return { streams: [], audioUrl: null }
 
-    const set: VideoQualitySet | null = (() => {
-      try {
-        const info = JSON.parse(stdout) as {
-          formats?: Array<{
-            height?: number
-            url?: string
-            vcodec?: string
-            acodec?: string
-            ext?: string
-            protocol?: string
-          }>
-        }
-        const formats = Array.isArray(info.formats) ? info.formats : []
-        const bestVideo = new Map<
-          number,
-          { height: number; url: string; score: number; hls: boolean; videoOnly: boolean }
-        >()
-        let audioUrl: string | null = null
-        let audioScore = -1
-        for (const fmt of formats) {
-          const url = fmt.url
-          if (!url) continue
-          const isVideo = Boolean(fmt.vcodec && fmt.vcodec !== 'none')
-          const hasAudio = Boolean(fmt.acodec && fmt.acodec !== 'none')
-          const hls =
-            (fmt.protocol && fmt.protocol.startsWith('m3u8')) ||
-            /hls_playlist|\.m3u8(?:\?|$)/.test(url)
-          if (isVideo && fmt.height) {
-            // Video streams: muxed (with audio) or video-only DASH.
-            const isDirect = !hls
-            const score =
-              (isDirect ? 16 : 4) +
-              (fmt.ext === 'mp4' ? 4 : 0) +
-              (fmt.vcodec && fmt.vcodec.startsWith('avc1') ? 2 : 0)
-            const prev = bestVideo.get(fmt.height)
-            if (!prev || score > prev.score) {
-              bestVideo.set(fmt.height, {
-                height: fmt.height,
-                url,
-                score,
-                hls,
-                videoOnly: !hasAudio
-              })
-            }
-          } else if (!isVideo && hasAudio) {
-            // Audio-only streams: the pairing audio for video-only DASH.
-            // MP4/AAC is what Chromium actually plays (WebM/Opus URLs from
-            // the web_embedded player are rejected with NotSupportedError).
-            const isDirect = !hls
-            const score =
-              (isDirect ? 16 : 4) +
-              (fmt.ext === 'm4a' ? 6 : fmt.ext === 'webm' ? 3 : 1) +
-              (fmt.acodec === 'aac' ? 4 : fmt.acodec === 'opus' ? 2 : 0)
-            if (score > audioScore) {
-              audioScore = score
-              audioUrl = url
-            }
-          }
-        }
-        return {
-          streams: [...bestVideo.values()]
-            .sort((a, b) => b.height - a.height)
-            .map(({ height, url, hls, videoOnly }) => ({ height, url, hls, videoOnly })),
-          audioUrl
-        }
-      } catch (parseErr) {
-        getLogger().info(`yt-dlp quality parse failed for ${videoId}`, parseErr)
-        return null
-      }
-    })()
+    const set = parseVideoQualities(stdout)
 
     if (!set) return { streams: [], audioUrl: null }
     set.fresh = true

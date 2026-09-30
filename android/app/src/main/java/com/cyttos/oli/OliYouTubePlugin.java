@@ -253,8 +253,11 @@ public class OliYouTubePlugin extends Plugin {
       return;
     }
     final boolean streams = Boolean.TRUE.equals(call.getBoolean("streams", false));
+    // the video page plays the addresses in the web view (like the PC window): the plain client, not the phone-only ones
+    final boolean video = Boolean.TRUE.equals(call.getBoolean("video", false));
     ask(call, "https://www.youtube.com/watch?v=" + id,
-        streams ? streamClients() : new String[] {"default", "embed"}, streams ? 30000 : 60000, (r) -> {
+        video ? new String[] {"default", "embed"} : streams ? streamClients() : new String[] {"default", "embed"},
+        video ? 45000 : streams ? 30000 : 60000, (r) -> {
           r.addOption("--no-playlist");
           r.addOption("--skip-download");
           r.addOption("-j");
@@ -414,7 +417,7 @@ public class OliYouTubePlugin extends Plugin {
       }
       emit(t.id, "downloading", "", "", 0, 0);
       String lastError = "Download failed";
-      String[] clients = {"default", "embed"};
+      String[] clients = {"default", "embed", "vr"};
       for (int attempt = 0; attempt < clients.length; attempt++) {
         t.processId = "dl-" + t.id + "-" + attempt;
         YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);
@@ -477,11 +480,14 @@ public class OliYouTubePlugin extends Plugin {
     r.addOption("--progress");
     r.addOption("--no-mtime");
     r.addOption("--fragment-retries", "10");
+    // YouTube throttles or cuts one long request; asking in 10 MB pieces keeps big files (videos) going to the end
+    r.addOption("--http-chunk-size", "10M");
     r.addOption("-o", new File(root(), t.relBase).getAbsolutePath() + ".%(ext)s");
     if ("video".equals(t.mode)) {
       String h = t.height > 0 ? "[height<=" + t.height + "]" : "";
       String audioSel = "opus".equals(t.audio) ? "ba[ext=webm]" : "ba[ext=m4a]";
-      r.addOption("-f", "bv*" + h + "+" + audioSel + "/bv*" + h + "+ba/b" + h + "/bv*+ba/b");
+      // h264 (mp4) first: it merges into mp4 without conversion on every phone
+      r.addOption("-f", "bv*[ext=mp4]" + h + "+" + audioSel + "/bv*" + h + "+" + audioSel + "/bv*" + h + "+ba/b" + h + "/bv*+ba/b");
       r.addOption("--merge-output-format", "mp4");
     } else {
       r.addOption("-f", "opus".equals(t.audio) ? "ba[ext=webm]/ba" : "ba[ext=m4a]/ba");

@@ -20,7 +20,6 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(OliMediaPlugin.class);
     registerPlugin(OliDownloadPlugin.class);
     registerPlugin(OliYouTubePlugin.class);
-    registerPlugin(OliVideoPlugin.class);
     super.onCreate(savedInstanceState);
     // Back button / back gesture: the app decides (close a panel, previous page, home); only at the home page the app is
     // sent to the background instead of being closed.
