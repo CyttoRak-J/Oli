@@ -289,13 +289,14 @@ export class YouTubeService {
 
   /** Every quality this video can be watched in (same reading rules as the PC's video window); empty when YouTube gives nothing. */
   async resolveVideoSet(videoId: string): Promise<VideoQualitySet> {
-    const none: VideoQualitySet = { streams: [], audioUrl: null }
-    if (!isVideoId(videoId)) return none
+    if (!isVideoId(videoId)) return { streams: [], audioUrl: null }
     return this.share(`v:${videoId}`, async () => {
       try {
-        return parseVideoQualities((await this.opts.plugin.info({ videoId, streams: true, video: true })).json) ?? none
-      } catch {
-        return none
+        const answer = await this.opts.plugin.info({ videoId, streams: true, video: true })
+        return parseVideoQualities(answer.json) ?? { streams: [], audioUrl: null }
+      } catch (e) {
+        // the reason (which YouTube client was tried and what it answered) is shown to the person
+        throw new Error(String((e as { message?: string } | null)?.message ?? e))
       }
     })
   }

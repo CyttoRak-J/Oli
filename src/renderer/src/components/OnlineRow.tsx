@@ -84,9 +84,13 @@ export function OnlineRow({
 
   const watchVideo = (): void => {
     if (isMobileShell()) usePlayer.getState().pause() // on the PC the main process pauses the song
-    void openVideoWindow(result.videoId!).then((ok) => {
-      if (!ok && isMobileShell()) window.alert('This video could not be opened. Check the connection and try again.')
-    })
+    void openVideoWindow(result.videoId!)
+      .then((ok) => {
+        if (!ok && isMobileShell()) window.alert('This video could not be opened.')
+      })
+      .catch((e: unknown) => {
+        if (isMobileShell()) window.alert('This video could not be opened.\n' + String((e as { message?: string } | null)?.message ?? e))
+      })
   }
 
   const openDownload = (mode: 'song' | 'video'): void => {

@@ -128,7 +128,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `CLAUDE.md`  (8 KB)
 - `LICENSE`  (1 KB)
 - `README.md`  (7 KB)
-- `.github/android-release-notes.md`  (11 KB)
+- `.github/android-release-notes.md`  (12 KB)
 - `.github/release-notes.md`  (3 KB)
 - `.github/workflows/android.yml`  (5 KB)
 - `.github/workflows/attach-android.yml`  (1 KB)
@@ -380,7 +380,7 @@ The 315 files below are the project. `extract-spec.mjs` (the bootstrap at the to
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadPlugin.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliDownloadService.java`  (7 KB)
 - `android/app/src/main/java/com/cyttos/oli/OliMediaPlugin.java`  (20 KB)
-- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (19 KB)
+- `android/app/src/main/java/com/cyttos/oli/OliYouTubePlugin.java`  (26 KB)
 - `android/app/src/main/java/com/cyttos/oli/SourceProbe.java`  (5 KB)
 - `android/app/src/main/java/com/cyttos/oli/TagFields.java`  (1 KB)
 - `android/app/src/main/java/com/cyttos/oli/YtDlpOutput.java`  (2 KB)
@@ -923,7 +923,7 @@ first** for what was changed recently, what is verified, and what is still open.
 - `src/shared`: IPC channel names, types, default settings.
 - Android (`android/`, `src/renderer/src/platform/`): the phone app runs the same React screens and the same services inside the web view (`androidCore.ts`, `webBackend.ts`), with
   four native Java plugins in `android/app/src/main/java/com/cyttos/oli/` (`OliAudio`, `OliMedia`, `OliDownload`, `OliYouTube`). **Read `BUILD_FROM_SCRATCH.md` Appendix B (Android plan) first**; the full specification is
-  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.3); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
+  section 20 of `BUILD_FROM_SCRATCH.md`. Status: everything built (android-v0.9.4); the owner ran 0.8.0 on a phone and reported 11 problems, fixed in 0.9.0 and listed in Appendix B (Android plan).
 
 ## Rules learned the hard way (do not undo)
 - **Never change `hash64` in `main/util/identity.ts`** (it is cyrb64, 16 hex). Every id in the user's database,
@@ -1062,7 +1062,7 @@ Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.3, about 104 MB because it
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.4, about 104 MB because it
 contains the YouTube engine). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
@@ -1139,6 +1139,10 @@ from `%APPDATA%\Oli\logs`.
 An early build of Oli for Android phones. **Install:** download `Oli-<version>-android.apk` to your phone, open it, and allow
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
+
+### What is new in 0.9.4: videos that YouTube refuses
+- Before playing or downloading a video, Oli now **tests each YouTube method with a real request** (start and middle of the picture stream) and uses the first one that YouTube really serves. This is the fix for "HTTP Error 403: Forbidden" on video downloads and for a video that would not play.
+- If YouTube refuses every method on this phone, the message says which method was refused and how (for example "default: 1080p refused in the middle (HTTP 403)"), for both the video button and Downloads.
 
 ### What is new in 0.9.3: the PC's video player on the phone
 - **Watch video** now opens the same player page as the PC: quality list (up to 1080p and more), Repeat, speed, volume, and a Download button (video or tagged song). Close it with the X or the back gesture. The song that was playing stops.
@@ -22726,9 +22730,13 @@ export function OnlineRow({
 
   const watchVideo = (): void => {
     if (isMobileShell()) usePlayer.getState().pause() // on the PC the main process pauses the song
-    void openVideoWindow(result.videoId!).then((ok) => {
-      if (!ok && isMobileShell()) window.alert('This video could not be opened. Check the connection and try again.')
-    })
+    void openVideoWindow(result.videoId!)
+      .then((ok) => {
+        if (!ok && isMobileShell()) window.alert('This video could not be opened.')
+      })
+      .catch((e: unknown) => {
+        if (isMobileShell()) window.alert('This video could not be opened.\n' + String((e as { message?: string } | null)?.message ?? e))
+      })
   }
 
   const openDownload = (mode: 'song' | 'video'): void => {
@@ -34838,13 +34846,14 @@ export class YouTubeService {
 
   /** Every quality this video can be watched in (same reading rules as the PC's video window); empty when YouTube gives nothing. */
   async resolveVideoSet(videoId: string): Promise<VideoQualitySet> {
-    const none: VideoQualitySet = { streams: [], audioUrl: null }
-    if (!isVideoId(videoId)) return none
+    if (!isVideoId(videoId)) return { streams: [], audioUrl: null }
     return this.share(`v:${videoId}`, async () => {
       try {
-        return parseVideoQualities((await this.opts.plugin.info({ videoId, streams: true, video: true })).json) ?? none
-      } catch {
-        return none
+        const answer = await this.opts.plugin.info({ videoId, streams: true, video: true })
+        return parseVideoQualities(answer.json) ?? { streams: [], audioUrl: null }
+      } catch (e) {
+        // the reason (which YouTube client was tried and what it answered) is shown to the person
+        throw new Error(String((e as { message?: string } | null)?.message ?? e))
       }
     })
   }
@@ -42637,7 +42646,7 @@ android {
         applicationId "com.cyttos.oli"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 12
+        versionCode 13
         versionName "0.9.2"
         // Phones only (no x86 emulators): keeps the APK about 60 MB smaller.
         ndk {
@@ -46269,6 +46278,11 @@ import com.yausername.youtubedl_android.YoutubeDLRequest;
 import com.yausername.youtubedl_android.YoutubeDLResponse;
 
 import java.io.File;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.HashMap;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -46418,10 +46432,20 @@ public class OliYouTubePlugin extends Plugin {
   }
 
   /** Runs yt-dlp once per client until one answers; returns its stdout. */
+  /** Looks at a client's answer and returns null when it is good, else why it is not (the next client is then tried). */
+  private interface Check {
+    String problem(String out);
+  }
+
   private void ask(PluginCall call, String target, String[] clients, long timeoutMs, Builder b) {
+    ask(call, target, clients, timeoutMs, b, null);
+  }
+
+  private void ask(PluginCall call, String target, String[] clients, long timeoutMs, Builder b, Check check) {
     final Context ctx = getContext();
     WORK.execute(() -> {
       String lastError = "yt-dlp gave no answer";
+      StringBuilder reasons = new StringBuilder();
       boolean acquired = false;
       try {
         ensureInit(ctx);
@@ -46438,6 +46462,11 @@ public class OliYouTubePlugin extends Plugin {
           try {
             YoutubeDLResponse resp = YoutubeDL.INSTANCE.execute(req, pid);
             if (resp.getOut() != null && !resp.getOut().trim().isEmpty()) {
+              String bad = check == null ? null : check.problem(resp.getOut());
+              if (bad != null) {
+                reasons.append(c).append(": ").append(bad).append("; ");
+                continue;
+              }
               JSObject o = new JSObject();
               o.put("json", resp.getOut());
               o.put("client", c);
@@ -46446,12 +46475,14 @@ public class OliYouTubePlugin extends Plugin {
               return;
             }
           } catch (Exception e) {
-            lastError = String.valueOf(e.getMessage());
+            lastError = c + ": " + e.getMessage();
+            reasons.append(lastError).append("; ");
           } finally {
             dog.cancel(false);
           }
         }
-        call.reject(lastError.length() > 600 ? lastError.substring(0, 600) : lastError);
+        String why = reasons.length() > 0 ? reasons.toString() : lastError;
+        call.reject(why.length() > 900 ? why.substring(0, 900) : why);
       } catch (Exception e) {
         call.reject(String.valueOf(e.getMessage()));
       } finally {
@@ -46517,7 +46548,115 @@ public class OliYouTubePlugin extends Plugin {
           r.addOption("--no-playlist");
           r.addOption("--skip-download");
           r.addOption("-j");
-        });
+        }, video ? (out) -> videoProblem(out, 0) : null);
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Does this client's video really download? YouTube answers some clients with addresses that then refuse (403) once the
+  // file gets big; the picture streams are the ones that fail, so one is fetched here (start and middle) before it is used.
+
+  private static final java.util.Set<String> SAFE_HEADERS =
+      new java.util.HashSet<>(java.util.Arrays.asList("user-agent", "accept", "accept-language", "referer", "origin"));
+
+  private static void addHeaders(Map<String, String> into, JSONObject h) {
+    if (h == null) return;
+    java.util.Iterator<String> keys = h.keys();
+    while (keys.hasNext()) {
+      String k = keys.next();
+      if (SAFE_HEADERS.contains(k.toLowerCase(java.util.Locale.ROOT))) into.put(k, h.optString(k));
+    }
+  }
+
+  private static int fetchStatus(String url, Map<String, String> headers, long from) {
+    HttpURLConnection c = null;
+    try {
+      c = (HttpURLConnection) new URL(url).openConnection();
+      c.setConnectTimeout(12000);
+      c.setReadTimeout(12000);
+      c.setInstanceFollowRedirects(true);
+      for (Map.Entry<String, String> e : headers.entrySet()) c.setRequestProperty(e.getKey(), e.getValue());
+      c.setRequestProperty("Range", "bytes=" + from + "-" + (from + 4095));
+      int code = c.getResponseCode();
+      if (code == 200 || code == 206) {
+        byte[] buf = new byte[4096];
+        //noinspection ResultOfMethodCallIgnored
+        c.getInputStream().read(buf);
+      }
+      return code;
+    } catch (Exception e) {
+      return -1;
+    } finally {
+      if (c != null) c.disconnect();
+    }
+  }
+
+  /** null when the sharpest picture stream (up to 1080p, or up to maxHeight) can be fetched, else the reason. */
+  private static String videoProblem(String json, int maxHeight) {
+    try {
+      JSONObject info = new JSONObject(json.trim());
+      JSONArray formats = info.optJSONArray("formats");
+      if (formats == null) return "no formats";
+      int cap = maxHeight > 0 ? maxHeight : 1080;
+      JSONObject best = null;
+      for (int i = 0; i < formats.length(); i++) {
+        JSONObject f = formats.getJSONObject(i);
+        String url = f.optString("url", "");
+        String vc = f.optString("vcodec", "none");
+        int h = f.optInt("height", 0);
+        String proto = f.optString("protocol", "");
+        if (!url.startsWith("http") || "none".equals(vc) || h <= 0 || h > cap || proto.startsWith("m3u8")) continue;
+        boolean noAudio = "none".equals(f.optString("acodec", "none"));
+        if (best == null || h > best.optInt("height", 0) || (h == best.optInt("height", 0) && noAudio)) best = f;
+      }
+      if (best == null) return "no picture streams";
+      Map<String, String> headers = new HashMap<>();
+      addHeaders(headers, info.optJSONObject("http_headers"));
+      addHeaders(headers, best.optJSONObject("http_headers"));
+      String url = best.getString("url");
+      int start = fetchStatus(url, headers, 0);
+      if (start != 200 && start != 206) return best.optInt("height") + "p refused (HTTP " + start + ")";
+      long size = best.optLong("filesize", best.optLong("filesize_approx", 0));
+      if (size > 16_000_000L) {
+        int mid = fetchStatus(url, headers, 12_000_000L);
+        if (mid != 200 && mid != 206) return best.optInt("height") + "p refused in the middle (HTTP " + mid + ")";
+      }
+      return null;
+    } catch (Exception e) {
+      return "unreadable answer";
+    }
+  }
+
+  /** The first client whose picture streams download, or null (the reasons are appended to why). */
+  private String pickVideoClient(DownloadTask t, StringBuilder why) {
+    for (String c : new String[] {"default", "embed", "vr"}) {
+      String pid = "vp-" + t.id + "-" + c;
+      try {
+        YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);
+        common(req);
+        client(req, c);
+        req.addOption("--no-playlist");
+        req.addOption("--skip-download");
+        req.addOption("-j");
+        ScheduledFuture<?> dog = WATCHDOG.schedule(() -> YoutubeDL.INSTANCE.destroyProcessById(pid), 45000, TimeUnit.MILLISECONDS);
+        try {
+          YoutubeDLResponse resp = YoutubeDL.INSTANCE.execute(req, pid);
+          String out = resp.getOut();
+          if (out == null || out.trim().isEmpty()) {
+            why.append(c).append(": no answer; ");
+            continue;
+          }
+          String bad = videoProblem(out, t.height);
+          if (bad == null) return c;
+          why.append(c).append(": ").append(bad).append("; ");
+        } finally {
+          dog.cancel(false);
+        }
+      } catch (Exception e) {
+        why.append(c).append(": ").append(e.getMessage()).append("; ");
+        if (t.cancel || t.pause) return null;
+      }
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -46674,6 +46813,24 @@ public class OliYouTubePlugin extends Plugin {
       emit(t.id, "downloading", "", "", 0, 0);
       String lastError = "Download failed";
       String[] clients = {"default", "embed", "vr"};
+      if ("video".equals(t.mode)) {
+        StringBuilder why = new StringBuilder();
+        String good = pickVideoClient(t, why);
+        if (good == null) {
+          tasks.remove(t.id);
+          if (t.cancel) {
+            deleteLeftovers(t);
+            emit(t.id, "canceled", "", "", 0, 0);
+          } else if (t.pause) {
+            emit(t.id, "paused", "", "", 0, 0);
+          } else {
+            String m = "YouTube refuses the picture of this video on this phone (" + why + ")";
+            emit(t.id, "failed", m.length() > 500 ? m.substring(0, 500) : m, "", 0, 0);
+          }
+          return;
+        }
+        clients = new String[] {good};
+      }
       for (int attempt = 0; attempt < clients.length; attempt++) {
         t.processId = "dl-" + t.id + "-" + attempt;
         YoutubeDLRequest req = new YoutubeDLRequest("https://www.youtube.com/watch?v=" + t.videoId);
