@@ -24,6 +24,13 @@
 
         </activity>
 
+        <!-- Full-screen video player (YouTube videos: picture + sound, choose the quality). -->
+        <activity
+            android:name=".OliVideoActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:exported="false" />
+
         <!-- Native player: keeps music playing with the screen off and draws the notification / lock-screen controls. -->
         <service
             android:name=".OliAudioService"

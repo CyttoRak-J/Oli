@@ -171,7 +171,7 @@ export const transcodeLocalFile = (filePath: string): Promise<string | null> =>
 export const getMediaBase = (): Promise<string> => call(IPC.getMediaBase)
 export const probeDuration = (filePath: string): Promise<number | null> =>
   call(IPC.probeDuration, filePath)
-export const openVideoWindow = (videoId: string): Promise<void> => call(IPC.openVideoWindow, videoId)
+export const openVideoWindow = (videoId: string): Promise<boolean> => call(IPC.openVideoWindow, videoId)
 export const getSearchHistory = (): Promise<Array<{ id: string; query: string; pinned: boolean; createdAt: number }>> =>
   call(IPC.getSearchHistory)
 export const clearSearchHistory = (): Promise<void> => call(IPC.clearSearchHistory)

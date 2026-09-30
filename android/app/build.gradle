@@ -65,6 +65,7 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-session:$media3Version"
     implementation "androidx.media3:media3-common:$media3Version"
+    implementation "androidx.media3:media3-ui:$media3Version"
     // YouTube (phase 3): yt-dlp in Python plus ffmpeg, packaged for Android. Big (about 100 MB of native code).
     implementation "io.github.junkfood02.youtubedl-android:library:$youtubedlVersion"
     implementation "io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlVersion"

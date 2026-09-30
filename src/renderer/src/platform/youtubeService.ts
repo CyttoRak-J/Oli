@@ -9,6 +9,7 @@ import {
   MIX_LIMIT,
   PLAYLIST_LIMIT,
   extractStreams,
+  extractVideoOptions,
   isVideoId,
   isYouTubeUrl,
   parsePlaylist,
@@ -19,6 +20,7 @@ import {
   streamExpiry,
   videoIdFromUrl,
   type PlaylistResult,
+  type VideoOption,
   type VideoMeta
 } from './youtubeCore'
 
@@ -286,6 +288,18 @@ export class YouTubeService {
     })
   }
 
+  /** Every quality this video can be watched in (picture + sound), best first; empty when YouTube gives nothing. */
+  async resolveVideo(videoId: string): Promise<VideoOption[]> {
+    if (!isVideoId(videoId)) return []
+    return this.share(`v:${videoId}`, async () => {
+      try {
+        return extractVideoOptions((await this.opts.plugin.info({ videoId, streams: true })).json)
+      } catch {
+        return []
+      }
+    })
+  }
+
   async resolveStreamBatch(videoIds: string[]): Promise<Array<{ videoId: string; urls: string[] }>> {
     const out: Array<{ videoId: string; urls: string[] }> = []
     for (const id of videoIds.slice(0, 12)) out.push({ videoId: id, urls: await this.resolveStream(id) })
@@ -312,6 +326,22 @@ export class YouTubeService {
       })()
     }
   }
+}
+
+/** The native full-screen video player (Media3). */
+export interface OliVideoPlugin {
+  open(o: { title: string; options: string; startHeight?: number }): Promise<void>
+}
+let videoProxy: OliVideoPlugin | null = null
+
+export function getVideoPlugin(): OliVideoPlugin | null {
+  if (videoProxy) return videoProxy
+  if (typeof window === 'undefined') return null
+  const cap = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor
+  if (!cap || cap.getPlatform?.() !== 'android' || !cap.registerPlugin) return null
+  if (Array.isArray(cap.PluginHeaders) && !cap.PluginHeaders.some((h) => h.name === 'OliVideo')) return null
+  videoProxy = cap.registerPlugin<OliVideoPlugin>('OliVideo')
+  return videoProxy
 }
 
 interface CapacitorGlobal {

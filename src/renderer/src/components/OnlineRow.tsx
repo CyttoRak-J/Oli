@@ -82,6 +82,13 @@ export function OnlineRow({
     })
   }
 
+  const watchVideo = (): void => {
+    if (isMobileShell()) usePlayer.getState().pause() // on the PC the main process pauses the song
+    void openVideoWindow(result.videoId!).then((ok) => {
+      if (!ok && isMobileShell()) window.alert('This video could not be opened. Check the connection and try again.')
+    })
+  }
+
   const openDownload = (mode: 'song' | 'video'): void => {
     setDlMode(mode)
     setDlQuality(0)
@@ -207,16 +214,14 @@ export function OnlineRow({
             >
               <SkipForward size={13} />
             </button>
-            {!isMobileShell() && (
-              <button
-                title="Open video window"
-                aria-label="Open video window"
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-surface-4 bg-surface-2 text-ink-2 transition-colors hover:border-accent hover:text-ink-0"
-                onClick={() => void openVideoWindow(result.videoId!)}
-              >
-                <MonitorPlay size={13} />
-              </button>
-            )}
+            <button
+              title="Open video window"
+              aria-label="Open video window"
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-surface-4 bg-surface-2 text-ink-2 transition-colors hover:border-accent hover:text-ink-0"
+              onClick={watchVideo}
+            >
+              <MonitorPlay size={13} />
+            </button>
             <button
               title="Download video"
               aria-label="Download video"
@@ -249,15 +254,13 @@ export function OnlineRow({
             >
               {queuing ? 'Adding…' : 'Play next'}
             </button>
-            {!isMobileShell() && (
-              <button
-                className="flex items-center gap-1 rounded-md border border-surface-4 bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-2 hover:border-accent"
-                onClick={() => void openVideoWindow(result.videoId!)}
-              >
-                <MonitorPlay size={12} />
-                Video
-              </button>
-            )}
+            <button
+              className="flex items-center gap-1 rounded-md border border-surface-4 bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-2 hover:border-accent"
+              onClick={watchVideo}
+            >
+              <MonitorPlay size={12} />
+              Video
+            </button>
           </div>
         )
       ) : result.previewUrl ? (
