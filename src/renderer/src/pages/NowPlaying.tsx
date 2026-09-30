@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Disc3, ListMusic, Radio, Shuffle, Repeat, Repeat1, History, Mic2 } from 'lucide-react'
+import { Info, Play, Pause, SkipBack, SkipForward, Disc3, ListMusic, Radio, Shuffle, Repeat, Repeat1, History, Mic2 } from 'lucide-react'
 import { usePlayer } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { Artwork } from '../components/Artwork'
@@ -59,16 +59,20 @@ export function NowPlaying(): React.JSX.Element {
   }
 
   const sliderValue = previewTime ?? currentTime
-  const progressMax = Math.max(1, duration)
+  // the player's duration can still be 0 while a stream loads: fall back to the song's own length so the bar has a range
+  const progressMax = Math.max(1, duration || current.duration || 0)
   const progressPct = Math.min(100, (sliderValue / progressMax) * 100)
   const upcoming = queue.slice(index + 1)
 
   const onSeek = (raw: string): void => {
     setPreviewTime(Number(raw))
   }
-  const onSeekCommit = (): void => {
-    if (previewTime != null) {
-      player.seek(previewTime)
+  // A finger drag on the phone often ends in pointercancel / touchend instead of pointerup: commit on all of them,
+  // using the slider's own value (the state may not have re-rendered yet).
+  const onSeekCommit = (e?: { currentTarget: HTMLInputElement }): void => {
+    const v = e ? Number(e.currentTarget.value) : previewTime
+    if (v != null && Number.isFinite(v) && (previewTime != null || e)) {
+      player.seek(v)
       setPreviewTime(null)
     }
   }
@@ -113,13 +117,16 @@ export function NowPlaying(): React.JSX.Element {
           max={progressMax}
           step={0.1}
           value={Math.min(sliderValue, progressMax)}
-          style={{
-            background: `linear-gradient(to right, var(--color-accent) ${progressPct}%, var(--color-surface-4) ${progressPct}%)`
-          }}
           onInput={(e) => onSeek((e.target as HTMLInputElement).value)}
+          style={{
+            background: `linear-gradient(to right, var(--color-accent) ${progressPct}%, var(--color-surface-4) ${progressPct}%)`,
+            touchAction: 'none'
+          }}
           onPointerUp={onSeekCommit}
+          onPointerCancel={onSeekCommit}
+          onTouchEnd={onSeekCommit}
           onKeyUp={(e) => {
-            if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') onSeekCommit()
+            if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') onSeekCommit(e)
           }}
           aria-label="Seek"
         />
@@ -236,13 +243,25 @@ export function NowPlaying(): React.JSX.Element {
               <div className="min-w-0 flex-1">
                 <button
                   className="block w-full min-w-0 truncate text-left text-[12.5px] font-medium leading-snug text-ink-0 hover:text-accent"
-                  onClick={() => openInfo(track)}
-                  title="View song info"
+                  onClick={() => (phone ? playAt(track) : openInfo(track))}
+                  title={phone ? 'Play' : 'View song info'}
                 >
                   {track.title}
                 </button>
                 <div className="truncate text-[11px] text-ink-2">{track.artist}</div>
               </div>
+              {phone && (
+                <button
+                  className="shrink-0 rounded-full p-1.5 text-ink-3"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openInfo(track)
+                  }}
+                  aria-label="Song info"
+                >
+                  <Info size={15} />
+                </button>
+              )}
               <span className="text-[11px] tabular-nums text-ink-3">
                 {formatDuration(track.duration)}
               </span>

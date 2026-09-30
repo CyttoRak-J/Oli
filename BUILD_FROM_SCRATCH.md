@@ -50758,6 +50758,8 @@ skipping from the notification or outside the app does nothing; downloads stop w
 If the phone still loses the queue in the background, the next step is a native queue (the native player advancing to a preloaded URL by itself); see ANDROID
 rules in CLAUDE.md. Checked on the PC: 238 unit tests, typecheck, lint; Java of `MainActivity` / `OliDownloadService` is compile-checked by the `android-dev` CI run.
 
+**0.9.16 (owner: seek on Now Playing plays from 0:00; tapping an Up Next song shows its info):** (1) the seek slider committed only on `pointerup`; a touch drag can end in `pointercancel`/`touchend`, so the seek never happened, and `progressMax` was `max(1, duration)` (1 s while the stream's duration was still 0). Now `NowPlaying` / `PlayerBar` commit on pointerup, pointercancel and touchend using the slider's own value, `touch-action: none`, and fall back to the song's duration. (2) `tapToPlay` ignores taps on buttons and the title was a button opening the info; on the phone the title now plays and an (i) button opens the info. Not yet confirmed on a phone.
+
 ## Appendix D: Android 0.9.2 to 0.9.14: the YouTube / download / video saga (READ THIS FIRST, it saves days)
 
 Between 2026-09-30 and 2026-10-01 the owner tested the phone app on a real phone (mobile data only, no Wi-Fi) and reported: online songs jump back to 0:00

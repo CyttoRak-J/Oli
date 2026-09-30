@@ -66,16 +66,17 @@ export function PlayerBar(): React.JSX.Element {
   }, [currentId])
 
   const sliderValue = previewTime ?? player.currentTime
-  const progressMax = Math.max(1, player.duration)
+  const progressMax = Math.max(1, player.duration || player.current?.duration || 0)
   const progressPct = Math.min(100, (sliderValue / progressMax) * 100)
   const volumePct = (player.muted ? 0 : player.volume) * 100
 
   const onProgressInput = (raw: string): void => {
     setPreviewTime(Number(raw))
   }
-  const onProgressCommit = (): void => {
-    if (previewTime != null) {
-      player.seek(previewTime)
+  const onProgressCommit = (e?: { currentTarget: HTMLInputElement }): void => {
+    const v = e ? Number(e.currentTarget.value) : previewTime
+    if (v != null && Number.isFinite(v) && (previewTime != null || e)) {
+      player.seek(v)
       setPreviewTime(null)
     }
   }
@@ -237,8 +238,10 @@ export function PlayerBar(): React.JSX.Element {
             style={rangeFill(progressPct)}
             onInput={(e) => onProgressInput((e.target as HTMLInputElement).value)}
             onPointerUp={onProgressCommit}
+            onPointerCancel={onProgressCommit}
+            onTouchEnd={onProgressCommit}
             onKeyUp={(e) => {
-              if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') onProgressCommit()
+              if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') onProgressCommit(e)
             }}
             aria-label="Seek"
           />
