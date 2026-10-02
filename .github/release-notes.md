@@ -8,7 +8,11 @@
 
 `SHA256SUMS.txt` lists the checksum of every file.
 
-## What is new in 1.1.1
+## What is new in 1.1.2
+
+- **A single YouTube video can be played, not only downloaded**: paste a video link into Home or Search and the card now has a **Play** button next to Download (before, only playlists and Mixes had it). The Android app has the same fix.
+
+### Already in 1.1.1
 
 - **Bigger YouTube playlists and Mixes**: a playlist can list and download up to 2,000 songs (was 200) and a Mix up to 500 (was 100; a Mix ends near 380 anyway).
 - **Settings > Downloads**: "Songs prepared ahead" now goes up to 10 (was 5) and "Simultaneous YouTube downloads" up to 6 (was 3). More at once is faster but can trigger YouTube's bot check: lower it if downloads start failing.

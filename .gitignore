@@ -11,3 +11,10 @@ npm-debug.log*
 yarn-error.log*
 # yt-dlp is fetched by scripts/fetch-yt-dlp.mjs (npm postinstall), checksum-verified; never committed
 bin/
+
+# internal notes and agent files: kept locally, not published
+CLAUDE.md
+BUILD_FROM_SCRATCH.md
+docs/ANDROID_SIGNING.md
+scripts/android-harness/README.md
+.claude/

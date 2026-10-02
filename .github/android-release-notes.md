@@ -4,7 +4,10 @@ An early build of Oli for Android phones. **Install:** download `Oli-<version>-a
 "Install unknown apps" for your browser or file manager when Android asks. `SHA256SUMS-android.txt` has the checksum.
 Allow notifications and access to your music when asked: the lock-screen controls and the scan need them.
 
-### What is new in 0.9.21
+### What is new in 0.9.22
+- A single pasted YouTube video now has a **Play** button next to Download (before, only playlists and Mixes could be played).
+
+### Already in 0.9.21
 - The temporary grey "Last seek" line on Now Playing is gone (seeking works).
 
 ### Already in 0.9.20: seeking works (the real cause)

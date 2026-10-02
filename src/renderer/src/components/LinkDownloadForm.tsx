@@ -103,6 +103,45 @@ export function LinkDownloadForm({
     setTimeout(() => setStatus(''), 4000)
   }
 
+  const playVideo = async (): Promise<void> => {
+    if (!videoId) return
+    // Title and channel come from YouTube's public oEmbed endpoint; if it is
+    // unreachable the player still plays the video under a generic title.
+    let title = 'YouTube video'
+    let channel = 'YouTube'
+    try {
+      const r = await fetch(
+        `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`
+      )
+      if (r.ok) {
+        const j = (await r.json()) as { title?: string; author_name?: string }
+        if (j.title) title = j.title
+        if (j.author_name) channel = j.author_name
+      }
+    } catch {
+      /* keep the generic title */
+    }
+    const track = onlineToTrack(
+      {
+        provider: 'youtube',
+        id: `youtube:${videoId}`,
+        title,
+        artist: channel,
+        album: null,
+        duration: null,
+        year: null,
+        artworkUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        previewUrl: null,
+        videoId
+      },
+      []
+    )
+    usePlayer.getState().playTracks([track], 0, { source: 'search', sourceId: null })
+    setStatus('Playing')
+    setTimeout(() => setStatus(''), 4000)
+  }
+
   const start = async (): Promise<void> => {
     setBusy(true)
     setStatus('Starting…')
@@ -309,14 +348,14 @@ export function LinkDownloadForm({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {isPlaylist && (
+        {(isPlaylist || videoId) && (
           <button
             className="flex items-center gap-1.5 rounded-lg border border-accent/60 bg-surface-2 px-3.5 py-2 text-[12.5px] font-semibold text-accent transition-opacity hover:bg-accent hover:text-white disabled:opacity-50"
-            disabled={busy || selected.length === 0}
-            onClick={playSelected}
+            disabled={busy || (isPlaylist && selected.length === 0)}
+            onClick={isPlaylist ? playSelected : () => void playVideo()}
           >
             <Play size={13} className="ml-0.5 fill-current" />
-            Play{selected.length > 0 && entries.length > 0 ? ` ${selected.length}` : ''}
+            Play{isPlaylist && selected.length > 0 && entries.length > 0 ? ` ${selected.length}` : ''}
           </button>
         )}
         <button

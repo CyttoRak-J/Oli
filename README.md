@@ -6,7 +6,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)
-![Version](https://img.shields.io/badge/version-1.1.1-purple)
+![Version](https://img.shields.io/badge/version-1.1.2-purple)
 
 </div>
 
