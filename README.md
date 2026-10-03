@@ -10,21 +10,14 @@
 
 </div>
 
-Oli plays your own music collection, YouTube, and free lossless music from the Internet Archive.
-Browse your library by songs, albums, and artists; search and play YouTube videos or download them
-as tagged audio files; organize everything with queues, favorites, history, and playlists.
-Everything is stored locally on your machine.
+Oli is an offline music player for your own music collection.
+Browse your library by songs, albums, and artists; organize everything with queues, favorites,
+history, and playlists. Everything is stored locally on your machine.
 
 ## Features
 
 - **Local library player** — MP3, FLAC, AAC/M4A, WAV, OGG, Opus and more, with automatic metadata
   and embedded artwork extraction. Seeking works on every format, including 24-bit / 96 kHz FLAC.
-- **YouTube in the same app** — paste any link into Search and play it, or download it as a
-  tagged song or video file. Playlists and Mixes are supported.
-- **Internet Archive** — search free lossless music (FLAC, WAV, ALAC) and download it. Every file is
-  checked against the archive's checksum, and missing tags and cover art are filled in. No account or key.
-- **Self-updating YouTube engine** — Oli installs and updates `yt-dlp` by itself (checked against the
-  official SHA-256) and tells you in the app if it is missing or blocked. Can be switched off in Preferences.
 - **Queue & history** — your queue, playback history, favorites, and resume state are saved
   between sessions. "Play every track in random order" shuffles your whole library.
 - **Smart playlists** — manual and rule-based playlists that stay in sync with your library.
@@ -43,19 +36,17 @@ Everything is stored locally on your machine.
    - **macOS:** right-click Oli → **Open** → **Open**. If macOS says the app is damaged, run
      `xattr -cr /Applications/Oli.app` once.
 3. Open **Preferences → Library**, add your music folder, and let Oli scan it.
-4. Start listening — or paste a YouTube link into Search, or open **Internet Archive** in the sidebar.
+4. Start listening.
 
 `SHA256SUMS.txt` on each release lists the checksum of every file.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.21, about 104 MB because it
-contains the YouTube engine). Same screens as the PC app with a phone layout, and:
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.21). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
 - **Your music**: scan all the music on the phone or choose the folders to scan (like the PC's "Add folders"), reads their real format and tags, shows covers, follows changes.
-- **Internet Archive** and **YouTube**: search, paste links, playlists, play in the app, download songs/videos/playlists through a resumable background
-  download queue; downloaded FLAC/MP3 files get their tags and cover written in; tag editing; backup and restore; update check.
+- Tag editing, backup and restore, and an update check.
 - It is signed with a public alpha key, so it is for testing (`docs/ANDROID_SIGNING.md` explains how to use your own key).
 
 **Honest status:** every planned feature is built and the build is checked by GitHub Actions and by tests on a PC, but the app has **not been run on a real phone yet**.
@@ -66,7 +57,7 @@ See [`BUILD_FROM_SCRATCH.md`](BUILD_FROM_SCRATCH.md), Appendix B (status table) 
 Requirements: Node.js 20+ (22 recommended), npm.
 
 ```bash
-npm install          # also downloads the yt-dlp binary for your OS (checksum-verified)
+npm install
 npm run dev          # run in development mode
 npm run typecheck    # type check
 npm run lint         # lint
@@ -80,10 +71,9 @@ Windows and macOS packages and publish a release (see `.github/workflows/build.y
 builds the Android APK the same way (`.github/workflows/android.yml`).
 
 Newer npm versions block install scripts by default. If `npm run dev` says Electron failed to install, run
-`node node_modules/electron/install.js` (and `node scripts/fetch-yt-dlp.mjs` for the YouTube engine) once.
+`node node_modules/electron/install.js` once.
 
-The installer bundles `yt-dlp`. Merging YouTube video and audio, and converting some formats
-(Opus, WavPack, APE) for playback, use an `ffmpeg` found on your system
+Converting some formats (Opus, WavPack, APE) for playback uses an `ffmpeg` found on your system
 (`winget install ffmpeg` on Windows, `brew install ffmpeg` on macOS).
 
 ## For contributors and AI assistants
@@ -102,11 +92,8 @@ troubleshooting, and the FAQ.
 ## Data & privacy
 
 All app data is stored in a single SQLite database (`%APPDATA%\Oli\library.sqlite` on Windows,
-`~/Library/Application Support/Oli/library.sqlite` on macOS). Oli only uses the network when you
-explicitly search or play online content, check for updates, or when it installs its YouTube engine.
+`~/Library/Application Support/Oli/library.sqlite` on macOS). Oli only uses the network to check for updates.
 Spotify/AcoustID API keys, if you add any, stay on your machine.
-
-Only download what you are allowed to have. The Internet Archive page shows each item's licence link.
 
 ## Support
 
