@@ -5,7 +5,7 @@
 **A premium desktop music player and local library manager for Windows and macOS.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20android-lightgrey)
 ![Version](https://img.shields.io/badge/version-1.1.2-purple)
 
 </div>
