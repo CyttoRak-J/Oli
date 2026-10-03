@@ -79,10 +79,6 @@ Converting some formats (Opus, WavPack, APE) for playback uses an `ffmpeg` found
 ## For contributors and AI assistants
 
 - [`CLAUDE.md`](CLAUDE.md) — project rules, commands and the mistakes not to repeat.
-- [`BUILD_FROM_SCRATCH.md`](BUILD_FROM_SCRATCH.md) Appendix A — what changed recently, what is verified, what is still open.
-- [`BUILD_FROM_SCRATCH.md`](BUILD_FROM_SCRATCH.md) — a complete guide for building this app from zero
-  (it asks the user for the name and other choices first).
-- Appendix B and C of the same file — the Android status, plan and per-phase notes; Appendix D — prompts to paste into a new chat (continue the work, or build and release: the release agent asks which platforms).
 
 ## Documentation
 
