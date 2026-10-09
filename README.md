@@ -42,14 +42,14 @@ history, and playlists. Everything is stored locally on your machine.
 
 ### Android (alpha)
 
-The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.21). Same screens as the PC app with a phone layout, and:
+The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-releases tagged `android-v*`; the latest is 0.9.33). Same screens as the PC app with a phone layout, and:
 - **Music player**: a native Android player that keeps playing with the screen off, notification and lock-screen controls, headset/Bluetooth buttons, and an
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
 - **Your music**: scan all the music on the phone or choose the folders to scan (like the PC's "Add folders"), reads their real format and tags, shows covers, follows changes.
 - Tag editing, backup and restore, and an update check.
-- It is signed with a public alpha key, so it is for testing .
+- It is signed with a public alpha key, so it is for testing.
 
-**Honest status:** every planned feature is built and the build is checked by GitHub Actions and by tests on a PC, but the app has **not been run on a real phone yet**.
+**Honest status:** every planned feature is built and checked by automated builds and tests on a PC. It is a beta that has been tried on **one phone so far**, so expect rough edges and please report problems in [Issues](https://github.com/CyttoRak-J/Oli/issues).
 
 ## Source code
 
