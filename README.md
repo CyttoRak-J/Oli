@@ -47,38 +47,17 @@ The Android app lives on the Releases page as `Oli-<version>-android.apk` (pre-r
   honest report of what really reaches the speakers or a USB DAC (hi-res files are decoded at full bit depth; the app says when Android converts the rate).
 - **Your music**: scan all the music on the phone or choose the folders to scan (like the PC's "Add folders"), reads their real format and tags, shows covers, follows changes.
 - Tag editing, backup and restore, and an update check.
-- It is signed with a public alpha key, so it is for testing (`docs/ANDROID_SIGNING.md` explains how to use your own key).
+- It is signed with a public alpha key, so it is for testing .
 
 **Honest status:** every planned feature is built and the build is checked by GitHub Actions and by tests on a PC, but the app has **not been run on a real phone yet**.
-See [`BUILD_FROM_SCRATCH.md`](BUILD_FROM_SCRATCH.md), Appendix B (status table) and Appendix C (phases, Phase 6 = what comes next).
 
-## Building from source
+## Source code
 
-Requirements: Node.js 20+ (22 recommended), npm.
-
-```bash
-npm install
-npm run dev          # run in development mode
-npm run typecheck    # type check
-npm run lint         # lint
-npm test             # unit tests (vitest)
-npm run build:win    # Windows installer  -> dist/Oli-Setup-<version>.exe
-npm run build:mac    # macOS disk images  -> dist/Oli-<version>-<arch>.dmg (run on a Mac)
-```
-
-Pushing a version tag (`git tag v1.2.3 && git push origin v1.2.3`) makes GitHub Actions build the
-Windows and macOS packages and publish a release (see `.github/workflows/build.yml`). A tag `android-v0.1.0`
-builds the Android APK the same way (`.github/workflows/android.yml`).
-
-Newer npm versions block install scripts by default. If `npm run dev` says Electron failed to install, run
-`node node_modules/electron/install.js` once.
+Oli's source code is private. This repository hosts the releases, the help site, and the issue tracker.
+Bug reports and feature requests are welcome in [Issues](https://github.com/CyttoRak-J/Oli/issues).
 
 Converting some formats (Opus, WavPack, APE) for playback uses an `ffmpeg` found on your system
 (`winget install ffmpeg` on Windows, `brew install ffmpeg` on macOS).
-
-## For contributors and AI assistants
-
-- [`CLAUDE.md`](CLAUDE.md) — project rules, commands and the mistakes not to repeat.
 
 ## Documentation
 
